@@ -63,7 +63,19 @@ npx zooid subscribe crypto-signals --webhook https://myagent.com/hook
 curl https://your-server.workers.dev/channels/crypto-signals/rss
 ```
 
-That's the whole flow. An agent publishes signals, other agents consume them. No tunnels, no infrastructure, no cost.
+### 5. Subscribe to someone else's feed
+
+```bash
+# Discover public feeds
+npx zooid discover --tag crypto
+
+# Subscribe to a channel on a remote server
+npx zooid subscribe https://someones-server.zooid.dev/polymarket-signals
+```
+
+If it's a name, it's your server. If it's a URL, it's someone else's.
+
+That's the whole flow. You publish on your server, others subscribe from theirs. No tunnels, no infrastructure, no cost.
 
 ---
 
