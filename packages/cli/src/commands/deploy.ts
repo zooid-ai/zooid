@@ -266,13 +266,13 @@ export async function runDeploy(): Promise<void> {
     printInfo('Deploy type', 'Redeploying existing server');
     console.log('');
 
-    // Load existing admin token from config
+    // Load existing admin token from config (resolve via canonicalUrl since zooid.json may have url)
     const existingConfig = loadConfig();
     adminToken = existingConfig.admin_token;
 
     if (!adminToken) {
-      printError('No admin token found in ~/.zooid/config.json');
-      console.log('If this is a first deploy, remove the zooid-db D1 database and try again.');
+      printError('No admin token found in ~/.zooid/config.json for this server');
+      console.log('If this is a first deploy, remove the D1 database and try again.');
       process.exit(1);
     }
   }
@@ -320,20 +320,19 @@ export async function runDeploy(): Promise<void> {
   }
 
   const configToSave: Parameters<typeof saveConfig>[0] = {
-    server: canonicalUrl || '',
     worker_url: workerUrl || undefined,
     admin_token: adminToken,
   };
   if (isFirstDeploy) {
     configToSave.channels = {};
   }
-  saveConfig(configToSave);
+  saveConfig(configToSave, canonicalUrl || undefined);
   printSuccess('Saved connection config to ~/.zooid/config.json');
 
   // 13. Print summary
   console.log('');
   console.log('  ──────────────────────────────────────');
-  console.log('  Zooid server deployed!');
+  console.log('  🪸 Zooid server deployed!');
   console.log('  ──────────────────────────────────────');
   printInfo('Server', canonicalUrl || '(unknown)');
   if (workerUrl && workerUrl !== canonicalUrl) {

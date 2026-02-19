@@ -3,19 +3,105 @@ import { runConfigSet, runConfigGet } from './commands/config';
 import { runChannelCreate, runChannelList, runChannelAddPublisher } from './commands/channel';
 import { runPublish } from './commands/publish';
 import { runSubscribePoll, runSubscribeWebhook } from './commands/subscribe';
+import { runTail } from './commands/tail';
 import { runStatus } from './commands/status';
 import { runServerGet, runServerSet } from './commands/server';
 import { runDev } from './commands/dev';
 import { runInit } from './commands/init';
 import { runDeploy } from './commands/deploy';
 import { printSuccess, printError, printInfo } from './lib/output';
+import {
+  isEnabled as telemetryEnabled,
+  showNoticeIfNeeded,
+  writeEvent,
+  flushInBackground,
+  getInstallId,
+} from './lib/telemetry';
+import { loadConfig } from './lib/config';
+import type { TelemetryEvent } from './lib/telemetry';
 
 const program = new Command();
 
 program
   .name('zooid')
-  .description('Pub/sub for AI agents')
+  .description('🪸 Pub/sub for AI agents')
   .version('0.0.0');
+
+// --- telemetry hooks ---
+
+/** Shared state for the current command's telemetry context. */
+const telemetryCtx: {
+  startTime: number;
+  channelId?: string;
+  /** True if the command used a token (channel is private / not reportable). */
+  usedToken?: boolean;
+} = { startTime: 0 };
+
+/**
+ * Commands that interact with channels call this to report channel context.
+ * If a token was used, channel info is redacted from telemetry.
+ */
+export function setTelemetryChannel(channelId: string): void {
+  telemetryCtx.channelId = channelId;
+
+  // Check if a token was needed — if so, channel is private, don't report it
+  const config = loadConfig();
+  const channelTokens = config.channels?.[channelId];
+  const hasChannelToken = !!(channelTokens?.publish_token || channelTokens?.subscribe_token);
+  telemetryCtx.usedToken = hasChannelToken || !!config.admin_token;
+}
+
+/** Build the full command path (e.g. "channel create", "publish"). */
+function getCommandPath(cmd: Command): string {
+  const parts: string[] = [];
+  let current: Command | null = cmd;
+  while (current && current !== program) {
+    parts.unshift(current.name());
+    current = current.parent;
+  }
+  return parts.join(' ');
+}
+
+program.hook('preAction', () => {
+  telemetryCtx.startTime = Date.now();
+  if (telemetryEnabled()) {
+    showNoticeIfNeeded();
+  }
+});
+
+program.hook('postAction', (thisCommand) => {
+  if (!telemetryEnabled()) return;
+
+  try {
+    const event: TelemetryEvent = {
+      install_id: getInstallId(),
+      command: getCommandPath(thisCommand),
+      exit_code: 0,
+      duration_ms: Date.now() - telemetryCtx.startTime,
+      cli_version: program.version() ?? '0.0.0',
+      os: process.platform,
+      arch: process.arch,
+      node_version: process.version,
+      ts: new Date().toISOString(),
+    };
+
+    // Include channel/server info only for public channels (no token used)
+    if (telemetryCtx.channelId && !telemetryCtx.usedToken) {
+      event.channel_id = telemetryCtx.channelId;
+      const config = loadConfig();
+      if (config.server) event.server_url = config.server;
+    }
+
+    writeEvent(event);
+    flushInBackground();
+  } catch {
+    // Best-effort
+  }
+
+  // Reset context for next command (shouldn't matter, but be clean)
+  telemetryCtx.channelId = undefined;
+  telemetryCtx.usedToken = undefined;
+});
 
 // --- dev ---
 program
@@ -64,7 +150,7 @@ const configCmd = program
 
 configCmd
   .command('set <key> <value>')
-  .description('Set a config value (server, admin-token)')
+  .description('Set a config value (server, admin-token, telemetry)')
   .action((key, value) => {
     try {
       runConfigSet(key, value);
@@ -174,9 +260,43 @@ program
   .option('--data <json>', 'Event data as JSON string')
   .option('--file <path>', 'Read event from JSON file')
   .action(async (channel, opts) => {
+    setTelemetryChannel(channel);
     try {
       const event = await runPublish(channel, opts);
       printSuccess(`Published event: ${event.id}`);
+    } catch (err) {
+      printError((err as Error).message);
+      process.exit(1);
+    }
+  });
+
+// --- tail ---
+program
+  .command('tail <channel>')
+  .description('Fetch latest events from a channel')
+  .option('--limit <n>', 'Max events to return', '50')
+  .option('--type <type>', 'Filter events by type')
+  .option('--since <iso>', 'Only events after this ISO 8601 timestamp')
+  .option('--cursor <cursor>', 'Resume from a previous cursor')
+  .action(async (channel, opts) => {
+    setTelemetryChannel(channel);
+    try {
+      const result = await runTail(channel, {
+        limit: parseInt(opts.limit, 10),
+        type: opts.type,
+        since: opts.since,
+        cursor: opts.cursor,
+      });
+      if (result.events.length === 0) {
+        console.log('No events.');
+      } else {
+        for (const event of result.events) {
+          console.log(JSON.stringify(event));
+        }
+      }
+      if (result.cursor) {
+        printInfo('Cursor', result.cursor);
+      }
     } catch (err) {
       printError((err as Error).message);
       process.exit(1);
@@ -192,6 +312,7 @@ program
   .option('--mode <mode>', 'Transport mode: auto, ws, or poll', 'auto')
   .option('--type <type>', 'Filter events by type')
   .action(async (channel, opts) => {
+    setTelemetryChannel(channel);
     try {
       if (opts.webhook) {
         const wh = await runSubscribeWebhook(channel, opts.webhook);

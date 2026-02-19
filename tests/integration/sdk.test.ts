@@ -154,6 +154,105 @@ describe('SDK Integration Tests', () => {
     });
   });
 
+  describe('tail (one-shot read)', () => {
+    it('tails latest events from a public channel', async () => {
+      const adminToken = await createToken({ scope: 'admin' }, JWT_SECRET);
+      const admin = new ZooidClient({
+        server: 'https://test.local',
+        token: adminToken,
+        fetch: testFetch,
+      });
+
+      const created = await admin.createChannel({
+        id: 'tail-test',
+        name: 'Tail Test',
+        is_public: true,
+      });
+
+      const publisher = new ZooidClient({
+        server: 'https://test.local',
+        token: created.publish_token,
+        fetch: testFetch,
+      });
+
+      await publisher.publishBatch('tail-test', [
+        { type: 'a', data: { v: 1 } },
+        { type: 'b', data: { v: 2 } },
+        { type: 'c', data: { v: 3 } },
+      ]);
+
+      // Tail without auth (public channel)
+      const reader = new ZooidClient({
+        server: 'https://test.local',
+        fetch: testFetch,
+      });
+
+      const result = await reader.tail('tail-test');
+      expect(result.events).toHaveLength(3);
+      expect(result.events[0].type).toBe('a');
+      expect(result.events[2].type).toBe('c');
+    });
+
+    it('tails with limit', async () => {
+      const adminToken = await createToken({ scope: 'admin' }, JWT_SECRET);
+      const admin = new ZooidClient({
+        server: 'https://test.local',
+        token: adminToken,
+        fetch: testFetch,
+      });
+
+      const created = await admin.createChannel({
+        id: 'tail-limit',
+        name: 'Tail Limit',
+        is_public: true,
+      });
+
+      const publisher = new ZooidClient({
+        server: 'https://test.local',
+        token: created.publish_token,
+        fetch: testFetch,
+      });
+
+      await publisher.publishBatch('tail-limit', [
+        { type: 'a', data: { v: 1 } },
+        { type: 'b', data: { v: 2 } },
+        { type: 'c', data: { v: 3 } },
+      ]);
+
+      const reader = new ZooidClient({
+        server: 'https://test.local',
+        fetch: testFetch,
+      });
+
+      const result = await reader.tail('tail-limit', { limit: 2 });
+      expect(result.events).toHaveLength(2);
+      expect(result.has_more).toBe(true);
+      expect(result.cursor).toBeTruthy();
+    });
+
+    it('requires subscribe token to tail private channel', async () => {
+      const adminToken = await createToken({ scope: 'admin' }, JWT_SECRET);
+      const admin = new ZooidClient({
+        server: 'https://test.local',
+        token: adminToken,
+        fetch: testFetch,
+      });
+
+      await admin.createChannel({
+        id: 'tail-private',
+        name: 'Private Tail',
+        is_public: false,
+      });
+
+      const anonymous = new ZooidClient({
+        server: 'https://test.local',
+        fetch: testFetch,
+      });
+
+      await expect(anonymous.tail('tail-private')).rejects.toThrow();
+    });
+  });
+
   describe('private channels', () => {
     it('requires subscribe token to poll private channel', async () => {
       const adminToken = await createToken({ scope: 'admin' }, JWT_SECRET);

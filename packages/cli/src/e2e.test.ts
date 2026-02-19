@@ -59,6 +59,7 @@ describe('CLI E2E', () => {
     });
 
     it('sets and gets admin-token', async () => {
+      await cli(['config', 'set', 'server', 'https://my-zooid.workers.dev']);
       await cli(['config', 'set', 'admin-token', 'eyJ-test-token']);
 
       const get = await cli(['config', 'get', 'admin-token']);
@@ -72,8 +73,8 @@ describe('CLI E2E', () => {
 
       const raw = fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8');
       const config = JSON.parse(raw);
-      expect(config.server).toBe('https://a.com');
-      expect(config.admin_token).toBe('tok123');
+      expect(config.current).toBe('https://a.com');
+      expect(config.servers['https://a.com'].admin_token).toBe('tok123');
     });
 
     it('rejects unknown config key', async () => {

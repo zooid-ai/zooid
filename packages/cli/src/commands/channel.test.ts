@@ -26,11 +26,17 @@ afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+const TEST_SERVER = 'https://test.workers.dev';
+
 function writeConfig(overrides = {}) {
   const config = {
-    server: 'https://test.workers.dev',
-    admin_token: 'admin-jwt',
-    ...overrides,
+    current: TEST_SERVER,
+    servers: {
+      [TEST_SERVER]: {
+        admin_token: 'admin-jwt',
+        ...overrides,
+      },
+    },
   };
   fs.mkdirSync(tmpDir, { recursive: true });
   fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify(config));
@@ -62,9 +68,10 @@ describe('channel commands', () => {
       expect(result.publish_token).toBe('pub-tok');
 
       const raw = fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8');
-      const config = JSON.parse(raw);
-      expect(config.channels.signals.publish_token).toBe('pub-tok');
-      expect(config.channels.signals.subscribe_token).toBe('sub-tok');
+      const file = JSON.parse(raw);
+      const serverEntry = file.servers[TEST_SERVER];
+      expect(serverEntry.channels.signals.publish_token).toBe('pub-tok');
+      expect(serverEntry.channels.signals.subscribe_token).toBe('sub-tok');
     });
 
     it('throws when no server configured', async () => {

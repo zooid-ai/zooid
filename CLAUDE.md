@@ -47,7 +47,7 @@ Other top-level directories: `tests/`, `docs/`, `scripts/`.
 - **Channel IDs**: URL-safe slugs — lowercase alphanumeric + hyphens, 3-64 chars.
 - **Webhook delivery is fire-and-forget** in V1 (no retries). Use `waitUntil()` for fan-out to stay within 10ms CPU limit.
 - **CDN caching for public channels**: Poll responses include `Cache-Control: public, s-maxage=N` so Cloudflare's CDN serves cached responses at the edge. Requires a custom domain (not `*.workers.dev`). Absorbs DDoS and poll abuse without Worker invocations.
-- **No SSE** — polling + CDN cache for public channels, Durable Objects + WebSockets (V2) for real-time push.
+- **WebSockets via Durable Objects** for real-time push. Polling + CDN cache for infrequently updated public channels. No SSE.
 
 ## Workers Constraints
 

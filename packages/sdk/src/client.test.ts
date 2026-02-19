@@ -232,6 +232,46 @@ describe('ZooidClient', () => {
     });
   });
 
+  describe('tail()', () => {
+    it('fetches GET /api/v1/channels/:id/events (alias for poll)', async () => {
+      const client = new ZooidClient({ server: 'https://example.com' });
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          events: [{ id: 'e1', type: 'signal', data: '{}' }],
+          cursor: 'e1',
+          has_more: false,
+        }),
+      );
+
+      const result = await client.tail('signals');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://example.com/api/v1/channels/signals/events',
+        expect.objectContaining({ method: 'GET' }),
+      );
+      expect(result.events).toHaveLength(1);
+      expect(result.has_more).toBe(false);
+    });
+
+    it('passes query params for limit, type, since', async () => {
+      const client = new ZooidClient({ server: 'https://example.com' });
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ events: [], cursor: null, has_more: false }),
+      );
+
+      await client.tail('signals', {
+        limit: 5,
+        type: 'alert',
+        since: '2026-01-01T00:00:00Z',
+      });
+
+      const url = mockFetch.mock.calls[0][0];
+      expect(url).toContain('limit=5');
+      expect(url).toContain('type=alert');
+      expect(url).toContain('since=2026-01-01T00%3A00%3A00Z');
+    });
+  });
+
   describe('poll()', () => {
     it('fetches GET /api/v1/channels/:id/events', async () => {
       const client = new ZooidClient({ server: 'https://example.com' });

@@ -56,6 +56,38 @@ export async function getChannel(
   return data.channels.find((ch) => ch.id === channelId) ?? null;
 }
 
+export interface ServerMeta {
+  server_name: string;
+  server_description: string | null;
+  poll_interval: number;
+  delivery: string[];
+}
+
+const defaultMeta: ServerMeta = {
+  server_name: 'Zooid',
+  server_description: null,
+  poll_interval: 5,
+  delivery: ['poll'],
+};
+
+export async function fetchServerMeta(
+  baseUrl: string,
+): Promise<ServerMeta> {
+  try {
+    const res = await fetch(`${baseUrl}/.well-known/zooid.json`);
+    if (!res.ok) return defaultMeta;
+    const data = await res.json();
+    return {
+      server_name: data.server_name ?? 'Zooid',
+      server_description: data.server_description ?? null,
+      poll_interval: data.poll_interval ?? 5,
+      delivery: Array.isArray(data.delivery) ? data.delivery : ['poll'],
+    };
+  } catch {
+    return defaultMeta;
+  }
+}
+
 export async function pollEvents(
   baseUrl: string,
   channelId: string,

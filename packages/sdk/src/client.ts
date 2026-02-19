@@ -141,6 +141,15 @@ export class ZooidClient {
     return res.events;
   }
 
+  /**
+   * Fetch the latest events from a channel (one-shot read).
+   *
+   * Alias for {@link poll} with a more intuitive name for single reads.
+   */
+  async tail(channelId: string, options?: PollOptions): Promise<PollResult> {
+    return this.poll(channelId, options);
+  }
+
   /** Poll events from a channel with cursor-based pagination. */
   async poll(channelId: string, options?: PollOptions): Promise<PollResult> {
     const params = new URLSearchParams();

@@ -59,10 +59,7 @@ export async function runDev(port = 8787): Promise<void> {
   const adminToken = await createAdminToken(jwtSecret);
   const serverUrl = `http://localhost:${port}`;
 
-  saveConfig({
-    server: serverUrl,
-    admin_token: adminToken,
-  });
+  saveConfig({ admin_token: adminToken }, serverUrl);
 
   // Initialize D1 schema
   const schemaPath = path.join(serverDir, 'src/db/schema.sql');

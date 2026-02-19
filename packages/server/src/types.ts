@@ -23,6 +23,8 @@ export interface Bindings {
   ZOOID_SIGNING_KEY?: string;
   ZOOID_PUBLIC_KEY?: string;
   ZOOID_SERVER_ID?: string;
+  ZOOID_SERVER_NAME?: string;
+  ZOOID_SERVER_DESC?: string;
   ZOOID_TOKEN_EXPIRY?: string;
   ZOOID_POLL_INTERVAL?: string;
 }

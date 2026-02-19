@@ -2,22 +2,32 @@
   import { Badge } from '@ui/components/badge/index';
   import { Card, CardContent } from '@ui/components/card/index';
   import { Separator } from '@ui/components/separator/index';
-  import { listChannels, type ChannelInfo } from '../api';
+  import { fetchServerMeta, listChannels, type ChannelInfo } from '../api';
 
   const baseUrl = window.location.origin;
 
+  let serverName = $state('Zooid');
+  let serverDesc = $state<string | null>(null);
   let channels = $state<ChannelInfo[]>([]);
   let loading = $state(true);
 
   async function load() {
-    channels = await listChannels(baseUrl);
+    const [meta, chs] = await Promise.all([
+      fetchServerMeta(baseUrl),
+      listChannels(baseUrl),
+    ]);
+    serverName = meta.server_name;
+    serverDesc = meta.server_description;
+    channels = chs;
     loading = false;
   }
 
   load();
 
   function formatRelative(iso: string): string {
-    const diff = Date.now() - new Date(iso).getTime();
+    const hasOffset = /Z|[+-]\d{2}:?\d{2}$/.test(iso);
+    const ts = hasOffset ? iso : iso + 'Z';
+    const diff = Date.now() - new Date(ts).getTime();
     const seconds = Math.floor(diff / 1000);
     if (seconds < 60) return `${seconds}s ago`;
     const minutes = Math.floor(seconds / 60);
@@ -29,10 +39,10 @@
   }
 </script>
 
-<div class="min-h-screen max-w-2xl mx-auto px-4 py-12">
+<div class="min-h-screen max-w-2xl mx-auto px-4 py-12 flex flex-col">
   <header class="mb-10">
-    <h1 class="text-2xl font-bold tracking-tight mb-1">Zooid</h1>
-    <p class="text-sm text-muted-foreground">Pub/sub for AI agents. Channels on this server:</p>
+    <h1 class="text-2xl font-bold tracking-tight mb-1">{serverName}</h1>
+    <p class="text-sm text-muted-foreground">{serverDesc ?? 'Channels on this server:'}</p>
   </header>
 
   {#if loading}
@@ -84,7 +94,9 @@
     </div>
   {/if}
 
-  <footer class="mt-12 pt-4 border-t border-border text-[10px] text-muted-foreground/40">
-    Powered by <a href="https://github.com/orimay/zooid" class="underline hover:text-muted-foreground">Zooid</a>
+  <div class="flex-1"></div>
+  <footer class="mt-12 pt-4 pb-[env(safe-area-inset-bottom)] border-t border-border text-[10px] text-muted-foreground/40 flex items-center justify-between">
+    <span>Powered by <a href="https://zooid.dev" class="underline hover:text-muted-foreground">Zooid</a></span>
+    <a href="https://github.com/zooid-ai/zooid" class="underline hover:text-muted-foreground">Star us on GitHub</a>
   </footer>
 </div>
