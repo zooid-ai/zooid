@@ -1,0 +1,26 @@
+name = "zooid-zooid"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "../web/dist/"
+not_found_handling = "single-page-application"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/.well-known/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "zooid-db-zooid"
+database_id = "1dc5f0f2-3cc6-45ca-bd5e-1ad9d315a8dc"
+
+[[durable_objects.bindings]]
+name = "CHANNEL_DO"
+class_name = "ChannelDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChannelDO"]
+
+[vars]
+ZOOID_SERVER_ID = "zooid"
+ZOOID_POLL_INTERVAL = "30"
