@@ -9,7 +9,11 @@ export type {
 // Deprecated aliases re-exported for backward compatibility
 export type { ServerMetadata, ServerMeta } from '@zooid/types';
 
-import type { ChannelListItem, Webhook } from '@zooid/types';
+import type { ZooidEvent as ZooidEventType, ChannelListItem, Webhook } from '@zooid/types';
+
+// Local alias so we can reference ZooidEvent in interface definitions
+// while still re-exporting it above.
+type ZooidEvent = ZooidEventType;
 
 /** Channel info as returned by `GET /api/v1/channels`. Alias for {@link ChannelListItem}. */
 export type ChannelInfo = ChannelListItem;
@@ -104,6 +108,25 @@ export interface SubscribeOptions {
   mode?: SubscribeMode;
   /** Event type filter — passed as `?types=` on WS, `?type=` on poll. */
   type?: string;
+}
+
+/** Options for the `tail()` method. Extends poll options with follow mode. */
+export interface TailOptions extends PollOptions {
+  /** When `true`, subscribe and stream events as they arrive. */
+  follow?: boolean;
+  /** Transport mode for follow mode. Default: `'auto'`. */
+  mode?: SubscribeMode;
+  /** Polling interval in ms for follow mode (poll transport). Default: `5000`. */
+  interval?: number;
+}
+
+/**
+ * An async iterable stream of events returned by `tail({ follow: true })`.
+ * Call `close()` to stop the underlying subscription and end the stream.
+ */
+export interface TailStream extends AsyncIterable<ZooidEvent> {
+  /** Stop the subscription and end the stream. */
+  close(): void;
 }
 
 /** Options for updating server identity metadata. */

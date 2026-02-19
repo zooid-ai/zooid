@@ -273,29 +273,45 @@ program
 // --- tail ---
 program
   .command('tail <channel>')
-  .description('Fetch latest events from a channel')
-  .option('--limit <n>', 'Max events to return', '50')
+  .description('Fetch latest events, or stream live with -f')
+  .option('-n, --limit <n>', 'Max events to return', '50')
+  .option('-f, --follow', 'Follow mode — stream new events as they arrive')
   .option('--type <type>', 'Filter events by type')
   .option('--since <iso>', 'Only events after this ISO 8601 timestamp')
   .option('--cursor <cursor>', 'Resume from a previous cursor')
+  .option('--mode <mode>', 'Transport mode for follow: auto, ws, or poll', 'auto')
+  .option('--interval <ms>', 'Poll interval in ms for follow mode', '5000')
   .action(async (channel, opts) => {
     setTelemetryChannel(channel);
     try {
-      const result = await runTail(channel, {
-        limit: parseInt(opts.limit, 10),
-        type: opts.type,
-        since: opts.since,
-        cursor: opts.cursor,
-      });
-      if (result.events.length === 0) {
-        console.log('No events.');
+      if (opts.follow) {
+        const mode = opts.mode as 'auto' | 'ws' | 'poll';
+        const transport = mode === 'auto' ? 'auto (WebSocket → poll fallback)' : mode;
+        console.log(`Tailing ${channel} [${transport}]${opts.type ? ` type=${opts.type}` : ''}...`);
+        console.log('Press Ctrl+C to stop.\n');
+        await runTail(channel, {
+          follow: true,
+          mode,
+          interval: parseInt(opts.interval, 10),
+          type: opts.type,
+        });
       } else {
-        for (const event of result.events) {
-          console.log(JSON.stringify(event));
+        const result = await runTail(channel, {
+          limit: parseInt(opts.limit, 10),
+          type: opts.type,
+          since: opts.since,
+          cursor: opts.cursor,
+        });
+        if (result.events.length === 0) {
+          console.log('No events.');
+        } else {
+          for (const event of result.events) {
+            console.log(JSON.stringify(event));
+          }
         }
-      }
-      if (result.cursor) {
-        printInfo('Cursor', result.cursor);
+        if (result.cursor) {
+          printInfo('Cursor', result.cursor);
+        }
       }
     } catch (err) {
       printError((err as Error).message);

@@ -14,6 +14,8 @@ import type {
   WebhookOptions,
   WebhookResult,
   SubscribeOptions,
+  TailOptions,
+  TailStream,
   UpdateServerMetaOptions,
 } from './types';
 
@@ -142,12 +144,84 @@ export class ZooidClient {
   }
 
   /**
-   * Fetch the latest events from a channel (one-shot read).
+   * Fetch events from a channel.
    *
-   * Alias for {@link poll} with a more intuitive name for single reads.
+   * Without `follow`, performs a one-shot poll (alias for {@link poll}).
+   * With `follow: true`, returns an async iterable stream that wraps {@link subscribe}.
+   *
+   * @example
+   * ```ts
+   * // One-shot
+   * const result = await client.tail('my-channel', { limit: 10 });
+   *
+   * // Follow mode
+   * const stream = client.tail('my-channel', { follow: true });
+   * for await (const event of stream) {
+   *   console.log(event);
+   * }
+   * ```
    */
-  async tail(channelId: string, options?: PollOptions): Promise<PollResult> {
+  tail(channelId: string, options: TailOptions & { follow: true }): TailStream;
+  tail(channelId: string, options?: TailOptions): Promise<PollResult>;
+  tail(channelId: string, options?: TailOptions): Promise<PollResult> | TailStream {
+    if (options?.follow) {
+      return this.createTailStream(channelId, options);
+    }
     return this.poll(channelId, options);
+  }
+
+  private createTailStream(channelId: string, options: TailOptions): TailStream {
+    const buffer: ZooidEvent[] = [];
+    let waiting: ((result: IteratorResult<ZooidEvent>) => void) | null = null;
+    let done = false;
+    let unsub: (() => void) | null = null;
+
+    this.subscribe(channelId, (event) => {
+      if (waiting) {
+        const resolve = waiting;
+        waiting = null;
+        resolve({ value: event, done: false });
+      } else {
+        buffer.push(event);
+      }
+    }, {
+      mode: options.mode,
+      interval: options.interval,
+      type: options.type,
+    }).then((fn) => {
+      unsub = fn;
+      if (done) fn();
+    });
+
+    const stream: TailStream = {
+      close() {
+        done = true;
+        unsub?.();
+        if (waiting) {
+          waiting({ value: undefined as unknown as ZooidEvent, done: true });
+          waiting = null;
+        }
+      },
+      [Symbol.asyncIterator]() {
+        return {
+          next(): Promise<IteratorResult<ZooidEvent>> {
+            if (buffer.length > 0) {
+              return Promise.resolve({ value: buffer.shift()!, done: false });
+            }
+            if (done) {
+              return Promise.resolve({ value: undefined as unknown as ZooidEvent, done: true });
+            }
+            return new Promise((resolve) => { waiting = resolve; });
+          },
+          return(): Promise<IteratorResult<ZooidEvent>> {
+            stream.close();
+            return Promise.resolve({ value: undefined as unknown as ZooidEvent, done: true });
+          },
+        };
+      },
+    };
+
+    return stream;
   }
 
   /** Poll events from a channel with cursor-based pagination. */

@@ -75,11 +75,11 @@ npx zooid tail crypto-signals --limit 5
 npx zooid tail crypto-signals --type odds_shift
 ```
 
-### 5. Subscribe
+### 5. Follow a channel
 
 ```bash
-# Live stream via WebSocket (or polling fallback)
-npx zooid subscribe crypto-signals
+# Stream events live (like tail -f)
+npx zooid tail -f crypto-signals
 
 # Register a webhook
 npx zooid subscribe crypto-signals --webhook https://myagent.com/hook
@@ -88,14 +88,14 @@ npx zooid subscribe crypto-signals --webhook https://myagent.com/hook
 curl https://your-server.workers.dev/channels/crypto-signals/rss
 ```
 
-### 6. Subscribe to someone else's feed
+### 6. Follow someone else's feed
 
 ```bash
 # Discover public feeds
 npx zooid discover --tag crypto
 
-# Subscribe to a channel on a remote server
-npx zooid subscribe https://beno.zooid.dev/polymarket-signals
+# Follow a channel on a remote server
+npx zooid tail -f https://beno.zooid.dev/polymarket-signals
 ```
 
 If it's a name, it's your server. If it's a URL, it's someone else's.
@@ -272,10 +272,14 @@ await client.publish('my-channel', {
 // Tail latest events (one-shot)
 const { events, cursor } = await client.tail('crypto-signals', { limit: 10 });
 
-// Poll with cursor (same thing, for paginated reads)
-const next = await client.poll('crypto-signals', { cursor });
+// Follow a channel (live stream via WebSocket)
+const stream = client.tail('crypto-signals', { follow: true });
 
-// Subscribe (live stream via WebSocket)
+for await (const event of stream) {
+  console.log(event.type, event.data);
+}
+
+// Or use the callback style
 const unsub = await client.subscribe('crypto-signals', (event) => {
   console.log(event.type, event.data);
 });

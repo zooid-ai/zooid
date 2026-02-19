@@ -5,6 +5,10 @@ import path from 'node:path';
 import { runTail } from './tail';
 
 let tmpDir: string;
+const mockTailStream = {
+  close: vi.fn(),
+  [Symbol.asyncIterator]: vi.fn(),
+};
 const mockClient = {
   tail: vi.fn(),
 };
@@ -127,5 +131,78 @@ describe('tail command', () => {
       since: '2026-01-01T00:00:00Z',
       cursor: 'xyz',
     });
+  });
+});
+
+describe('tail --follow', () => {
+  it('calls client.tail() with follow: true and iterates the stream', async () => {
+    writeConfig();
+
+    const events = [
+      { id: 'e1', type: 'signal', data: '{"v":1}', created_at: '2026-01-01T00:00:00Z' },
+      { id: 'e2', type: 'signal', data: '{"v":2}', created_at: '2026-01-01T00:00:01Z' },
+    ];
+
+    let index = 0;
+    const mockStream = {
+      close: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return {
+          next() {
+            if (index < events.length) {
+              return Promise.resolve({ value: events[index++], done: false });
+            }
+            return Promise.resolve({ value: undefined, done: true });
+          },
+        };
+      },
+    };
+
+    mockClient.tail.mockReturnValueOnce(mockStream);
+
+    const logged: string[] = [];
+    const origLog = console.log;
+    console.log = (msg: string) => logged.push(msg);
+
+    try {
+      await runTail('signals', { follow: true, mode: 'auto', interval: 5000 });
+    } finally {
+      console.log = origLog;
+    }
+
+    expect(mockClient.tail).toHaveBeenCalledWith('signals', {
+      follow: true,
+      mode: 'auto',
+      interval: 5000,
+      type: undefined,
+    });
+
+    expect(logged).toHaveLength(2);
+    expect(JSON.parse(logged[0])).toEqual(expect.objectContaining({ id: 'e1' }));
+    expect(JSON.parse(logged[1])).toEqual(expect.objectContaining({ id: 'e2' }));
+  });
+
+  it('passes type filter in follow mode', async () => {
+    writeConfig();
+
+    const mockStream = {
+      close: vi.fn(),
+      [Symbol.asyncIterator]() {
+        return {
+          next() {
+            return Promise.resolve({ value: undefined, done: true });
+          },
+        };
+      },
+    };
+
+    mockClient.tail.mockReturnValueOnce(mockStream);
+
+    await runTail('signals', { follow: true, type: 'alert' });
+
+    expect(mockClient.tail).toHaveBeenCalledWith('signals', expect.objectContaining({
+      follow: true,
+      type: 'alert',
+    }));
   });
 });

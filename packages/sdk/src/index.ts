@@ -16,6 +16,8 @@ export type {
   WebhookResult,
   SubscribeMode,
   SubscribeOptions,
+  TailOptions,
+  TailStream,
   UpdateServerMetaOptions,
 } from './types';
 

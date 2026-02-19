@@ -272,6 +272,115 @@ describe('ZooidClient', () => {
     });
   });
 
+  describe('tail({ follow: true })', () => {
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('returns an async iterable that yields events from subscribe', async () => {
+      const client = new ZooidClient({ server: 'https://example.com' });
+
+      // subscribe will be called internally — mock poll mode
+      mockFetch.mockResolvedValue(
+        jsonResponse({ events: [], cursor: null, has_more: false }),
+      );
+
+      const stream = client.tail('signals', { follow: true, mode: 'poll', interval: 1000 });
+
+      // Manually push events via the subscribe callback
+      // We need to access the internal subscribe — let's spy on it
+      // Instead, we test the integration: publish events via poll responses
+
+      // First poll — empty (subscribe starts immediately)
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Second poll returns an event
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          events: [{ id: 'e1', type: 'signal', data: '{"v":1}', created_at: '2026-01-01T00:00:00Z' }],
+          cursor: 'e1',
+          has_more: false,
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(1000);
+
+      const iterator = stream[Symbol.asyncIterator]();
+      const first = await iterator.next();
+      expect(first.done).toBe(false);
+      expect(first.value).toEqual(expect.objectContaining({ id: 'e1' }));
+
+      stream.close();
+    });
+
+    it('close() ends the async iteration', async () => {
+      const client = new ZooidClient({ server: 'https://example.com' });
+
+      mockFetch.mockResolvedValue(
+        jsonResponse({ events: [], cursor: null, has_more: false }),
+      );
+
+      const stream = client.tail('signals', { follow: true, mode: 'poll', interval: 1000 });
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Close the stream
+      stream.close();
+
+      const iterator = stream[Symbol.asyncIterator]();
+      const result = await iterator.next();
+      expect(result.done).toBe(true);
+    });
+
+    it('buffers events that arrive before iteration starts', async () => {
+      const client = new ZooidClient({ server: 'https://example.com' });
+
+      // First poll immediately returns events
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({
+          events: [
+            { id: 'e1', type: 'a', data: '{}', created_at: '2026-01-01T00:00:00Z' },
+            { id: 'e2', type: 'b', data: '{}', created_at: '2026-01-01T00:00:01Z' },
+          ],
+          cursor: 'e2',
+          has_more: false,
+        }),
+      );
+      // Subsequent polls empty
+      mockFetch.mockResolvedValue(
+        jsonResponse({ events: [], cursor: null, has_more: false }),
+      );
+
+      const stream = client.tail('signals', { follow: true, mode: 'poll', interval: 5000 });
+
+      // Let the initial poll resolve
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Now start iterating — events should be buffered
+      const iterator = stream[Symbol.asyncIterator]();
+      const first = await iterator.next();
+      const second = await iterator.next();
+
+      expect(first.value).toEqual(expect.objectContaining({ id: 'e1' }));
+      expect(second.value).toEqual(expect.objectContaining({ id: 'e2' }));
+
+      stream.close();
+    });
+
+    it('passes type filter to subscribe', async () => {
+      const client = new ZooidClient({ server: 'https://example.com' });
+
+      mockFetch.mockResolvedValue(
+        jsonResponse({ events: [], cursor: null, has_more: false }),
+      );
+
+      const stream = client.tail('signals', { follow: true, mode: 'poll', type: 'alert' });
+      await vi.advanceTimersByTimeAsync(0);
+
+      const url = mockFetch.mock.calls[0][0];
+      expect(url).toContain('type=alert');
+
+      stream.close();
+    });
+  });
+
   describe('poll()', () => {
     it('fetches GET /api/v1/channels/:id/events', async () => {
       const client = new ZooidClient({ server: 'https://example.com' });
