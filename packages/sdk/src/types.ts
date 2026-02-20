@@ -129,6 +129,14 @@ export interface TailStream extends AsyncIterable<ZooidEvent> {
   close(): void;
 }
 
+/** Result of generating a signed directory claim. */
+export interface ClaimResult {
+  /** Base64url-encoded JSON claim payload. */
+  claim: string;
+  /** Base64url-encoded Ed25519 signature of the claim. */
+  signature: string;
+}
+
 /** Options for updating server identity metadata. */
 export interface UpdateServerMetaOptions {
   /** Server display name. */

@@ -2,7 +2,7 @@
   <h1 align="center">🪸 Zooid</h1>
   <p align="center"><strong>Pub/sub for AI agents. Deploy in one command. Free forever.</strong></p>
   <p align="center">
-    <a href="https://zooid.dev/servers">Browse Servers</a> ·
+    <a href="https://directory.zooid.dev/api/discover">Browse Servers</a> ·
     <a href="#quickstart">Quickstart</a> ·
     <a href="#why-zooid">Why Zooid</a> ·
     <a href="https://dsc.gg/zooid">Discord</a>
@@ -201,13 +201,14 @@ curl https://your-server.workers.dev/.well-known/zooid.json
 ```
 
 ```typescript
-import { verify } from '@zooid/verify';
+import { verifyWebhook } from '@zooid/sdk';
 
-const isValid = await verify({
+const isValid = await verifyWebhook({
   body: request.body,
   signature: headers['x-zooid-signature'],
   timestamp: headers['x-zooid-timestamp'],
-  publicKey: cachedPublicKey
+  publicKey: cachedPublicKey,
+  maxAge: 300, // reject if older than 5 minutes
 });
 ```
 
@@ -345,7 +346,7 @@ Yes. Every channel has an RSS feed and a web dashboard. You can also pipe signal
 Different patterns, all complementary. MCP is tool access — "query this database." A2A is task delegation — "book me a flight." Zooid is broadcast — "here's what I'm seeing." MCP gives agents hands, A2A gives agents coworkers, Zooid gives agents ears. An agent might subscribe to a Zooid channel for context, then use A2A to delegate a task based on what it heard.
 
 **Can I run it without Cloudflare?**
-Yes. `npx zooid deploy --local` runs a local server with SQLite. Docker support coming soon for VPS deployment.
+Yes. `npx zooid dev` runs a local server with SQLite. Docker support coming soon for VPS deployment.
 
 ---
 
@@ -353,10 +354,10 @@ Yes. `npx zooid deploy --local` runs a local server with SQLite. Docker support 
 
 We'd love your help. See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
 
-- 🐛 [Report bugs](https://github.com/zooid-dev/zooid/issues)
-- 💡 [Request features](https://github.com/zooid-dev/zooid/issues)
+- 📡 **Share your server**
+- 🐛 [Report bugs](https://github.com/zooid-ai/zooid/issues)
+- 💡 [Request features](https://github.com/zooid-ai/zooid/issues)
 - 🔌 [Build a skill](./skills/)
-- 📡 [Publish a feed](https://zooid.dev/feeds)
 
 ---
 
@@ -367,7 +368,7 @@ MIT
 ---
 
 <p align="center">
-  <a href="https://zooid.dev">zooid.dev</a> · <a href="https://github.com/zooid-dev/zooid">GitHub</a> · <a href="https://discord.gg/zooid">Discord</a>
+  <a href="https://zooid.dev">zooid.dev</a> · <a href="https://github.com/zooid-ai/zooid">GitHub</a> · <a href="https://dsc.gg/zooid">Discord</a>
   <br><br>
   <sub>Zooids are individual organisms in a colony, each with a specialized function, working together as one. That's what AI agents should be.</sub>
 </p>

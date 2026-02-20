@@ -138,6 +138,58 @@ describe('ZooidClient', () => {
     });
   });
 
+  describe('getClaim()', () => {
+    it('sends POST /api/v1/directory/claim with channels', async () => {
+      const client = new ZooidClient({
+        server: 'https://example.com',
+        token: 'admin-token',
+      });
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ claim: 'Y2xhaW0', signature: 'c2ln' }),
+      );
+
+      const result = await client.getClaim(['channel-a', 'channel-b']);
+
+      const [url, opts] = mockFetch.mock.calls[0];
+      expect(url).toBe('https://example.com/api/v1/directory/claim');
+      expect(opts.method).toBe('POST');
+      expect(opts.headers.Authorization).toBe('Bearer admin-token');
+      const body = JSON.parse(opts.body);
+      expect(body.channels).toEqual(['channel-a', 'channel-b']);
+      expect(body.action).toBeUndefined();
+      expect(result.claim).toBe('Y2xhaW0');
+      expect(result.signature).toBe('c2ln');
+    });
+
+    it('sends action when provided', async () => {
+      const client = new ZooidClient({
+        server: 'https://example.com',
+        token: 'admin-token',
+      });
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ claim: 'Y2xhaW0', signature: 'c2ln' }),
+      );
+
+      await client.getClaim(['channel-a'], 'delete');
+
+      const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+      expect(body.channels).toEqual(['channel-a']);
+      expect(body.action).toBe('delete');
+    });
+
+    it('throws on non-2xx response', async () => {
+      const client = new ZooidClient({
+        server: 'https://example.com',
+        token: 'admin-token',
+      });
+      mockFetch.mockResolvedValueOnce(
+        jsonResponse({ error: 'Channels not found: bad-ch' }, 400),
+      );
+
+      await expect(client.getClaim(['bad-ch'])).rejects.toThrow();
+    });
+  });
+
   describe('addPublisher()', () => {
     it('sends POST /api/v1/channels/:id/publishers', async () => {
       const client = new ZooidClient({

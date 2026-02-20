@@ -17,6 +17,7 @@ import type {
   TailOptions,
   TailStream,
   UpdateServerMetaOptions,
+  ClaimResult,
 } from './types';
 
 /**
@@ -106,6 +107,13 @@ export class ZooidClient {
   /** Create a new channel via `POST /api/v1/channels`. Requires admin token. */
   async createChannel(options: CreateChannelOptions): Promise<CreateChannelResult> {
     return this.request<CreateChannelResult>('POST', '/api/v1/channels', options);
+  }
+
+  /** Generate a signed claim for the Zooid Directory. Requires admin token. */
+  async getClaim(channels: string[], action?: 'delete'): Promise<ClaimResult> {
+    const body: Record<string, unknown> = { channels };
+    if (action) body.action = action;
+    return this.request<ClaimResult>('POST', '/api/v1/directory/claim', body);
   }
 
   /** Add a named publisher to a channel. Requires admin token. */

@@ -7,6 +7,7 @@ import { ListChannels, CreateChannel, AddPublisher } from './routes/channels';
 import { PublishEvents, PollEvents } from './routes/events';
 import { RegisterWebhook, DeleteWebhook } from './routes/webhooks';
 import { GetServerMeta, UpdateServerMeta } from './routes/server-meta';
+import { DirectoryClaim } from './routes/directory';
 import { ws } from './routes/ws';
 import { rss } from './routes/rss';
 import { feed } from './routes/feed';
@@ -60,6 +61,11 @@ openapi.post('/channels/:channelId/events', requireAuth(), requireScope('publish
 // prettier-ignore
 // @ts-expect-error chanfana types don't include middleware overloads
 openapi.get('/channels/:channelId/events', requireSubscribeIfPrivate('channelId'), PollEvents);
+
+// Directory claim route
+// prettier-ignore
+// @ts-expect-error chanfana types don't include middleware overloads
+openapi.post('/directory/claim', requireAuth(), requireScope('admin'), DirectoryClaim);
 
 // Webhook routes
 // prettier-ignore

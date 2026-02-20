@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { loadConfig, saveConfig, switchServer, loadConfigFile, getConfigPath, type ZooidConfigFile } from './config';
+import { loadConfig, saveConfig, switchServer, loadConfigFile, getConfigPath, loadDirectoryToken, saveDirectoryToken, type ZooidConfigFile } from './config';
 
 let tmpDir: string;
 
@@ -120,6 +120,63 @@ describe('config', () => {
       expect(file.current).toBe('https://b.com');
       expect(file.servers!['https://b.com']).toEqual({});
       expect(file.servers!['https://a.com'].admin_token).toBe('tok');
+    });
+  });
+
+  describe('loadDirectoryToken()', () => {
+    it('returns undefined when no config exists', () => {
+      expect(loadDirectoryToken()).toBeUndefined();
+    });
+
+    it('returns undefined when directory_token is not set', () => {
+      const file: ZooidConfigFile = { current: 'https://a.com', servers: {} };
+      fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify(file));
+      expect(loadDirectoryToken()).toBeUndefined();
+    });
+
+    it('returns the directory token when set', () => {
+      const file: ZooidConfigFile = {
+        current: 'https://a.com',
+        servers: {},
+        directory_token: 'zd_test123',
+      };
+      fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify(file));
+      expect(loadDirectoryToken()).toBe('zd_test123');
+    });
+  });
+
+  describe('saveDirectoryToken()', () => {
+    it('saves directory token to config file', () => {
+      saveConfig({ admin_token: 'tok' }, 'https://a.com');
+      saveDirectoryToken('zd_newtoken');
+
+      const raw = fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8');
+      const file = JSON.parse(raw) as ZooidConfigFile;
+      expect(file.directory_token).toBe('zd_newtoken');
+      // Preserves existing config
+      expect(file.servers!['https://a.com'].admin_token).toBe('tok');
+    });
+
+    it('creates config file if it does not exist', () => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      saveDirectoryToken('zd_fresh');
+
+      const raw = fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8');
+      const file = JSON.parse(raw) as ZooidConfigFile;
+      expect(file.directory_token).toBe('zd_fresh');
+    });
+
+    it('overwrites existing directory token', () => {
+      const file: ZooidConfigFile = {
+        current: 'https://a.com',
+        servers: {},
+        directory_token: 'zd_old',
+      };
+      fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify(file));
+
+      saveDirectoryToken('zd_new');
+
+      expect(loadDirectoryToken()).toBe('zd_new');
     });
   });
 });

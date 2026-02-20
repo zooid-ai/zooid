@@ -3,12 +3,13 @@ import { env } from 'cloudflare:test';
 import app from '../../packages/server/src/index';
 import { ZooidClient } from '../../packages/sdk/src/client';
 import { createToken } from '../../packages/server/src/lib/jwt';
+import { generateKeyPair } from '../../packages/server/src/lib/signing';
 import { setupTestDb, cleanTestDb } from '../../packages/server/src/test-utils';
 
 const JWT_SECRET = 'test-jwt-secret';
 
 // Helper: create a mini fetch that routes through the Hono app
-function createTestFetch() {
+function createTestFetch(extraEnv: Record<string, string> = {}) {
   return async (input: string | URL | Request, init?: RequestInit) => {
     const url =
       typeof input === 'string'
@@ -20,6 +21,7 @@ function createTestFetch() {
     return app.request(path, init ?? {}, {
       ...env,
       ZOOID_JWT_SECRET: JWT_SECRET,
+      ...extraEnv,
     });
   };
 }
@@ -344,6 +346,113 @@ describe('SDK Integration Tests', () => {
       const meta = await reader.getServerMeta();
       expect(meta.name).toBe('My Zooid');
       expect(meta.owner).toBe('tester');
+    });
+  });
+
+  describe('directory claim', () => {
+    let claimFetch: ReturnType<typeof createTestFetch>;
+    let signingKeyBase64: string;
+    let publicKey: CryptoKey;
+
+    function arrayBufferToBase64(buffer: ArrayBuffer): string {
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+      }
+      return btoa(binary);
+    }
+
+    function base64UrlToBytes(base64url: string): Uint8Array {
+      const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+      const binary = atob(padded);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    }
+
+    beforeAll(async () => {
+      const keyPair = await generateKeyPair();
+      const exported = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
+      signingKeyBase64 = arrayBufferToBase64(exported);
+      publicKey = keyPair.publicKey;
+      claimFetch = createTestFetch({ ZOOID_SIGNING_KEY: signingKeyBase64 });
+    });
+
+    it('creates channels and generates a valid signed claim via SDK', async () => {
+      const adminToken = await createToken({ scope: 'admin' }, JWT_SECRET);
+      const admin = new ZooidClient({
+        server: 'https://test.local',
+        token: adminToken,
+        fetch: claimFetch,
+      });
+
+      // Create channels
+      await admin.createChannel({ id: 'claim-ch-a', name: 'Claim A', is_public: true });
+      await admin.createChannel({ id: 'claim-ch-b', name: 'Claim B', is_public: true });
+
+      // Get claim
+      const result = await admin.getClaim(['claim-ch-a', 'claim-ch-b']);
+      expect(result.claim).toBeTruthy();
+      expect(result.signature).toBeTruthy();
+
+      // Decode claim
+      const claimBytes = base64UrlToBytes(result.claim);
+      const claimJson = new TextDecoder().decode(claimBytes);
+      const claim = JSON.parse(claimJson);
+      expect(claim.channels).toEqual(['claim-ch-a', 'claim-ch-b']);
+      expect(claim.server_url).toBeTruthy();
+      expect(claim.timestamp).toBeTruthy();
+
+      // Verify signature
+      const sigBytes = base64UrlToBytes(result.signature);
+      const valid = await crypto.subtle.verify('Ed25519', publicKey, sigBytes, claimBytes);
+      expect(valid).toBe(true);
+    });
+
+    it('generates a delete claim via SDK', async () => {
+      const adminToken = await createToken({ scope: 'admin' }, JWT_SECRET);
+      const admin = new ZooidClient({
+        server: 'https://test.local',
+        token: adminToken,
+        fetch: claimFetch,
+      });
+
+      await admin.createChannel({ id: 'del-ch', name: 'Delete Me', is_public: true });
+
+      const result = await admin.getClaim(['del-ch'], 'delete');
+      const claimJson = new TextDecoder().decode(base64UrlToBytes(result.claim));
+      const claim = JSON.parse(claimJson);
+      expect(claim.action).toBe('delete');
+      expect(claim.channels).toEqual(['del-ch']);
+    });
+
+    it('rejects claim for non-existent channels via SDK', async () => {
+      const adminToken = await createToken({ scope: 'admin' }, JWT_SECRET);
+      const admin = new ZooidClient({
+        server: 'https://test.local',
+        token: adminToken,
+        fetch: claimFetch,
+      });
+
+      await expect(admin.getClaim(['does-not-exist'])).rejects.toThrow();
+    });
+
+    it('rejects claim without admin token', async () => {
+      const subToken = await createToken(
+        { scope: 'subscribe', channel: 'any' },
+        JWT_SECRET,
+      );
+      const subscriber = new ZooidClient({
+        server: 'https://test.local',
+        token: subToken,
+        fetch: claimFetch,
+      });
+
+      await expect(subscriber.getClaim(['any'])).rejects.toThrow();
     });
   });
 });

@@ -5,6 +5,8 @@ import { runPublish } from './commands/publish';
 import { runSubscribePoll, runSubscribeWebhook } from './commands/subscribe';
 import { runTail } from './commands/tail';
 import { runStatus } from './commands/status';
+import { runShare } from './commands/share';
+import { runUnshare } from './commands/unshare';
 import { runServerGet, runServerSet } from './commands/server';
 import { runDev } from './commands/dev';
 import { runInit } from './commands/init';
@@ -426,6 +428,37 @@ program
       printInfo('Poll interval', `${discovery.poll_interval}s`);
       printInfo('Delivery', discovery.delivery.join(', '));
       console.log('');
+    } catch (err) {
+      printError((err as Error).message);
+      process.exit(1);
+    }
+  });
+
+// --- share ---
+program
+  .command('share [channels...]')
+  .description('List channels in the Zooid Directory')
+  .option('--channel <id>', 'Channel to share (alternative to positional args)')
+  .option('-y, --yes', 'Skip prompts, use server values for description/tags')
+  .action(async (channels: string[], opts) => {
+    try {
+      const ids = opts.channel ? [opts.channel, ...channels] : channels;
+      await runShare(ids, { yes: opts.yes });
+      printSuccess('Channels shared to directory');
+    } catch (err) {
+      printError((err as Error).message);
+      process.exit(1);
+    }
+  });
+
+// --- unshare ---
+program
+  .command('unshare <channel>')
+  .description('Remove a channel from the Zooid Directory')
+  .action(async (channel: string) => {
+    try {
+      await runUnshare(channel);
+      printSuccess(`Removed ${channel} from directory`);
     } catch (err) {
       printError((err as Error).message);
       process.exit(1);

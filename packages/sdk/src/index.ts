@@ -1,5 +1,7 @@
 export { ZooidClient } from './client';
 export { ZooidError } from './error';
+export { verifyWebhook } from './verify';
+export type { VerifyWebhookOptions } from './verify';
 export type {
   ZooidClientOptions,
   ServerDiscovery,
@@ -19,6 +21,7 @@ export type {
   TailOptions,
   TailStream,
   UpdateServerMetaOptions,
+  ClaimResult,
 } from './types';
 
 // Deprecated aliases for backward compatibility

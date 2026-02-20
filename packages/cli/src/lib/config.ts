@@ -18,6 +18,8 @@ export interface ServerConfig {
 export interface ZooidConfigFile {
   current?: string;
   servers?: Record<string, ServerConfig>;
+  /** Directory token (per-GitHub-user, not per-server). */
+  directory_token?: string;
 }
 
 /** Public config shape returned by loadConfig() — backward compatible */
@@ -142,6 +144,21 @@ export function saveConfig(partial: Partial<ServerConfig>, serverUrl?: string): 
   file.servers[url] = merged;
   file.current = url;
 
+  fs.writeFileSync(getConfigPath(), JSON.stringify(file, null, 2) + '\n');
+}
+
+/** Load the directory token from config (top-level, not per-server). */
+export function loadDirectoryToken(): string | undefined {
+  const file = loadConfigFile();
+  return file.directory_token;
+}
+
+/** Save the directory token to config (top-level, not per-server). */
+export function saveDirectoryToken(token: string): void {
+  const dir = getConfigDir();
+  fs.mkdirSync(dir, { recursive: true });
+  const file = loadConfigFile();
+  file.directory_token = token;
   fs.writeFileSync(getConfigPath(), JSON.stringify(file, null, 2) + '\n');
 }
 
