@@ -2,6 +2,13 @@
   "name": "@zooid/server",
   "version": "0.0.0",
   "type": "module",
+  "license": "MIT",
+  "author": "Ori Ben",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zooid-ai/zooid",
+    "directory": "packages/server"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",

@@ -27,5 +27,11 @@
     "vitest": "^3.2.0"
   },
   "files": ["dist"],
-  "license": "MIT"
+  "license": "MIT",
+  "author": "Ori Ben",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zooid-ai/zooid",
+    "directory": "packages/sdk"
+  }
 }
