@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure we're running from the repo root
+cd "$(dirname "$0")/.."
+
 # Publish Zooid packages to npm
 # Usage: ./scripts/publish.sh [patch|minor|major] [--dry-run]
 #
