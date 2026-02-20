@@ -1,0 +1,37 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+*.tsbuildinfo
+
+# Cloudflare
+.wrangler
+.dev.vars
+
+# Environment
+.env
+.env.*
+
+# Editor
+.vscode/settings.json
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+coverage
+
+# Generated docs
+docs/api
+
+# Project
+.claude/*/*
+!.claude/skills/zooid
+.specs
+examples/test

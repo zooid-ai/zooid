@@ -1,0 +1,15 @@
+{
+  "name": "@zooid/homepage",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node --import tsx build.ts",
+    "deploy": "pnpm build && wrangler pages deploy dist --project-name=zooid-homepage"
+  },
+  "devDependencies": {
+    "marked": "^15.0.0",
+    "tsx": "^4.19.0",
+    "wrangler": "^4.0.0"
+  }
+}

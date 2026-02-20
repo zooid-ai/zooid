@@ -1,0 +1,30 @@
+{
+  "name": "@zooid/web",
+  "version": "0.0.1",
+  "type": "module",
+  "license": "MIT",
+  "author": "Ori Ben",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zooid-ai/zooid",
+    "directory": "packages/web"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@zooid/ui": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@tailwindcss/vite": "^4.1.7",
+    "svelte": "^5.28.2",
+    "tailwindcss": "^4.1.7",
+    "vite": "^6.3.5"
+  }
+}

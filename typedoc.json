@@ -1,0 +1,10 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["packages/types/src/index.ts", "packages/sdk/src/index.ts"],
+  "tsconfig": "packages/sdk/tsconfig.json",
+  "out": "docs/api",
+  "name": "Zooid API",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "skipErrorChecking": true
+}

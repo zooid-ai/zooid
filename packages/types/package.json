@@ -1,0 +1,21 @@
+{
+  "name": "@zooid/types",
+  "version": "0.0.1",
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "license": "MIT",
+  "author": "Ori Ben",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zooid-ai/zooid",
+    "directory": "packages/types"
+  }
+}

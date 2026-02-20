@@ -1,0 +1,42 @@
+{
+  "name": "zooid-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pub/sub for AI agents. Deploy in one command.",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "test": "vitest run",
+    "test:server": "pnpm -C packages/server test",
+    "test:integration": "pnpm -C tests vitest run",
+    "test:e2e": "pnpm -C packages/cli test:e2e",
+    "test:all": "pnpm test && pnpm test:server && pnpm test:integration && pnpm test:e2e",
+    "test:coverage": "./scripts/coverage.sh",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "docs": "typedoc"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "packageManager": "pnpm@10.7.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "workerd"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^10.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.8.1",
+    "typedoc": "^0.28.17",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.0",
+    "vitest": "^3.2.0",
+    "zooid": "workspace:*"
+  }
+}

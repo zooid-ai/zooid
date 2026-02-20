@@ -1,0 +1,38 @@
+{
+  "name": "@zooid/server",
+  "version": "0.0.1",
+  "type": "module",
+  "license": "MIT",
+  "author": "Ori Ben",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zooid-ai/zooid",
+    "directory": "packages/server"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "vitest run"
+  },
+  "files": [
+    "src",
+    "wrangler.toml"
+  ],
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@zooid/types": "workspace:*",
+    "@zooid/web": "workspace:*",
+    "chanfana": "^3.0.0",
+    "fast-xml-parser": "^5.3.6",
+    "hono": "^4.11.9",
+    "ulidx": "^2.4.1",
+    "yaml": "^2.8.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.13",
+    "@cloudflare/workers-types": "^4.20260217.0",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "wrangler": "^4.66.0"
+  }
+}

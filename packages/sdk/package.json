@@ -1,0 +1,39 @@
+{
+  "name": "@zooid/sdk",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts --format esm,cjs --dts --watch",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@zooid/types": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.34",
+    "tsup": "^8.5.1",
+    "vitest": "^3.2.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT",
+  "author": "Ori Ben",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zooid-ai/zooid",
+    "directory": "packages/sdk"
+  }
+}

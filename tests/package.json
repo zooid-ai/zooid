@@ -1,0 +1,16 @@
+{
+  "name": "@zooid/tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.12.13",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "@zooid/sdk": "workspace:*",
+    "@zooid/types": "workspace:*",
+    "vitest": "^3.2.0"
+  }
+}
