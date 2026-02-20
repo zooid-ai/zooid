@@ -13,6 +13,7 @@
     "test:e2e": "tsup && vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
+    "@inquirer/checkbox": "^5.0.7",
     "@zooid/sdk": "workspace:*",
     "@zooid/types": "workspace:*",
     "commander": "^14.0.3"

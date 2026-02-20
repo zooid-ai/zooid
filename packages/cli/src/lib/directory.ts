@@ -3,8 +3,8 @@ import { printInfo, printError } from './output';
 
 const DIRECTORY_BASE_URL = 'https://directory.zooid.dev';
 const TOKEN_PREFIX = 'zd_';
-const POLL_INTERVAL_MS = 2000;
-const POLL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const POLL_INTERVAL_MS = 3000;
+const POLL_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
 export { DIRECTORY_BASE_URL };
 
@@ -92,7 +92,7 @@ async function deviceAuth(): Promise<string> {
     }
   }
 
-  throw new Error('Device authorization timed out. Please try again.');
+  throw new Error('Authorization timed out. You need your human to authorize you. Run `npx zooid share` again to retry.');
 }
 
 /** Fetch wrapper that adds the directory token and retriggers auth on 401. */

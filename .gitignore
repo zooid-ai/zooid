@@ -31,6 +31,7 @@ coverage
 docs/api
 
 # Project
-.claude
+.claude/*/*
+!.claude/skills/zooid
 .specs
 examples/test

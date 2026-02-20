@@ -19,16 +19,15 @@ export async function runShare(channelIds: string[], options: ShareOptions = {})
 
   // List all channels from the server
   const allChannels = await client.listChannels();
+  const publicChannels = allChannels.filter((ch) => ch.is_public);
+
+  if (publicChannels.length === 0) {
+    throw new Error('No public channels found on this server.');
+  }
 
   let selected: ChannelListItem[];
 
-  if (channelIds.length === 0) {
-    // Share all public channels
-    selected = allChannels.filter((ch) => ch.is_public);
-    if (selected.length === 0) {
-      throw new Error('No public channels found on this server.');
-    }
-  } else {
+  if (channelIds.length > 0) {
     // Validate requested channels exist
     const byId = new Map(allChannels.map((ch) => [ch.id, ch]));
     const missing: string[] = [];
@@ -44,14 +43,23 @@ export async function runShare(channelIds: string[], options: ShareOptions = {})
     if (missing.length > 0) {
       throw new Error(`Channels not found: ${missing.join(', ')}`);
     }
-  }
 
-  // Validate all selected channels are public
-  const privateChannels = selected.filter((ch) => !ch.is_public);
-  if (privateChannels.length > 0) {
-    throw new Error(
-      `Cannot share private channels: ${privateChannels.map((ch) => ch.id).join(', ')}. Only public channels can be listed in the directory.`,
-    );
+    // Validate all selected channels are public
+    const privateChannels = selected.filter((ch) => !ch.is_public);
+    if (privateChannels.length > 0) {
+      throw new Error(
+        `Cannot share private channels: ${privateChannels.map((ch) => ch.id).join(', ')}. Only public channels can be listed in the directory.`,
+      );
+    }
+  } else if (options.yes) {
+    // --yes with no channels specified: share all public
+    selected = publicChannels;
+  } else {
+    // Interactive: let user pick which channels to share
+    selected = await pickChannels(publicChannels);
+    if (selected.length === 0) {
+      throw new Error('No channels selected.');
+    }
   }
 
   // Prompt for description/tags per channel (unless --yes)
@@ -98,6 +106,27 @@ export async function runShare(channelIds: string[], options: ShareOptions = {})
   console.log('');
 }
 
+/** Interactive checkbox picker using @inquirer/checkbox. */
+async function pickChannels(channels: ChannelListItem[]): Promise<ChannelListItem[]> {
+  const { default: checkbox } = await import('@inquirer/checkbox');
+
+  const selected = await checkbox({
+    message: 'Select channels to share',
+    choices: channels.map((ch) => ({
+      name: ch.description ? `${ch.id} — ${ch.description}` : ch.id,
+      value: ch.id,
+      checked: true,
+    })),
+    theme: {
+      icon: { cursor: '> ' },
+      style: { highlight: (text: string) => text },
+    },
+  });
+
+  const selectedSet = new Set(selected);
+  return channels.filter((ch) => selectedSet.has(ch.id));
+}
+
 async function promptChannelDetails(
   channels: ChannelListItem[],
   skipPrompt?: boolean,
@@ -125,9 +154,7 @@ async function promptChannelDetails(
     console.log('  Press Enter to accept defaults shown in [brackets].\n');
 
     for (const ch of channels) {
-      if (channels.length > 1) {
-        console.log(`  --- ${ch.id} ---`);
-      }
+      console.log(`  ${ch.id}:`);
 
       const desc = await ask(rl, 'Description', ch.description ?? '');
       const tagsRaw = await ask(rl, 'Tags (comma-separated)', ch.tags.join(', '));
@@ -137,8 +164,7 @@ async function promptChannelDetails(
         .filter(Boolean);
 
       result.set(ch.id, { description: desc, tags });
-
-      if (channels.length > 1) console.log('');
+      console.log('');
     }
   } finally {
     rl.close();

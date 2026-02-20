@@ -7,6 +7,7 @@ import { runTail } from './commands/tail';
 import { runStatus } from './commands/status';
 import { runShare } from './commands/share';
 import { runUnshare } from './commands/unshare';
+import { runDiscover } from './commands/discover';
 import { runServerGet, runServerSet } from './commands/server';
 import { runDev } from './commands/dev';
 import { runInit } from './commands/init';
@@ -445,6 +446,26 @@ program
       const ids = opts.channel ? [opts.channel, ...channels] : channels;
       await runShare(ids, { yes: opts.yes });
       printSuccess('Channels shared to directory');
+    } catch (err) {
+      printError((err as Error).message);
+      process.exit(1);
+    }
+  });
+
+// --- discover ---
+program
+  .command('discover')
+  .description('Browse public channels in the Zooid Directory')
+  .option('-q, --query <text>', 'Search by keyword')
+  .option('-t, --tag <tag>', 'Filter by tag')
+  .option('-n, --limit <n>', 'Max results', '20')
+  .action(async (opts) => {
+    try {
+      await runDiscover({
+        query: opts.query,
+        tag: opts.tag,
+        limit: parseInt(opts.limit, 10),
+      });
     } catch (err) {
       printError((err as Error).message);
       process.exit(1);
