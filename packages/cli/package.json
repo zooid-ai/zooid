@@ -1,6 +1,6 @@
 {
   "name": "zooid",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "license": "MIT",
   "author": "Ori Ben",
@@ -12,7 +12,9 @@
   "bin": {
     "zooid": "./dist/index.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",

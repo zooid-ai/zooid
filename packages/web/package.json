@@ -1,6 +1,6 @@
 {
   "name": "@zooid/web",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "license": "MIT",
   "author": "Ori Ben",
@@ -9,7 +9,9 @@
     "url": "https://github.com/zooid-ai/zooid",
     "directory": "packages/web"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",

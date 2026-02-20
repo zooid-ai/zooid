@@ -1,6 +1,6 @@
 {
   "name": "@zooid/server",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "license": "MIT",
   "author": "Ori Ben",
@@ -14,7 +14,10 @@
     "deploy": "wrangler deploy",
     "test": "vitest run"
   },
-  "files": ["src", "wrangler.toml"],
+  "files": [
+    "src",
+    "wrangler.toml"
+  ],
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@zooid/types": "workspace:*",

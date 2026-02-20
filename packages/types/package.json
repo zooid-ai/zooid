@@ -1,6 +1,6 @@
 {
   "name": "@zooid/types",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "types": "./src/index.ts",
   "exports": {
@@ -8,7 +8,9 @@
       "types": "./src/index.ts"
     }
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "license": "MIT",
   "author": "Ori Ben",
   "repository": {

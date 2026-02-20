@@ -1,6 +1,6 @@
 {
   "name": "@zooid/sdk",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -26,7 +26,9 @@
     "tsup": "^8.5.1",
     "vitest": "^3.2.0"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "license": "MIT",
   "author": "Ori Ben",
   "repository": {
