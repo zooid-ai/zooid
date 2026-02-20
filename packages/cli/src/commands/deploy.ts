@@ -1,17 +1,75 @@
 import { execSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
-import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { ZooidClient } from '@zooid/sdk';
 import { loadConfig, saveConfig } from '../lib/config';
 import { printSuccess, printError, printInfo } from '../lib/output';
 import { loadServerConfig, saveServerConfig, runInit } from './init';
 
-function findServerDir(): string {
-  const cliDir = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(cliDir, '../../server');
+const require = createRequire(import.meta.url);
+
+/** Resolve the directory of an installed npm package. */
+function resolvePackageDir(packageName: string): string {
+  const pkgJson = require.resolve(`${packageName}/package.json`);
+  return path.dirname(pkgJson);
+}
+
+/**
+ * Set up a temporary deploy directory with the server source and web assets.
+ * Returns the path to the temp directory.
+ */
+function prepareStagingDir(): string {
+  const serverDir = resolvePackageDir('@zooid/server');
+  const webDir = resolvePackageDir('@zooid/web');
+  const webDistDir = path.join(webDir, 'dist');
+
+  if (!fs.existsSync(path.join(serverDir, 'wrangler.toml'))) {
+    throw new Error(`Server package missing wrangler.toml at ${serverDir}`);
+  }
+
+  if (!fs.existsSync(webDistDir)) {
+    throw new Error(`Web dashboard not built. Missing: ${webDistDir}`);
+  }
+
+  // Create temp directory
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zooid-deploy-'));
+
+  // Copy server source
+  copyDirSync(path.join(serverDir, 'src'), path.join(tmpDir, 'src'));
+
+  // Copy web dist
+  copyDirSync(webDistDir, path.join(tmpDir, 'web-dist'));
+
+  // Copy wrangler.toml and rewrite the asset directory path
+  let toml = fs.readFileSync(path.join(serverDir, 'wrangler.toml'), 'utf-8');
+  toml = toml.replace(/directory\s*=\s*"[^"]*"/, 'directory = "./web-dist/"');
+  fs.writeFileSync(path.join(tmpDir, 'wrangler.toml'), toml);
+
+  // Symlink node_modules so wrangler can resolve dependencies
+  const serverNodeModules = path.join(serverDir, 'node_modules');
+  if (fs.existsSync(serverNodeModules)) {
+    fs.symlinkSync(serverNodeModules, path.join(tmpDir, 'node_modules'), 'junction');
+  }
+
+  return tmpDir;
+}
+
+/** Recursively copy a directory. */
+function copyDirSync(src: string, dest: string): void {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const srcPath = path.join(src, entry.name);
+    const destPath = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      copyDirSync(srcPath, destPath);
+    } else {
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
 }
 
 function base64url(buf: Buffer): string {
@@ -47,7 +105,7 @@ interface CfCredentials {
 /** Run a wrangler command with CF credentials in env. Returns stdout. */
 function wrangler(
   cmd: string,
-  serverDir: string,
+  cwd: string,
   creds: CfCredentials,
   opts?: { input?: string },
 ): string {
@@ -59,7 +117,7 @@ function wrangler(
     env.CLOUDFLARE_ACCOUNT_ID = creds.accountId;
   }
   return execSync(`npx wrangler ${cmd}`, {
-    cwd: serverDir,
+    cwd,
     stdio: 'pipe',
     encoding: 'utf-8',
     env,
@@ -73,9 +131,6 @@ interface DeployUrls {
 }
 
 function parseDeployUrls(output: string): DeployUrls {
-  // wrangler deploy output looks like:
-  //   https://zooid.user.workers.dev
-  //   signals.example.com (custom domain)
   const workersDev = output.match(/https:\/\/[^\s]+\.workers\.dev/);
   const custom = output.match(/^\s+(\S+\.(?!workers\.dev)\S+)\s+\(custom domain\)/m);
 
@@ -100,21 +155,18 @@ function loadDotEnv(): Partial<CfCredentials> {
 }
 
 async function getCfCredentials(): Promise<CfCredentials> {
-  // 1. Environment variables
   const envToken = process.env.CLOUDFLARE_API_TOKEN;
   const envAccount = process.env.CLOUDFLARE_ACCOUNT_ID;
   if (envToken) {
     return { apiToken: envToken, accountId: envAccount };
   }
 
-  // 2. .env file in current directory
   const dotEnv = loadDotEnv();
   if (dotEnv.apiToken) {
     printInfo('Using credentials from', '.env');
     return { apiToken: dotEnv.apiToken, accountId: dotEnv.accountId };
   }
 
-  // 3. Prompt
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -154,12 +206,12 @@ export async function runDeploy(): Promise<void> {
     process.exit(1);
   }
 
-  // 2. Resolve server directory
-  const serverDir = findServerDir();
-
-  if (!fs.existsSync(path.join(serverDir, 'wrangler.toml'))) {
-    printError(`Server directory not found at ${serverDir}`);
-    console.log('Make sure you\'re running from the zooid monorepo.');
+  // 2. Prepare staging directory from npm packages
+  let stagingDir: string;
+  try {
+    stagingDir = prepareStagingDir();
+  } catch (err) {
+    printError((err as Error).message);
     process.exit(1);
   }
 
@@ -170,7 +222,7 @@ export async function runDeploy(): Promise<void> {
 
   // 3. Check wrangler available
   try {
-    execSync('npx wrangler --version', { cwd: serverDir, stdio: 'pipe' });
+    execSync('npx wrangler --version', { cwd: stagingDir, stdio: 'pipe' });
   } catch {
     printError('wrangler not found. Install with: npm install -g wrangler');
     process.exit(1);
@@ -180,17 +232,18 @@ export async function runDeploy(): Promise<void> {
   const creds = await getCfCredentials();
 
   try {
-    wrangler('whoami', serverDir, creds);
+    wrangler('whoami', stagingDir, creds);
     printSuccess('Cloudflare authentication verified');
   } catch {
     printError('Invalid Cloudflare API token');
+    cleanup(stagingDir);
     process.exit(1);
   }
 
   // 5. Detect first deploy vs redeploy
   let isFirstDeploy = false;
   try {
-    const output = wrangler('d1 list --json', serverDir, creds);
+    const output = wrangler('d1 list --json', stagingDir, creds);
     const databases = JSON.parse(output) as Array<{ name: string }>;
     isFirstDeploy = !databases.some((db) => db.name === dbName);
   } catch {
@@ -206,59 +259,57 @@ export async function runDeploy(): Promise<void> {
 
     // 6. Create D1 database
     console.log(`Creating D1 database (${dbName})...`);
-    const d1Output = wrangler(`d1 create ${dbName}`, serverDir, creds);
+    const d1Output = wrangler(`d1 create ${dbName}`, stagingDir, creds);
 
     const dbIdMatch = d1Output.match(/database_id\s*=\s*"([^"]+)"/);
     if (!dbIdMatch) {
       printError('Failed to parse database ID from wrangler output');
       console.log(d1Output);
+      cleanup(stagingDir);
       process.exit(1);
     }
 
     const databaseId = dbIdMatch[1];
     printSuccess(`D1 database created (${databaseId})`);
 
-    // Update wrangler.toml with real values
-    const wranglerTomlPath = path.join(serverDir, 'wrangler.toml');
+    // Update wrangler.toml in staging dir with real values
+    const wranglerTomlPath = path.join(stagingDir, 'wrangler.toml');
     let tomlContent = fs.readFileSync(wranglerTomlPath, 'utf-8');
-    tomlContent = tomlContent.replace('name = "zooid"', `name = "${workerName}"`);
-    tomlContent = tomlContent.replace('database_name = "zooid-db"', `database_name = "${dbName}"`);
-    tomlContent = tomlContent.replace('database_id = "local"', `database_id = "${databaseId}"`);
-    tomlContent = tomlContent.replace('ZOOID_SERVER_ID = "zooid-local"', `ZOOID_SERVER_ID = "${serverSlug}"`);
+    tomlContent = tomlContent.replace(/name = "[^"]*"/, `name = "${workerName}"`);
+    tomlContent = tomlContent.replace(/database_name = "[^"]*"/, `database_name = "${dbName}"`);
+    tomlContent = tomlContent.replace(/database_id = "[^"]*"/, `database_id = "${databaseId}"`);
+    tomlContent = tomlContent.replace(/ZOOID_SERVER_ID = "[^"]*"/, `ZOOID_SERVER_ID = "${serverSlug}"`);
     fs.writeFileSync(wranglerTomlPath, tomlContent);
-    printSuccess('Updated wrangler.toml');
+    printSuccess('Configured wrangler.toml');
 
     // 7. Run schema migration
-    const schemaPath = path.join(serverDir, 'src/db/schema.sql');
+    const schemaPath = path.join(stagingDir, 'src/db/schema.sql');
     if (fs.existsSync(schemaPath)) {
       console.log('Running database schema migration...');
-      wrangler(`d1 execute ${dbName} --remote --file=${schemaPath}`, serverDir, creds);
+      wrangler(`d1 execute ${dbName} --remote --file=${schemaPath}`, stagingDir, creds);
       printSuccess('Database schema initialized');
     }
 
     // 8. Generate secrets
     console.log('Generating secrets...');
 
-    // JWT secret
     const jwtSecret = crypto.randomBytes(32).toString('base64');
 
-    // Ed25519 key pair
     const keyPair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']) as CryptoKeyPair;
     const privateKeyRaw = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
     const publicKeyRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey);
     const privateKeyB64 = Buffer.from(privateKeyRaw).toString('base64');
     const publicKeyB64 = Buffer.from(publicKeyRaw).toString('base64');
 
-    wrangler('secret put ZOOID_JWT_SECRET', serverDir, creds, { input: jwtSecret });
+    wrangler('secret put ZOOID_JWT_SECRET', stagingDir, creds, { input: jwtSecret });
     printSuccess('Set ZOOID_JWT_SECRET');
 
-    wrangler('secret put ZOOID_SIGNING_KEY', serverDir, creds, { input: privateKeyB64 });
+    wrangler('secret put ZOOID_SIGNING_KEY', stagingDir, creds, { input: privateKeyB64 });
     printSuccess('Set ZOOID_SIGNING_KEY (Ed25519 private)');
 
-    wrangler('secret put ZOOID_PUBLIC_KEY', serverDir, creds, { input: publicKeyB64 });
+    wrangler('secret put ZOOID_PUBLIC_KEY', stagingDir, creds, { input: publicKeyB64 });
     printSuccess('Set ZOOID_PUBLIC_KEY (Ed25519 public)');
 
-    // 9. Generate admin token
     adminToken = await createAdminToken(jwtSecret);
     printSuccess('Admin token generated');
   } else {
@@ -266,20 +317,41 @@ export async function runDeploy(): Promise<void> {
     printInfo('Deploy type', 'Redeploying existing server');
     console.log('');
 
-    // Load existing admin token from config (resolve via canonicalUrl since zooid.json may have url)
+    // Rewrite wrangler.toml for existing deploy
+    const wranglerTomlPath = path.join(stagingDir, 'wrangler.toml');
+    let tomlContent = fs.readFileSync(wranglerTomlPath, 'utf-8');
+    tomlContent = tomlContent.replace(/name = "[^"]*"/, `name = "${workerName}"`);
+    tomlContent = tomlContent.replace(/ZOOID_SERVER_ID = "[^"]*"/, `ZOOID_SERVER_ID = "${serverSlug}"`);
+
+    // For redeployment, we need the existing database ID
+    try {
+      const output = wrangler('d1 list --json', stagingDir, creds);
+      const databases = JSON.parse(output) as Array<{ name: string; uuid: string }>;
+      const db = databases.find((d) => d.name === dbName);
+      if (db) {
+        tomlContent = tomlContent.replace(/database_name = "[^"]*"/, `database_name = "${dbName}"`);
+        tomlContent = tomlContent.replace(/database_id = "[^"]*"/, `database_id = "${db.uuid}"`);
+      }
+    } catch {
+      // Fall through — wrangler will error if DB config is wrong
+    }
+
+    fs.writeFileSync(wranglerTomlPath, tomlContent);
+
     const existingConfig = loadConfig();
     adminToken = existingConfig.admin_token;
 
     if (!adminToken) {
       printError('No admin token found in ~/.zooid/config.json for this server');
       console.log('If this is a first deploy, remove the D1 database and try again.');
+      cleanup(stagingDir);
       process.exit(1);
     }
   }
 
   // 10. Deploy worker
   console.log('Deploying worker...');
-  const deployOutput = wrangler('deploy', serverDir, creds);
+  const deployOutput = wrangler('deploy', stagingDir, creds);
 
   const { workerUrl, customDomain } = parseDeployUrls(deployOutput);
   printSuccess('Worker deployed');
@@ -290,10 +362,9 @@ export async function runDeploy(): Promise<void> {
     printInfo('Custom domain', customDomain);
   }
 
-  // Canonical URL: zooid.json url > custom domain > workers.dev
   const canonicalUrl = config.url || customDomain || workerUrl;
 
-  // 11. Push server identity (wait for worker propagation)
+  // 11. Push server identity
   await new Promise((r) => setTimeout(r, 2000));
   if (canonicalUrl && adminToken) {
     try {
@@ -329,6 +400,9 @@ export async function runDeploy(): Promise<void> {
   saveConfig(configToSave, canonicalUrl || undefined);
   printSuccess('Saved connection config to ~/.zooid/config.json');
 
+  // Cleanup staging dir
+  cleanup(stagingDir);
+
   // 13. Print summary
   console.log('');
   console.log('  ──────────────────────────────────────');
@@ -349,5 +423,13 @@ export async function runDeploy(): Promise<void> {
     console.log('    npx zooid channel create my-channel');
     console.log('    npx zooid publish my-channel --data=\'{"hello": "world"}\'');
     console.log('');
+  }
+}
+
+function cleanup(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // Best effort
   }
 }

@@ -2,6 +2,14 @@
   "name": "@zooid/ui",
   "version": "0.0.0",
   "type": "module",
+  "license": "MIT",
+  "author": "Ori Ben",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zooid-ai/zooid",
+    "directory": "packages/ui"
+  },
+  "files": ["src"],
   "svelte": "./src/index.ts",
   "exports": {
     ".": {

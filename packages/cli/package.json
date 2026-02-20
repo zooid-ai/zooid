@@ -23,6 +23,7 @@
   "dependencies": {
     "@inquirer/checkbox": "^5.0.7",
     "@zooid/sdk": "workspace:*",
+    "@zooid/server": "workspace:*",
     "@zooid/types": "workspace:*",
     "commander": "^14.0.3"
   },

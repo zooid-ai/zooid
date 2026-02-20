@@ -14,9 +14,11 @@
     "deploy": "wrangler deploy",
     "test": "vitest run"
   },
+  "files": ["src", "wrangler.toml"],
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@zooid/types": "workspace:*",
+    "@zooid/web": "workspace:*",
     "chanfana": "^3.0.0",
     "fast-xml-parser": "^5.3.6",
     "hono": "^4.11.9",

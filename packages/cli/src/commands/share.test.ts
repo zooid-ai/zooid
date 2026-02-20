@@ -59,7 +59,7 @@ describe('share command', () => {
       new Response(JSON.stringify({ server_url: TEST_SERVER, channels: [{ id: 'ch-a' }] }), { status: 200 }),
     );
 
-    await runShare(['ch-a']);
+    await runShare(['ch-a'], { yes: true });
 
     expect(mockClient.getClaim).toHaveBeenCalledWith(['ch-a']);
     expect(mockDirectoryFetch).toHaveBeenCalledWith(
@@ -92,7 +92,7 @@ describe('share command', () => {
       new Response(JSON.stringify({ channels: [] }), { status: 200 }),
     );
 
-    await runShare([]);
+    await runShare([], { yes: true });
 
     // Should only share public channels
     expect(mockClient.getClaim).toHaveBeenCalledWith(['pub-1', 'pub-2']);
@@ -101,10 +101,11 @@ describe('share command', () => {
   it('throws when trying to share a private channel', async () => {
     writeConfig();
     mockClient.listChannels.mockResolvedValueOnce([
+      { id: 'pub', name: 'Public', description: null, tags: [], is_public: true, event_count: 0 },
       { id: 'priv', name: 'Private', description: null, tags: [], is_public: false, event_count: 0 },
     ]);
 
-    await expect(runShare(['priv'])).rejects.toThrow('Cannot share private channels');
+    await expect(runShare(['priv'], { yes: true })).rejects.toThrow('Cannot share private channels');
   });
 
   it('throws when channel does not exist', async () => {
@@ -135,6 +136,6 @@ describe('share command', () => {
       new Response(JSON.stringify({ error: 'invalid_signature', message: 'Ed25519 signature verification failed' }), { status: 403 }),
     );
 
-    await expect(runShare(['ch-a'])).rejects.toThrow('invalid_signature: Ed25519 signature verification failed');
+    await expect(runShare(['ch-a'], { yes: true })).rejects.toThrow('invalid_signature: Ed25519 signature verification failed');
   });
 });

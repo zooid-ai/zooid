@@ -4,7 +4,8 @@ set -euo pipefail
 # Publish Zooid packages to npm
 # Usage: ./scripts/publish.sh [patch|minor|major] [--dry-run]
 #
-# Publishes in dependency order: @zooid/types → @zooid/sdk → zooid (CLI)
+# Publishes in dependency order:
+#   @zooid/types → @zooid/ui → @zooid/sdk → @zooid/web → @zooid/server → zooid (CLI)
 # Handles workspace:* → real version replacement via pnpm publish
 
 BUMP="${1:-patch}"
@@ -17,8 +18,8 @@ if [[ "${2:-}" == "--dry-run" ]]; then
 fi
 
 # Packages to publish, in dependency order
-PACKAGES=("types" "sdk" "server" "cli")
-PACKAGE_DIRS=("packages/types" "packages/sdk" "packages/server" "packages/cli")
+PACKAGES=("types" "ui" "sdk" "web" "server" "cli")
+PACKAGE_DIRS=("packages/types" "packages/ui" "packages/sdk" "packages/web" "packages/server" "packages/cli")
 
 # --- Preflight checks ---
 
@@ -58,14 +59,16 @@ echo ""
 # --- Run tests ---
 
 echo "🧪 Running tests..."
-pnpm test --filter=@zooid/types --filter=@zooid/sdk --filter=zooid
+pnpm --filter=@zooid/types --filter=@zooid/sdk --filter=@zooid/server --filter=zooid test
 echo "✓ Tests passed"
 echo ""
 
 # --- Build ---
 
 echo "🔨 Building packages..."
-pnpm build --filter=@zooid/sdk --filter=zooid
+pnpm --filter=@zooid/sdk build
+pnpm --filter=@zooid/web build
+pnpm --filter=zooid build
 echo "✓ Build complete"
 echo ""
 
@@ -124,7 +127,7 @@ done
 
 if [[ -z "$DRY_RUN" ]]; then
   echo "🏷️  Tagging v$NEXT..."
-  git add packages/types/package.json packages/sdk/package.json packages/server/package.json packages/cli/package.json
+  git add packages/types/package.json packages/ui/package.json packages/sdk/package.json packages/web/package.json packages/server/package.json packages/cli/package.json
   git commit -m "release: v$NEXT"
   git tag "v$NEXT"
   git push origin main --tags
@@ -132,7 +135,7 @@ if [[ -z "$DRY_RUN" ]]; then
 else
   echo "🏷️  Would tag v$NEXT (skipped in dry run)"
   # Revert version bumps in dry run
-  git checkout -- packages/types/package.json packages/sdk/package.json packages/server/package.json packages/cli/package.json
+  git checkout -- packages/types/package.json packages/ui/package.json packages/sdk/package.json packages/web/package.json packages/server/package.json packages/cli/package.json
   echo "  Reverted version bumps"
 fi
 

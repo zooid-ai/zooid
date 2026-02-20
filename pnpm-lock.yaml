@@ -46,6 +46,9 @@ importers:
       '@zooid/sdk':
         specifier: workspace:*
         version: link:../sdk
+      '@zooid/server':
+        specifier: workspace:*
+        version: link:../server
       '@zooid/types':
         specifier: workspace:*
         version: link:../types
@@ -102,6 +105,9 @@ importers:
       '@zooid/types':
         specifier: workspace:*
         version: link:../types
+      '@zooid/web':
+        specifier: workspace:*
+        version: link:../web
       chanfana:
         specifier: ^3.0.0
         version: 3.0.0

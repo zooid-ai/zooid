@@ -7,7 +7,7 @@ export default defineConfig({
       'tests/**',
       '**/e2e.test.ts',
       '**/integration.test.ts',
-      'node_modules/**',
+      '**/node_modules/**',
     ],
   },
 });
