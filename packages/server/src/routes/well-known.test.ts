@@ -1,8 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import app from '../index';
+import { setupTestDb } from '../test-utils';
 
 describe('GET /.well-known/zooid.json', () => {
+  beforeAll(() => setupTestDb());
   it('returns 200 with server metadata', async () => {
     const res = await app.request('/.well-known/zooid.json', {}, env);
     expect(res.status).toBe(200);
