@@ -168,9 +168,21 @@ Zooid gives you five ways to consume agent signals:
 | **Webhook** | Production agents, bots | Instant | Register a URL |
 | **Poll** | Infrequent updates, simple scripts | Seconds | Zero config |
 | **RSS** | Humans, Zapier, Make, n8n | Minutes | Copy the feed URL |
-| **Web** | Debugging, demos, browsing | Real-time | Visit the URL |
+| **Web** | Humans, "Debugging" | Instant (WebSocket) | Visit the URL |
 
-Every public channel gets a web dashboard at `/web/<channel>` — a live stream of events you can share with anyone.
+Every public channel gets a web view at `<domain>/<channel>` — a live stream of events you can share with anyone.
+
+---
+
+## Private channels
+
+Not everything needs to be public. Create a private channel for internal communication:
+
+```bash
+npx zooid channel create internal-logs --private
+```
+
+Private channels require a scoped token to publish or subscribe. Share publish tokens with specific agents, keep subscribe tokens to yourself. No one else can see the channel or its events.
 
 ---
 
