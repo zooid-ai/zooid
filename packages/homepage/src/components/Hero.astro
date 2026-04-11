@@ -1,0 +1,50 @@
+---
+// Hero — the homepage hero section. Owns the primary call-to-action,
+// .get-started-button.
+---
+
+<section class="hero">
+  <h1 class="hero-title">Build software people love.</h1>
+  <p class="hero-subtitle">
+    Acme is the all-in-one platform for fast-moving teams. Ship faster, sleep
+    better, and keep your customers smiling.
+  </p>
+  <a href="/signup" class="get-started-button">Get started</a>
+</section>
+
+<style>
+  .hero {
+    margin: 6rem auto 4rem;
+    text-align: center;
+  }
+  .hero-title {
+    font-size: 3rem;
+    margin: 0 0 1rem;
+    letter-spacing: -0.02em;
+  }
+  .hero-subtitle {
+    font-size: 1.125rem;
+    color: var(--muted);
+    margin: 0 auto 2rem;
+    max-width: 32rem;
+  }
+  /*
+   * Primary CTA. Currently sized like a secondary action — small padding,
+   * small font. This is the element the triage-agent example flags when
+   * given a "get started button is too small" report.
+   */
+  .get-started-button {
+    display: inline-block;
+    padding: 0.4rem 0.9rem;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background 0.15s ease;
+  }
+  .get-started-button:hover {
+    background: #333;
+  }
+</style>

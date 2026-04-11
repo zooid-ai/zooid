@@ -1,0 +1,16 @@
+# Triage agent — agentd configuration.
+#
+# In MVP mode, agentd runs one session per CLI invocation against the
+# detected agent CLI (claude). Once the slack/zooid transports land, swap
+# `transport: http` for one of those and the same agent will respond on a
+# channel automatically.
+
+transport: http
+runtime: local
+
+# No hooks for the triage agent — it's a read-only workflow that writes a
+# single ticket file. If you want to e.g. open a real GitHub issue from each
+# ticket, add a post_end hook here:
+#
+# hooks:
+#   post_end: "scripts/open-github-issue.sh tickets/$(ls -t tickets | head -1)"

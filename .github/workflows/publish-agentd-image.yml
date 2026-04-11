@@ -1,0 +1,51 @@
+name: Publish agentd image
+
+on:
+  push:
+    tags:
+      - 'agentd-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'agentd version to bake into the image (npm dist-tag or version)'
+        required: true
+        default: 'latest'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#agentd-v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: packages/runtime-docker/docker/claude
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            AGENTD_VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            zooid/agentd-claude:${{ steps.version.outputs.version }}
+            zooid/agentd-claude:latest

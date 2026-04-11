@@ -1,0 +1,49 @@
+---
+const features = [
+  {
+    title: 'Fast by default',
+    body: 'Sub-second cold starts and edge deployment in every region.',
+  },
+  {
+    title: 'Built for teams',
+    body: 'Roles, audit logs, and SSO from day one.',
+  },
+  {
+    title: 'Open and extensible',
+    body: 'A typed SDK, webhooks, and an MCP server in the box.',
+  },
+]
+---
+
+<section class="features">
+  {
+    features.map((f) => (
+      <article class="feature">
+        <h2>{f.title}</h2>
+        <p>{f.body}</p>
+      </article>
+    ))
+  }
+</section>
+
+<style>
+  .features {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2rem;
+    margin-top: 4rem;
+  }
+  .feature h2 {
+    font-size: 1.125rem;
+    margin: 0 0 0.5rem;
+  }
+  .feature p {
+    margin: 0;
+    color: var(--muted);
+  }
+  @media (max-width: 720px) {
+    .features {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

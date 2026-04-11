@@ -1,0 +1,18 @@
+#!/bin/sh
+# Stub `claude` binary for agentd e2e tests.
+#
+# Behavior:
+#   - Echoes a couple of fixed JSONL lines to stdout, mimicking real
+#     `claude --output-format stream-json`.
+#   - Exits with $STUB_EXIT_CODE (default 0) so tests can drive failure paths.
+#   - Echoes $SECRET_FOO to stderr if set, so the env-leakage test can detect
+#     whether non-allowlisted host env vars made it into the container.
+
+if [ -n "${SECRET_FOO}" ]; then
+  printf 'secret_foo=%s\n' "${SECRET_FOO}" >&2
+fi
+
+printf '{"type":"assistant","content":"Reading file..."}\n'
+printf '{"type":"assistant","content":"Done."}\n'
+
+exit "${STUB_EXIT_CODE:-0}"

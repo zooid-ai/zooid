@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+  # The marketing homepage has heavy frontend deps (Astro) and is not part
+  # of the runtime/library workspace. To dev it, cd into packages/homepage
+  # and `pnpm install` there. Remove this exclusion if/when you want it
+  # symlinked into the root workspace.
+  - '!packages/homepage'
