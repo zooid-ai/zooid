@@ -2,21 +2,24 @@ import {
   SessionRunner,
   type Runtime,
   type SessionRunnerOptions,
-} from '@zooid/agentd-core'
-import { LocalRuntime } from '@zooid/agentd-runtime-local'
-import { DockerRuntime } from '@zooid/agentd-runtime-docker'
-import { claudeAdapter } from '@zooid/agentd-adapter-claude'
+  type DockerConfig,
+  type HomeMount,
+} from '@zooid/budd-core'
+import { LocalRuntime } from '@zooid/budd-runtime-local'
+import { DockerRuntime } from '@zooid/budd-runtime-docker'
+import { claudeAdapter } from '@zooid/budd-adapter-claude'
+import { codexAdapter } from '@zooid/budd-adapter-codex'
 
 /**
  * Default set of agent adapters bundled with the CLI. The order is the
  * detection order — first match wins (claude > codex > opencode > ...).
  */
-export const BUILTIN_ADAPTERS = [claudeAdapter]
+export const BUILTIN_ADAPTERS = [claudeAdapter, codexAdapter]
 
 export interface DefaultRuntimeChoice {
   runtime: 'local' | 'docker'
-  /** Required when `runtime === 'docker'`. */
-  image?: string
+  /** Docker-specific config. Required when `runtime === 'docker'`. */
+  docker?: DockerConfig
   /** Host directory mounted at /workspace inside the container. */
   workdir?: string
 }
@@ -28,12 +31,14 @@ export interface DefaultRuntimeChoice {
  */
 export function buildRuntime(choice: DefaultRuntimeChoice): Runtime {
   if (choice.runtime === 'docker') {
-    if (!choice.image) {
-      throw new Error('docker runtime requires an image')
+    const docker = choice.docker
+    if (!docker) {
+      throw new Error('docker runtime requires a docker config block')
     }
     return new DockerRuntime({
-      image: choice.image,
+      image: docker.image,
       workdir: choice.workdir ?? process.cwd(),
+      homeMountsOverride: docker.home_mounts,
     })
   }
   return new LocalRuntime()
@@ -61,4 +66,5 @@ export function createDefaultSessionRunner(
   })
 }
 
-export { SessionRunner, LocalRuntime, DockerRuntime, claudeAdapter }
+export { SessionRunner, LocalRuntime, DockerRuntime, claudeAdapter, codexAdapter }
+export type { HomeMount, DockerConfig }

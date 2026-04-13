@@ -4,10 +4,10 @@ import { serve } from '@hono/node-server'
 import {
   loadConfig,
   mergeCliFlags,
-  type AgentdConfig,
+  type BuddConfig,
   type CliFlags,
-} from '@zooid/agentd-core'
-import { createApp } from '@zooid/agentd-transport-http'
+} from '@zooid/budd-core'
+import { createApp } from '@zooid/budd-transport-http'
 import { buildRuntime, createDefaultSessionRunner } from './index.js'
 
 interface ParsedFlags extends CliFlags {
@@ -17,38 +17,44 @@ interface ParsedFlags extends CliFlags {
 
 function printHelp(): void {
   process.stdout.write(
-    `agentd — daemon that exposes a coding-agent CLI behind an HTTP API.
+    `budd — daemon that exposes a coding-agent CLI behind an HTTP API.
 
 Usage:
-  agentd [flags]
+  budd [flags]
 
 Flags:
   --transport <http>           Transport to listen on (only "http" is supported in MVP).
   --port <n>                   Port for the HTTP transport. Default: 8080 (or daemon.yaml).
   --runtime <local|docker>     Runtime for spawning the agent. Default: docker.
   --image <ref>                Container image to run when --runtime docker.
-                               Default: zooid/agentd-claude:latest (or daemon.yaml image:).
+                               Default: budd/claude-code:latest (or daemon.yaml docker.image).
   --workdir <path>             Host directory to mount at /workspace inside the container.
                                Default: current working directory.
-  --pre-start <cmd>            Shell command to run before each session. Overrides daemon.yaml.
-  --post-end <cmd>             Shell command to run after each session. Overrides daemon.yaml.
+  --pre-turn <cmd>             Shell command to run before each turn. Overrides daemon.yaml.
+  --post-turn <cmd>            Shell command to run after each turn. Overrides daemon.yaml.
   --print-token                Print a fresh 32-byte hex token and exit.
   --help, -h                   Print this help and exit.
 
 Environment:
-  AGENTD_TOKEN                 Required. Bearer token for POST /run. Clients send it as
-                               "Authorization: Bearer $AGENTD_TOKEN".
+  BUDD_TOKEN                   Required. Bearer token clients send as
+                               "Authorization: Bearer $BUDD_TOKEN".
 
 Config:
   ./daemon.yaml                Optional. Loaded from the current directory if present.
 
+HTTP API:
+  POST /sessions               Start a new session. Body: {"prompt":"..."}. SSE stream.
+  POST /sessions/:id/turns     Resume an existing session. Body: {"prompt":"..."}. SSE stream.
+  GET  /sessions/:id/events    Tail the session's event stream (reattach after disconnect,
+                               or read history). SSE response. 404 if no stream is available.
+
 Example:
-  $ export AGENTD_TOKEN=$(agentd --print-token)
-  $ agentd --port 8080 &
-  $ curl -N -H "Authorization: Bearer $AGENTD_TOKEN" \\
+  $ export BUDD_TOKEN=$(budd --print-token)
+  $ budd --port 8080 &
+  $ curl -N -H "Authorization: Bearer $BUDD_TOKEN" \\
          -H "content-type: application/json" \\
          -d '{"prompt":"fix the auth bug"}' \\
-         http://localhost:8080/run
+         http://localhost:8080/sessions
 `,
   )
 }
@@ -81,11 +87,11 @@ function parseArgv(argv: string[]): ParsedFlags {
       case '--workdir':
         flags.workdir = next()
         break
-      case '--pre-start':
-        flags.preStart = next()
+      case '--pre-turn':
+        flags.preTurn = next()
         break
-      case '--post-end':
-        flags.postEnd = next()
+      case '--post-turn':
+        flags.postTurn = next()
         break
       case '--print-token':
         flags.printToken = true
@@ -117,11 +123,11 @@ async function main(): Promise<void> {
     return
   }
 
-  let base: AgentdConfig = {
+  let base: BuddConfig = {
     transport: 'http',
     port: 8080,
     runtime: 'docker',
-    image: 'zooid/agentd-claude:latest',
+    docker: { image: 'budd/claude-code:latest' },
     hooks: {},
   }
   if (existsSync('daemon.yaml')) {
@@ -129,15 +135,15 @@ async function main(): Promise<void> {
   }
   const config = mergeCliFlags(base, flags)
 
-  const token = process.env.AGENTD_TOKEN
+  const token = process.env.BUDD_TOKEN
   if (!token) {
-    console.error('AGENTD_TOKEN is required')
+    console.error('BUDD_TOKEN is required')
     process.exit(1)
   }
 
   const runtime = buildRuntime({
     runtime: config.runtime,
-    image: config.image,
+    docker: config.docker,
     workdir: config.workdir,
   })
   const runner = createDefaultSessionRunner({
@@ -147,7 +153,7 @@ async function main(): Promise<void> {
   const app = createApp({ runner, token })
 
   serve({ fetch: app.fetch, port: config.port }, (info) => {
-    console.log(`agentd listening on http://localhost:${info.port}`)
+    console.log(`budd listening on http://localhost:${info.port}`)
   })
 }
 
