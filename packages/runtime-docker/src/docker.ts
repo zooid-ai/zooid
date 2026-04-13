@@ -1,5 +1,6 @@
+import { homedir } from 'node:os'
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { Runtime, SpawnConfig } from '@zooid/agentd-core'
+import type { Runtime, SpawnConfig, HomeMount } from '@zooid/budd-core'
 
 /**
  * Default env allowlist for the Docker runtime. Only these host env vars
@@ -27,7 +28,7 @@ export const DEFAULT_DOCKER_ENV_ALLOWLIST: readonly string[] = [
 ]
 
 export interface DockerRuntimeOptions {
-  /** Image to run, e.g. `zooid/agentd-claude:latest`. */
+  /** Image to run, e.g. `budd/claude-code:latest`. */
   image: string
   /** Host directory to mount at /workspace inside the container. */
   workdir: string
@@ -37,6 +38,11 @@ export interface DockerRuntimeOptions {
    * the default; pass an explicit list to override.
    */
   envAllowlist?: readonly string[]
+  /**
+   * Override adapter-provided home mounts. When set, replaces the mounts
+   * from `SpawnConfig.homeMounts` entirely (daemon.yaml `docker.home_mounts`).
+   */
+  homeMountsOverride?: HomeMount[]
 }
 
 export interface BuildDockerArgsInput {
@@ -46,6 +52,11 @@ export interface BuildDockerArgsInput {
   workdir: string
   envAllowlist: readonly string[]
   hostEnv: Record<string, string | undefined>
+  homeMounts: HomeMount[]
+  /** $HOME on the host, used as source for home mount -v flags. */
+  hostHome: string
+  /** $HOME inside the container (node:20-slim runs as root → /root). */
+  containerHome: string
 }
 
 /**
@@ -59,6 +70,13 @@ export function buildDockerArgs(input: BuildDockerArgsInput): string[] {
   argv.push('-v', `${input.workdir}:/workspace`)
   argv.push('-w', '/workspace')
 
+  // Home-directory mounts for agent state persistence.
+  for (const mount of input.homeMounts) {
+    const src = `${input.hostHome}/${mount.path}`
+    const dst = `${input.containerHome}/${mount.path}`
+    argv.push('-v', `${src}:${dst}:${mount.mode}`)
+  }
+
   // Env passthrough — allowlist only, skip undefined values.
   for (const key of input.envAllowlist) {
     const value = input.hostEnv[key]
@@ -66,8 +84,10 @@ export function buildDockerArgs(input: BuildDockerArgsInput): string[] {
     argv.push('-e', `${key}=${value}`)
   }
 
+  // Override any image ENTRYPOINT so the adapter's command runs directly.
+  argv.push('--entrypoint', input.command)
   argv.push(input.image)
-  argv.push(input.command, ...input.args)
+  argv.push(...input.args)
   return argv
 }
 
@@ -98,6 +118,7 @@ export function mapDockerExitCode(
  * for LocalRuntime in the SessionRunner. The container gets:
  *
  *   - The configured workdir mounted at /workspace
+ *   - Agent home-directory paths mounted for state persistence
  *   - Only allowlisted host env vars forwarded via `-e`
  *   - `--rm` so the container disappears on exit
  *   - `-i` so stdin is wired up (chunkers in SessionRunner read stdout)
@@ -116,6 +137,7 @@ export class DockerRuntime implements Runtime {
       this.opts.envAllowlist && this.opts.envAllowlist.length > 0
         ? this.opts.envAllowlist
         : DEFAULT_DOCKER_ENV_ALLOWLIST
+    const homeMounts = this.opts.homeMountsOverride ?? config.homeMounts ?? []
     const argv = buildDockerArgs({
       image: this.opts.image,
       command: config.command,
@@ -123,6 +145,9 @@ export class DockerRuntime implements Runtime {
       workdir: this.opts.workdir,
       envAllowlist: allowlist,
       hostEnv: { ...process.env, ...(config.env ?? {}) },
+      homeMounts,
+      hostHome: homedir(),
+      containerHome: '/root',
     })
     return spawn('docker', argv, { stdio: ['ignore', 'pipe', 'pipe'] })
   }

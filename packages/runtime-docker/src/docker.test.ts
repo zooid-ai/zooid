@@ -2,20 +2,25 @@ import { describe, it, expect } from 'vitest'
 import { buildDockerArgs, mapDockerExitCode } from './docker.js'
 
 describe('buildDockerArgs', () => {
+  const baseInput = {
+    image: 'budd/claude-code:latest',
+    command: 'claude',
+    args: ['-p', 'fix bug', '--session-id', '01JQXYZ', '--output-format', 'stream-json'],
+    workdir: '/Users/alice/projects/myapp',
+    envAllowlist: ['ANTHROPIC_API_KEY', 'SESSION_ID', 'MESSAGE_TEXT'],
+    hostEnv: {
+      ANTHROPIC_API_KEY: 'sk-...',
+      SESSION_ID: '01JQXYZ',
+      MESSAGE_TEXT: 'fix bug',
+      IRRELEVANT: 'leave me out',
+    },
+    homeMounts: [],
+    hostHome: '/Users/alice',
+    containerHome: '/root',
+  }
+
   it('builds a docker run invocation with required flags', () => {
-    const argv = buildDockerArgs({
-      image: 'zooid/agentd-claude:latest',
-      command: 'claude',
-      args: ['-p', 'fix bug', '--session-id', '01JQXYZ', '--output-format', 'stream-json'],
-      workdir: '/Users/alice/projects/myapp',
-      envAllowlist: ['ANTHROPIC_API_KEY', 'SESSION_ID', 'MESSAGE_TEXT'],
-      hostEnv: {
-        ANTHROPIC_API_KEY: 'sk-...',
-        SESSION_ID: '01JQXYZ',
-        MESSAGE_TEXT: 'fix bug',
-        IRRELEVANT: 'leave me out',
-      },
-    })
+    const argv = buildDockerArgs(baseInput)
 
     // Required flags and order
     expect(argv[0]).toBe('run')
@@ -39,13 +44,17 @@ describe('buildDockerArgs', () => {
     expect(argv).toContain('MESSAGE_TEXT=fix bug')
     expect(argv.find((a) => a.startsWith('IRRELEVANT='))).toBeUndefined()
 
-    // Image comes after flags
-    expect(argv).toContain('zooid/agentd-claude:latest')
-    const imgIdx = argv.indexOf('zooid/agentd-claude:latest')
+    // --entrypoint overrides image ENTRYPOINT so adapter command runs directly
+    const epIdx = argv.indexOf('--entrypoint')
+    expect(epIdx).toBeGreaterThan(-1)
+    expect(argv[epIdx + 1]).toBe('claude')
 
-    // Command + args after image
+    // Image comes after --entrypoint <command>
+    expect(argv).toContain('budd/claude-code:latest')
+    const imgIdx = argv.indexOf('budd/claude-code:latest')
+
+    // Only args (not command) after image — command is in --entrypoint
     expect(argv.slice(imgIdx + 1)).toEqual([
-      'claude',
       '-p',
       'fix bug',
       '--session-id',
@@ -57,8 +66,7 @@ describe('buildDockerArgs', () => {
 
   it('drops env vars not in the allowlist even if they are set', () => {
     const argv = buildDockerArgs({
-      image: 'zooid/agentd-claude:latest',
-      command: 'claude',
+      ...baseInput,
       args: [],
       workdir: '/tmp',
       envAllowlist: ['ANTHROPIC_API_KEY'],
@@ -71,8 +79,7 @@ describe('buildDockerArgs', () => {
 
   it('omits env entries for allowlisted keys that are undefined', () => {
     const argv = buildDockerArgs({
-      image: 'zooid/agentd-claude:latest',
-      command: 'claude',
+      ...baseInput,
       args: [],
       workdir: '/tmp',
       envAllowlist: ['ANTHROPIC_API_KEY', 'CODEX_API_KEY'],
@@ -80,6 +87,59 @@ describe('buildDockerArgs', () => {
     })
     expect(argv).toContain('ANTHROPIC_API_KEY=sk-')
     expect(argv.find((a) => a.startsWith('CODEX_API_KEY='))).toBeUndefined()
+  })
+
+  it('generates -v flags for home mounts with correct mode', () => {
+    const argv = buildDockerArgs({
+      ...baseInput,
+      args: [],
+      workdir: '/tmp',
+      envAllowlist: [],
+      hostEnv: {},
+      homeMounts: [
+        { path: '.claude/settings.json', mode: 'ro' },
+        { path: '.claude/projects', mode: 'rw' },
+        { path: '.claude/memory', mode: 'rw' },
+      ],
+      hostHome: '/home/deploy',
+      containerHome: '/root',
+    })
+
+    expect(argv).toContain('/home/deploy/.claude/settings.json:/root/.claude/settings.json:ro')
+    expect(argv).toContain('/home/deploy/.claude/projects:/root/.claude/projects:rw')
+    expect(argv).toContain('/home/deploy/.claude/memory:/root/.claude/memory:rw')
+  })
+
+  it('places home mounts before env flags', () => {
+    const argv = buildDockerArgs({
+      ...baseInput,
+      args: [],
+      workdir: '/tmp',
+      envAllowlist: ['ANTHROPIC_API_KEY'],
+      hostEnv: { ANTHROPIC_API_KEY: 'sk-' },
+      homeMounts: [{ path: '.claude/projects', mode: 'rw' }],
+      hostHome: '/home/deploy',
+      containerHome: '/root',
+    })
+
+    const homeMountIdx = argv.indexOf('/home/deploy/.claude/projects:/root/.claude/projects:rw')
+    const envIdx = argv.indexOf('ANTHROPIC_API_KEY=sk-')
+    expect(homeMountIdx).toBeLessThan(envIdx)
+  })
+
+  it('handles empty homeMounts array', () => {
+    const argv = buildDockerArgs({
+      ...baseInput,
+      args: [],
+      workdir: '/tmp',
+      envAllowlist: [],
+      hostEnv: {},
+      homeMounts: [],
+    })
+    // Only workdir mount, no home mounts
+    const vFlags = argv.reduce((acc, a, i) => (a === '-v' ? [...acc, argv[i + 1]] : acc), [] as string[])
+    expect(vFlags).toHaveLength(1)
+    expect(vFlags[0]).toBe('/tmp:/workspace')
   })
 })
 

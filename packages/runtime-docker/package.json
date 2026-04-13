@@ -1,7 +1,7 @@
 {
-  "name": "@zooid/agentd-runtime-docker",
+  "name": "@zooid/budd-runtime-docker",
   "version": "0.0.1",
-  "description": "Docker runtime for agentd. Spawns the agent CLI inside a container with a workspace mount and an env allowlist.",
+  "description": "Docker runtime for budd. Spawns the agent CLI inside a container with a workspace mount and an env allowlist.",
   "type": "module",
   "license": "MIT",
   "main": "./src/index.ts",
@@ -13,6 +13,9 @@
     }
   },
   "files": ["dist", "src", "docker", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -24,7 +27,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@zooid/agentd-core": "workspace:*"
+    "@zooid/budd-core": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -20,11 +20,11 @@ runtime: local
     const config = loadConfig(`
 transport: http
 hooks:
-  pre_start: "git pull"
-  post_end: "git push"
+  pre_turn: "git pull"
+  post_turn: "git push"
 `)
-    expect(config.hooks.pre_start).toBe('git pull')
-    expect(config.hooks.post_end).toBe('git push')
+    expect(config.hooks.pre_turn).toBe('git pull')
+    expect(config.hooks.post_turn).toBe('git push')
   })
 
   it('defaults port to 8080', () => {
@@ -37,32 +37,78 @@ hooks:
     expect(config.runtime).toBe('docker')
   })
 
-  it('default image is zooid/agentd-claude:latest when runtime is docker', () => {
+  it('default image is budd/claude-code:latest when runtime is docker', () => {
     const config = loadConfig(`transport: http\nruntime: docker`)
-    expect(config.image).toBe('zooid/agentd-claude:latest')
+    expect(config.docker?.image).toBe('budd/claude-code:latest')
   })
 
   it('accepts runtime: docker', () => {
     const config = loadConfig(`transport: http\nruntime: docker`)
     expect(config.runtime).toBe('docker')
+    expect(config.docker).toBeDefined()
   })
 
-  it('parses image field when runtime is docker', () => {
+  it('parses docker.image', () => {
     const config = loadConfig(`
 transport: http
 runtime: docker
-image: zooid/agentd-claude:1.2.3
+docker:
+  image: budd/claude-code:1.2.3
 `)
-    expect(config.image).toBe('zooid/agentd-claude:1.2.3')
+    expect(config.docker?.image).toBe('budd/claude-code:1.2.3')
   })
 
-  it('image field is ignored when runtime is local', () => {
+  it('docker block is undefined when runtime is local', () => {
     const config = loadConfig(`
 transport: http
 runtime: local
-image: whatever
+docker:
+  image: whatever
 `)
-    expect(config.image).toBeUndefined()
+    expect(config.docker).toBeUndefined()
+  })
+
+  it('parses docker.home_mounts', () => {
+    const config = loadConfig(`
+transport: http
+runtime: docker
+docker:
+  home_mounts:
+    - path: .claude
+      mode: rw
+    - path: .codex/sessions
+      mode: ro
+`)
+    expect(config.docker?.home_mounts).toEqual([
+      { path: '.claude', mode: 'rw' },
+      { path: '.codex/sessions', mode: 'ro' },
+    ])
+  })
+
+  it('rejects invalid home_mounts mode', () => {
+    expect(() =>
+      loadConfig(`
+transport: http
+runtime: docker
+docker:
+  home_mounts:
+    - path: .claude
+      mode: exec
+`),
+    ).toThrow(/home_mounts\[\]\.mode must be "ro" or "rw"/)
+  })
+
+  it('rejects empty home_mounts path', () => {
+    expect(() =>
+      loadConfig(`
+transport: http
+runtime: docker
+docker:
+  home_mounts:
+    - path: ""
+      mode: rw
+`),
+    ).toThrow(/home_mounts\[\]\.path must be a non-empty string/)
   })
 
   it('rejects unknown transport', () => {
@@ -87,19 +133,19 @@ describe('mergeCliFlags', () => {
     transport: 'http' as const,
     port: 8080,
     runtime: 'local' as const,
-    hooks: {} as { pre_start?: string; post_end?: string },
+    hooks: {} as { pre_turn?: string; post_turn?: string },
   }
 
   it('CLI port overrides YAML port', () => {
     expect(mergeCliFlags(base, { port: 9090 }).port).toBe(9090)
   })
 
-  it('CLI pre-start overrides YAML pre-start', () => {
+  it('CLI pre-turn overrides YAML pre-turn', () => {
     const merged = mergeCliFlags(
-      { ...base, hooks: { pre_start: 'echo yaml' } },
-      { preStart: 'echo cli' },
+      { ...base, hooks: { pre_turn: 'echo yaml' } },
+      { preTurn: 'echo cli' },
     )
-    expect(merged.hooks.pre_start).toBe('echo cli')
+    expect(merged.hooks.pre_turn).toBe('echo cli')
   })
 
   it('absent CLI flags leave YAML values intact', () => {
@@ -108,7 +154,32 @@ describe('mergeCliFlags', () => {
   })
 
   it('accepts --runtime docker from CLI flags', () => {
-    expect(mergeCliFlags(base, { runtime: 'docker' }).runtime).toBe('docker')
+    const merged = mergeCliFlags(base, { runtime: 'docker' })
+    expect(merged.runtime).toBe('docker')
+    expect(merged.docker?.image).toBe('budd/claude-code:latest')
+  })
+
+  it('CLI --image overrides docker.image', () => {
+    const dockerBase = {
+      ...base,
+      runtime: 'docker' as const,
+      docker: { image: 'budd/claude-code:1.0.0' },
+    }
+    const merged = mergeCliFlags(dockerBase, { image: 'custom:2.0' })
+    expect(merged.docker?.image).toBe('custom:2.0')
+  })
+
+  it('preserves home_mounts from base config through merge', () => {
+    const dockerBase = {
+      ...base,
+      runtime: 'docker' as const,
+      docker: {
+        image: 'budd/claude-code:latest',
+        home_mounts: [{ path: '.claude', mode: 'rw' as const }],
+      },
+    }
+    const merged = mergeCliFlags(dockerBase, {})
+    expect(merged.docker?.home_mounts).toEqual([{ path: '.claude', mode: 'rw' }])
   })
 
   it('rejects unknown --runtime values from CLI flags', () => {

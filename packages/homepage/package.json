@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Acme marketing landing page — example workspace for the agentd triage-agent demo.",
+  "description": "Acme marketing landing page — example workspace for the budd triage-agent demo.",
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",

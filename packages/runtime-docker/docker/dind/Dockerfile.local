@@ -1,0 +1,86 @@
+# budd DinD (rootless) — local-source build for end-to-end testing.
+#
+# Bundles a rootless Docker daemon + budd + Claude Code CLI into one
+# image. budd runs as PID 1 with `--runtime docker`, spawning agent
+# containers inside its own nested daemon. No --privileged needed.
+#
+# Build context MUST be the budd repo root:
+#
+#   docker build \
+#     -f packages/runtime-docker/docker/dind/Dockerfile.local \
+#     -t budd/dind:local .
+#
+# Pre-bake an agent image (optional):
+#
+#   docker save triage-agent:local -o images/triage-agent.tar
+#   docker build \
+#     -f packages/runtime-docker/docker/dind/Dockerfile.local \
+#     -t budd/dind:local .
+#
+# Run:
+#
+#   docker run --rm -p 8080:8080 \
+#     -e BUDD_TOKEN=$(openssl rand -hex 32) \
+#     -e ANTHROPIC_API_KEY=sk-... \
+#     -v "$PWD:/workspace" \
+#     budd/dind:local \
+#     --runtime docker --image triage-agent:local
+
+# ─── Stage 1: build budd from local source ────────────────────────────────
+FROM node:20-slim AS builder
+
+RUN corepack enable && corepack prepare pnpm@10.7.0 --activate
+
+WORKDIR /src
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
+COPY packages/core/package.json              packages/core/
+COPY packages/adapter-claude/package.json    packages/adapter-claude/
+COPY packages/adapter-codex/package.json     packages/adapter-codex/
+COPY packages/runtime-local/package.json     packages/runtime-local/
+COPY packages/runtime-docker/package.json    packages/runtime-docker/
+COPY packages/transport-http/package.json    packages/transport-http/
+COPY packages/cli/package.json               packages/cli/
+
+RUN pnpm install --frozen-lockfile
+
+COPY packages/core              packages/core
+COPY packages/adapter-claude    packages/adapter-claude
+COPY packages/adapter-codex     packages/adapter-codex
+COPY packages/runtime-local     packages/runtime-local
+COPY packages/runtime-docker    packages/runtime-docker
+COPY packages/transport-http    packages/transport-http
+COPY packages/cli               packages/cli
+
+RUN pnpm -r build
+RUN pnpm --filter=@zooid/budd deploy --prod --legacy /out
+
+# ─── Stage 2: rootless DinD runtime ─────────────────────────────────────────
+FROM docker:dind-rootless
+
+# Install Node.js as root, then switch back to rootless.
+USER root
+RUN apk add --no-cache nodejs npm git
+
+ARG CLAUDE_CODE_VERSION=latest
+RUN npm i -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+USER rootless
+
+# Copy built budd.
+COPY --from=builder /out /opt/budd
+
+# Pre-baked agent image tars. Place .tar files in images/ before building.
+# If the directory doesn't exist, the COPY is skipped.
+COPY --chown=rootless images/*.tar /images/
+
+# Our entrypoint: start dockerd → load images → exec budd.
+COPY packages/runtime-docker/docker/dind/entrypoint-budd.sh /usr/local/bin/
+
+WORKDIR /workspace
+EXPOSE 8080
+
+ENTRYPOINT ["entrypoint-budd.sh"]
+
+LABEL org.zooid.base="dind-rootless" \
+      org.zooid.description="budd + rootless Docker daemon + Claude Code CLI"

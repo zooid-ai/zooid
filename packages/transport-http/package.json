@@ -1,7 +1,7 @@
 {
-  "name": "@zooid/agentd-transport-http",
+  "name": "@zooid/budd-transport-http",
   "version": "0.0.1",
-  "description": "HTTP transport for agentd. POST /run accepts an HMAC-signed prompt and streams SessionEvents back as SSE.",
+  "description": "HTTP transport for budd. POST /sessions to start a session, POST /sessions/:id/turns to resume, GET /sessions/:id/events to tail. Bearer-auth, SSE responses.",
   "type": "module",
   "license": "MIT",
   "main": "./src/index.ts",
@@ -13,6 +13,9 @@
     }
   },
   "files": ["dist", "src", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -23,13 +26,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@zooid/agentd-core": "workspace:*",
+    "@zooid/budd-core": "workspace:^",
     "hono": "^4.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@zooid/agentd-adapter-claude": "workspace:*",
-    "@zooid/agentd-runtime-local": "workspace:*",
+    "@zooid/budd-adapter-claude": "workspace:^",
+    "@zooid/budd-runtime-local": "workspace:^",
     "tsup": "^8.5.1",
     "typescript": "^5.5.0",
     "vitest": "^3.2.0"

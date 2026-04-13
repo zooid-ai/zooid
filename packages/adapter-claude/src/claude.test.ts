@@ -23,6 +23,7 @@ describe('claudeAdapter.spawn', () => {
       '01JQXYZ',
       '--output-format',
       'stream-json',
+      '--verbose',
     ])
   })
 
@@ -39,7 +40,38 @@ describe('claudeAdapter.spawn', () => {
       '01JQXYZ',
       '--output-format',
       'stream-json',
+      '--verbose',
     ])
+  })
+
+  it('throws if session_id is missing (claude is preassigned-only)', () => {
+    expect(() =>
+      claudeAdapter.spawn({
+        prompt: 'x',
+        session_id: undefined,
+        resume: false,
+      }),
+    ).toThrow(/session_id is required/)
+  })
+})
+
+describe('claudeAdapter.prepareNewSession', () => {
+  it('returns a preassigned UUID — Claude Code requires UUIDs for --session-id', () => {
+    const plan = claudeAdapter.prepareNewSession()
+    expect(plan.strategy).toBe('preassigned')
+    if (plan.strategy !== 'preassigned') return
+    expect(plan.session_id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    )
+  })
+
+  it('returns a different id each call', () => {
+    const a = claudeAdapter.prepareNewSession()
+    const b = claudeAdapter.prepareNewSession()
+    if (a.strategy !== 'preassigned' || b.strategy !== 'preassigned') {
+      throw new Error('expected preassigned')
+    }
+    expect(a.session_id).not.toBe(b.session_id)
   })
 })
 
@@ -50,21 +82,5 @@ describe('claudeAdapter.isAvailable', () => {
 
   it('returns false when claude is not on PATH', () => {
     expect(claudeAdapter.isAvailable('/nonexistent')).toBe(false)
-  })
-})
-
-describe('claudeAdapter.parseOutput', () => {
-  it('parses a JSON line into kind/content', () => {
-    const result = claudeAdapter.parseOutput!(
-      '{"type":"assistant","content":"hi"}',
-    )
-    expect(result.kind).toBe('assistant')
-    expect((result.content as { content: string }).content).toBe('hi')
-  })
-
-  it('falls back to raw for non-JSON lines', () => {
-    const result = claudeAdapter.parseOutput!('not json')
-    expect(result.kind).toBe('raw')
-    expect(result.content).toBe('not json')
   })
 })

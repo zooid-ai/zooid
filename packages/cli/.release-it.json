@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "before:init": "pnpm -r build && pnpm -r test"
+  },
+  "npm": {
+    "publish": true,
+    "publishArgs": ["--access public"]
+  },
+  "git": {
+    "commitMessage": "chore: release budd v${version}",
+    "tagName": "budd-v${version}",
+    "push": false,
+    "requireCleanWorkingDir": false
+  },
+  "github": {
+    "release": false
+  }
+}

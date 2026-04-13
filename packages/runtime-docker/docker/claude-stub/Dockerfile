@@ -1,8 +1,8 @@
-# Test-only stub image for the agentd Docker runtime e2e suite.
+# Test-only stub image for the budd Docker runtime e2e suite.
 #
 # Provides a tiny `/usr/local/bin/claude` script that mimics
-# `claude --output-format stream-json`. The host runs agentd with
-# --runtime docker --image zooid/agentd-claude-stub:test, and the
+# `claude --output-format stream-json`. The host runs budd with
+# --runtime docker --image budd/claude-code-stub:test, and the
 # container exec'd by docker run is just this script.
 #
 # Built locally by tests/e2e/docker.e2e.test.ts; never published.

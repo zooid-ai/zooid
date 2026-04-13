@@ -1,13 +1,13 @@
-name: Publish agentd image
+name: Publish budd image
 
 on:
   push:
     tags:
-      - 'agentd-v*'
+      - 'budd-v*'
   workflow_dispatch:
     inputs:
       version:
-        description: 'agentd version to bake into the image (npm dist-tag or version)'
+        description: 'budd version to bake into the image (npm dist-tag or version)'
         required: true
         default: 'latest'
 
@@ -23,7 +23,7 @@ jobs:
           if [ -n "${{ github.event.inputs.version }}" ]; then
             echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
           else
-            echo "version=${GITHUB_REF_NAME#agentd-v}" >> "$GITHUB_OUTPUT"
+            echo "version=${GITHUB_REF_NAME#budd-v}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up QEMU
@@ -45,7 +45,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: |
-            AGENTD_VERSION=${{ steps.version.outputs.version }}
+            BUDD_VERSION=${{ steps.version.outputs.version }}
           tags: |
-            zooid/agentd-claude:${{ steps.version.outputs.version }}
-            zooid/agentd-claude:latest
+            budd/claude-code:${{ steps.version.outputs.version }}
+            budd/claude-code:latest

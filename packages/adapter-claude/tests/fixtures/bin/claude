@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stub claude binary for agentd tests.
+# Stub claude binary for budd tests.
 # Honors env vars:
 #   STUB_EXIT_CODE   — exit with this code (default 0)
 #   STUB_STDERR      — write this to stderr before exit

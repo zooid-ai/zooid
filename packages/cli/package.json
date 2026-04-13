@@ -1,6 +1,6 @@
 {
   "name": "@zooid/budd",
-  "version": "0.0.3",
+  "version": "0.0.1",
   "description": "budd — dockerized daemon for running CLI coding agents (Claude Code, Codex, ...) behind a simple API.",
   "type": "module",
   "license": "MIT",
@@ -21,6 +21,9 @@
     "src",
     "README.md"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -33,12 +36,12 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
-    "@zooid/budd-adapter-claude": "workspace:*",
-    "@zooid/budd-adapter-codex": "workspace:*",
-    "@zooid/budd-core": "workspace:*",
-    "@zooid/budd-runtime-docker": "workspace:*",
-    "@zooid/budd-runtime-local": "workspace:*",
-    "@zooid/budd-transport-http": "workspace:*",
+    "@zooid/budd-adapter-claude": "workspace:^",
+    "@zooid/budd-adapter-codex": "workspace:^",
+    "@zooid/budd-core": "workspace:^",
+    "@zooid/budd-runtime-docker": "workspace:^",
+    "@zooid/budd-runtime-local": "workspace:^",
+    "@zooid/budd-transport-http": "workspace:^",
     "hono": "^4.6.0",
     "yaml": "^2.5.0"
   },

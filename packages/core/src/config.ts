@@ -1,9 +1,27 @@
 import { parse } from 'yaml'
-import type { AgentdConfig, CliFlags } from './types.js'
+import type { BuddConfig, CliFlags, DockerConfig, HomeMount } from './types.js'
 
-const DEFAULT_DOCKER_IMAGE = 'zooid/agentd-claude:latest'
+export const DEFAULT_DOCKER_IMAGE = 'budd/claude-code:latest'
 
-export function loadConfig(yamlText: string): AgentdConfig {
+function parseHomeMounts(raw: unknown): HomeMount[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const mounts: HomeMount[] = []
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const path = entry.path
+    const mode = entry.mode
+    if (typeof path !== 'string' || path.length === 0) {
+      throw new Error(`home_mounts[].path must be a non-empty string`)
+    }
+    if (mode !== 'ro' && mode !== 'rw') {
+      throw new Error(`home_mounts[].mode must be "ro" or "rw" (got "${mode}")`)
+    }
+    mounts.push({ path, mode })
+  }
+  return mounts.length > 0 ? mounts : undefined
+}
+
+export function loadConfig(yamlText: string): BuddConfig {
   const raw = parse(yamlText) ?? {}
   if (typeof raw !== 'object' || raw === null) {
     throw new Error('daemon.yaml must be a YAML object')
@@ -29,26 +47,33 @@ export function loadConfig(yamlText: string): AgentdConfig {
     throw new Error(`port must be an integer (got ${JSON.stringify(port)})`)
   }
 
-  const hooks: AgentdConfig['hooks'] = {}
+  const hooks: BuddConfig['hooks'] = {}
   if (raw.hooks && typeof raw.hooks === 'object') {
-    if (typeof raw.hooks.pre_start === 'string') hooks.pre_start = raw.hooks.pre_start
-    if (typeof raw.hooks.post_end === 'string') hooks.post_end = raw.hooks.post_end
+    if (typeof raw.hooks.pre_turn === 'string') hooks.pre_turn = raw.hooks.pre_turn
+    if (typeof raw.hooks.post_turn === 'string') hooks.post_turn = raw.hooks.post_turn
   }
 
-  const config: AgentdConfig = { transport, port, runtime, hooks }
+  const config: BuddConfig = { transport, port, runtime, hooks }
+
   if (runtime === 'docker') {
-    config.image =
-      typeof raw.image === 'string' && raw.image.length > 0
-        ? raw.image
+    const rawDocker = raw.docker && typeof raw.docker === 'object' ? raw.docker : {}
+    const image =
+      typeof rawDocker.image === 'string' && rawDocker.image.length > 0
+        ? rawDocker.image
         : DEFAULT_DOCKER_IMAGE
+    const docker: DockerConfig = { image }
+    const homeMounts = parseHomeMounts(rawDocker.home_mounts)
+    if (homeMounts) docker.home_mounts = homeMounts
+    config.docker = docker
   }
+
   if (typeof raw.workdir === 'string' && raw.workdir.length > 0) {
     config.workdir = raw.workdir
   }
   return config
 }
 
-export function mergeCliFlags(base: AgentdConfig, flags: CliFlags): AgentdConfig {
+export function mergeCliFlags(base: BuddConfig, flags: CliFlags): BuddConfig {
   if (flags.transport !== undefined && flags.transport !== 'http') {
     throw new Error(
       `transport must be "http" (got "${flags.transport}"). Slack and Zooid transports are not in the MVP.`,
@@ -66,21 +91,25 @@ export function mergeCliFlags(base: AgentdConfig, flags: CliFlags): AgentdConfig
     throw new Error(`port must be an integer (got ${JSON.stringify(flags.port)})`)
   }
   const runtime = runtimeFlag ?? base.runtime
-  const merged: AgentdConfig = {
+  const merged: BuddConfig = {
     transport: 'http',
     port: flags.port ?? base.port,
     runtime,
     hooks: { ...base.hooks },
   }
   if (runtime === 'docker') {
-    merged.image = flags.image ?? base.image ?? DEFAULT_DOCKER_IMAGE
+    const baseDocker = base.docker ?? { image: DEFAULT_DOCKER_IMAGE }
+    merged.docker = {
+      image: flags.image ?? baseDocker.image,
+      ...(baseDocker.home_mounts ? { home_mounts: baseDocker.home_mounts } : {}),
+    }
   }
   if (flags.workdir !== undefined) {
     merged.workdir = flags.workdir
   } else if (base.workdir !== undefined) {
     merged.workdir = base.workdir
   }
-  if (flags.preStart !== undefined) merged.hooks.pre_start = flags.preStart
-  if (flags.postEnd !== undefined) merged.hooks.post_end = flags.postEnd
+  if (flags.preTurn !== undefined) merged.hooks.pre_turn = flags.preTurn
+  if (flags.postTurn !== undefined) merged.hooks.post_turn = flags.postTurn
   return merged
 }

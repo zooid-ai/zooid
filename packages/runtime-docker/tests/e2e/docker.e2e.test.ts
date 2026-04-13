@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 
-const STUB_IMAGE = 'zooid/agentd-claude-stub:test'
+const STUB_IMAGE = 'budd/claude-code-stub:test'
 const PKG_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const CLI_BIN = resolve(PKG_DIR, '../cli/dist/bin.js')
 
@@ -18,7 +18,7 @@ async function waitForHealthy(port: number, attempts = 100): Promise<void> {
   for (let i = 0; i < attempts; i++) {
     try {
       // Cheap probe — unauthenticated POST returns 401 once the server is up.
-      const res = await fetch(`http://localhost:${port}/run`, {
+      const res = await fetch(`http://localhost:${port}/sessions`, {
         method: 'POST',
         body: '{}',
       })
@@ -28,10 +28,10 @@ async function waitForHealthy(port: number, attempts = 100): Promise<void> {
     }
     await new Promise((r) => setTimeout(r, 100))
   }
-  throw new Error(`agentd on port ${port} did not become healthy`)
+  throw new Error(`budd on port ${port} did not become healthy`)
 }
 
-async function startAgentd(opts: {
+async function startBudd(opts: {
   port: number
   token: string
   workdir: string
@@ -39,7 +39,7 @@ async function startAgentd(opts: {
 }): Promise<ChildProcess> {
   if (!existsSync(CLI_BIN)) {
     throw new Error(
-      `agentd CLI not built at ${CLI_BIN} — run \`pnpm -C packages/cli build\` first`,
+      `budd CLI not built at ${CLI_BIN} — run \`pnpm -C packages/cli build\` first`,
     )
   }
   const child = spawn(
@@ -59,7 +59,7 @@ async function startAgentd(opts: {
       cwd: opts.workdir,
       env: {
         ...process.env,
-        AGENTD_TOKEN: opts.token,
+        BUDD_TOKEN: opts.token,
         ...opts.extraEnv,
       },
       stdio: ['ignore', 'inherit', 'inherit'],
@@ -101,16 +101,16 @@ afterAll(() => {
   spawnSync('docker', ['rmi', '-f', STUB_IMAGE], { stdio: 'ignore' })
 })
 
-describe('agentd --runtime docker (e2e)', () => {
+describe('budd --runtime docker (e2e)', () => {
   it('runs a session inside the container and streams SSE back', async () => {
-    const workdir = mkdtempSync(join(tmpdir(), 'agentd-e2e-'))
+    const workdir = mkdtempSync(join(tmpdir(), 'budd-e2e-'))
     const port = 8201
     const token = makeToken()
 
-    const agentd = await startAgentd({ port, token, workdir })
+    const budd = await startBudd({ port, token, workdir })
     try {
       const body = JSON.stringify({ prompt: 'fix the auth bug' })
-      const res = await fetch(`http://localhost:${port}/run`, {
+      const res = await fetch(`http://localhost:${port}/sessions`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -125,23 +125,24 @@ describe('agentd --runtime docker (e2e)', () => {
       const text = await res.text()
       const frames = parseSseFrames(text)
 
-      expect(frames[0]?.type).toBe('session.started')
+      expect(frames[0]?.type).toBe('session.start')
+      expect(frames[1]?.type).toBe('turn.start')
       const ended = frames[frames.length - 1]
-      expect(ended?.type).toBe('session.ended')
+      expect(ended?.type).toBe('turn.end')
       expect(ended?.exit_code).toBe(0)
       expect(frames.some((f) => f.type === 'stdout')).toBe(true)
     } finally {
-      agentd.kill('SIGTERM')
+      budd.kill('SIGTERM')
       rmSync(workdir, { recursive: true, force: true })
     }
   })
 
   it('non-zero container exit propagates', async () => {
-    const workdir = mkdtempSync(join(tmpdir(), 'agentd-e2e-'))
+    const workdir = mkdtempSync(join(tmpdir(), 'budd-e2e-'))
     const port = 8202
     const token = makeToken()
 
-    const agentd = await startAgentd({
+    const budd = await startBudd({
       port,
       token,
       workdir,
@@ -151,7 +152,7 @@ describe('agentd --runtime docker (e2e)', () => {
     })
     try {
       const body = JSON.stringify({ prompt: 'whatever' })
-      const res = await fetch(`http://localhost:${port}/run`, {
+      const res = await fetch(`http://localhost:${port}/sessions`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -162,20 +163,20 @@ describe('agentd --runtime docker (e2e)', () => {
       const text = await res.text()
       const frames = parseSseFrames(text)
       const ended = frames[frames.length - 1]
-      expect(ended?.type).toBe('session.ended')
+      expect(ended?.type).toBe('turn.end')
       expect(ended?.exit_code).toBe(2)
     } finally {
-      agentd.kill('SIGTERM')
+      budd.kill('SIGTERM')
       rmSync(workdir, { recursive: true, force: true })
     }
   })
 
   it('env leakage: host env vars not in the allowlist are not visible inside the container', async () => {
-    const workdir = mkdtempSync(join(tmpdir(), 'agentd-e2e-'))
+    const workdir = mkdtempSync(join(tmpdir(), 'budd-e2e-'))
     const port = 8203
     const token = makeToken()
 
-    const agentd = await startAgentd({
+    const budd = await startBudd({
       port,
       token,
       workdir,
@@ -186,7 +187,7 @@ describe('agentd --runtime docker (e2e)', () => {
     })
     try {
       const body = JSON.stringify({ prompt: 'whatever' })
-      const res = await fetch(`http://localhost:${port}/run`, {
+      const res = await fetch(`http://localhost:${port}/sessions`, {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -197,7 +198,7 @@ describe('agentd --runtime docker (e2e)', () => {
       const text = await res.text()
       expect(text).not.toContain('should-not-leak')
     } finally {
-      agentd.kill('SIGTERM')
+      budd.kill('SIGTERM')
       rmSync(workdir, { recursive: true, force: true })
     }
   })

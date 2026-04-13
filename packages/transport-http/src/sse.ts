@@ -1,4 +1,4 @@
-import type { SessionEvent } from '@zooid/agentd-core'
+import type { SessionEvent } from '@zooid/budd-core'
 
 export function serializeEvent(event: SessionEvent): string {
   return `data: ${JSON.stringify(event)}\n\n`

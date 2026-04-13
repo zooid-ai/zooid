@@ -12,10 +12,14 @@ export { detectAdapter } from './adapters/registry.js'
 export { loadConfig, mergeCliFlags } from './config.js'
 export type {
   SessionEvent,
+  HomeMount,
   SpawnConfig,
   Runtime,
   AgentAdapter,
-  AgentdConfig,
+  SessionIdPlan,
+  ParsedLine,
+  DockerConfig,
+  BuddConfig,
   CliFlags,
   Transport,
   InboundMessage,

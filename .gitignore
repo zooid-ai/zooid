@@ -4,3 +4,9 @@ dist
 .DS_Store
 .vitest-cache
 coverage
+.env
+.env.*
+!.env.example
+
+# Pre-baked Docker image tars (built locally, not committed)
+images/

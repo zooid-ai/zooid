@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stub `claude` binary for agentd e2e tests.
+# Stub `claude` binary for budd e2e tests.
 #
 # Behavior:
 #   - Echoes a couple of fixed JSONL lines to stdout, mimicking real

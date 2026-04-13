@@ -1,7 +1,7 @@
 {
-  "name": "@zooid/agentd-runtime-local",
+  "name": "@zooid/budd-runtime-local",
   "version": "0.0.1",
-  "description": "Local (host machine) runtime for agentd. Spawns the agent CLI directly via node:child_process.",
+  "description": "Local (host machine) runtime for budd. Spawns the agent CLI directly via node:child_process.",
   "type": "module",
   "license": "MIT",
   "main": "./src/index.ts",
@@ -13,6 +13,9 @@
     }
   },
   "files": ["dist", "src", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -23,7 +26,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@zooid/agentd-core": "workspace:*"
+    "@zooid/budd-core": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

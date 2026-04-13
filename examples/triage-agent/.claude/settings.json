@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "defaultMode": "dontAsk",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Edit(/tickets/**)",
+      "Write(/tickets/**)"
+    ],
+    "deny": [
+      "Bash",
+      "Edit(/CLAUDE.md)",
+      "Edit(/daemon.yaml)",
+      "Edit(/README.md)"
+    ]
+  }
+}

@@ -1,7 +1,7 @@
 {
-  "name": "@zooid/agentd-adapter-claude",
+  "name": "@zooid/budd-adapter-claude",
   "version": "0.0.1",
-  "description": "Claude Code adapter for agentd. Detects the `claude` binary on PATH and builds start/resume invocations.",
+  "description": "Claude Code adapter for budd. Detects the `claude` binary on PATH and builds start/resume invocations.",
   "type": "module",
   "license": "MIT",
   "main": "./src/index.ts",
@@ -13,6 +13,9 @@
     }
   },
   "files": ["dist", "src", "tests/fixtures", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -23,7 +26,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@zooid/agentd-core": "workspace:*"
+    "@zooid/budd-core": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
