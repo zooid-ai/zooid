@@ -21,27 +21,44 @@ export type SessionEvent =
   | { type: 'turn.end'; exit_code: number; reason?: string }
 
 /**
- * A directory (or file) under `$HOME` to mount into the container.
- * Used by the Docker runtime to persist agent state across sessions.
+ * An extra bind mount a user declares in `agents.*.docker.mounts.extra[]`.
+ * The Docker runtime emits each as a `-v path:target:mode` flag. Only
+ * consumed by `DockerRuntime.spawn`; `LocalRuntime` ignores it.
  */
-export interface HomeMount {
-  /** Path relative to $HOME, e.g. '.claude/projects' or '.codex/sessions'. */
+export interface ExtraMount {
+  /** Host-side source path. Relative paths are resolved against the
+   *  daemon.yaml directory by `buildRunnersFromConfig`. */
   path: string
+  /** Container-side target path. */
+  target: string
   mode: 'ro' | 'rw'
 }
 
 /**
  * Description of a process to spawn. Runtimes consume this and return
- * a ChildProcess; adapters produce it.
+ * a ChildProcess; adapters produce it. The mount-related fields are
+ * populated by `SessionRunner` from the per-agent adapter + daemon.yaml
+ * overrides; `DockerRuntime.spawn` turns them into `-v` flags, and
+ * `LocalRuntime` ignores them all.
  */
 export interface SpawnConfig {
   command: string
   args: string[]
   env?: Record<string, string>
   cwd?: string
-  /** Home-directory mounts the adapter needs persisted. Docker runtime uses
-   *  these to generate `-v` flags; local runtime ignores them. */
-  homeMounts?: HomeMount[]
+  /** Workspace-relative paths the adapter wants mounted RO on top of the
+   *  RW workspace bind. */
+  workspaceReadOnly?: string[]
+  /** Subtractive override from daemon.yaml: disable adapter-declared
+   *  workspaceReadOnly entries by name. */
+  workspaceReadOnlyDisable?: string[]
+  /** $HOME-relative file paths to mount RO when present on the host. */
+  homeReadOnly?: string[]
+  /** $HOME-relative directory for the adapter's session state; runtime
+   *  `mkdir -p`'s the host path and bind-mounts it RW. */
+  sessionStateDir?: string
+  /** User-declared extra mounts from `agents.*.docker.mounts.extra[]`. */
+  extraMounts?: ExtraMount[]
 }
 
 /**
@@ -95,12 +112,19 @@ export interface AgentAdapter {
   isAvailable(pathOverride?: string): boolean
   /** Called once per *new* session (skipped on resume). */
   prepareNewSession(): SessionIdPlan
-  /**
-   * Home-directory mounts the agent needs persisted across container runs.
-   * The Docker runtime turns these into `-v` flags; daemon.yaml `docker.home_mounts`
-   * overrides them entirely when present. Local runtime ignores them.
-   */
-  homeMounts?: HomeMount[]
+  /** Workspace-relative paths to mount RO on top of the RW workspace bind.
+   *  When the path exists on the host, the runtime adds a later `-v` flag
+   *  that overrides the RW bind for that subpath only. Both files and
+   *  directories are supported. */
+  workspaceReadOnly?: string[]
+  /** $HOME-relative file paths to mount RO when present on the host. */
+  homeReadOnly?: string[]
+  /** $HOME-relative directory for the adapter's session state (JSONL files,
+   *  memory entries, etc.). Takes the container-side workdir (e.g. "/workspace")
+   *  so the adapter can compute path-scoped subdirs like claude's encoded-cwd.
+   *  Runtime `mkdir -p`'s the host path and bind-mounts it RW.
+   *  If omitted, no session-state mount is added. */
+  sessionStateDir?(containerWorkdir: string): string
   spawn(opts: {
     prompt: string
     /** Undefined on a new session for `deferred` adapters. */
@@ -179,17 +203,33 @@ export interface Transport {
 
 /**
  * Docker-specific configuration, nested under `docker:` in daemon.yaml.
- * Ignored when `runtime: local`.
+ * Ignored when `runtime: local`. Daemon-wide `home_mounts` is gone — use
+ * per-adapter `homeReadOnly` / `sessionStateDir` + per-agent
+ * `docker.mounts.extra[]` instead.
  */
 export interface DockerConfig {
-  image: string
-  /** Override adapter-provided home mounts. When set, replaces adapter defaults entirely. */
-  home_mounts?: HomeMount[]
+  /** Daemon-wide default image. Per-agent `docker.image` takes precedence. */
+  image?: string
+}
+
+/**
+ * Per-agent docker block inside a multi-agent daemon.yaml. Rejected at
+ * parse time when top-level `runtime !== 'docker'`.
+ */
+export interface AgentDockerConfig {
+  /** Image for this agent. Optional; inherits top-level `docker.image`. */
+  image?: string
+  mounts?: {
+    extra?: ExtraMount[]
+    /** Subtractive override: disable adapter-declared workspaceReadOnly entries. */
+    workspace_readonly_disable?: string[]
+  }
 }
 
 /**
  * Per-agent config inside a multi-agent daemon.yaml. Each agent has its own
- * workspace and hooks; runtime + image + adapter are shared daemon-wide.
+ * workspace, hooks, and (docker runtime only) its own adapter + image +
+ * extra mounts.
  */
 export interface AgentConfig {
   /** Routing name. Must match /^[a-z][a-z0-9-]{0,31}$/ */
@@ -204,6 +244,10 @@ export interface AgentConfig {
     pre_turn?: string
     post_turn?: string
   }
+  /** Adapter name. Optional; defaults to the first registered adapter. */
+  adapter?: string
+  /** Docker-only block. Rejected at parse time when runtime !== 'docker'. */
+  docker?: AgentDockerConfig
 }
 
 /**

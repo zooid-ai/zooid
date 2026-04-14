@@ -84,3 +84,20 @@ describe('claudeAdapter.isAvailable', () => {
     expect(claudeAdapter.isAvailable('/nonexistent')).toBe(false)
   })
 })
+
+describe('claudeAdapter mount defaults', () => {
+  it('declares workspaceReadOnly for CLAUDE.md and .claude', () => {
+    expect(claudeAdapter.workspaceReadOnly).toEqual(['CLAUDE.md', '.claude'])
+  })
+  it('declares homeReadOnly for .claude/settings.json', () => {
+    expect(claudeAdapter.homeReadOnly).toEqual(['.claude/settings.json'])
+  })
+  it('sessionStateDir encodes the container workdir path', () => {
+    expect(claudeAdapter.sessionStateDir?.('/workspace')).toBe(
+      '.claude/projects/-workspace',
+    )
+    expect(claudeAdapter.sessionStateDir?.('/workspace/sub')).toBe(
+      '.claude/projects/-workspace-sub',
+    )
+  })
+})

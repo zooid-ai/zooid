@@ -91,56 +91,20 @@ agents:
     expect(config.docker).toBeUndefined()
   })
 
-  it('parses docker.home_mounts', () => {
-    const config = loadConfig(`
-transport: http
-runtime: docker
-docker:
-  home_mounts:
-    - path: .claude
-      mode: rw
-    - path: .codex/sessions
-      mode: ro
-agents:
-  qa:
-    workdir: ./qa
-`)
-    expect(config.docker?.home_mounts).toEqual([
-      { path: '.claude', mode: 'rw' },
-      { path: '.codex/sessions', mode: 'ro' },
-    ])
-  })
-
-  it('rejects invalid home_mounts mode', () => {
+  it('rejects daemon-wide docker.home_mounts with a migration pointer', () => {
     expect(() =>
       loadConfig(`
 transport: http
 runtime: docker
 docker:
+  image: budd/claude-code:latest
   home_mounts:
-    - path: .claude
-      mode: exec
+    - { path: .claude/projects, mode: rw }
 agents:
   qa:
     workdir: ./qa
 `),
-    ).toThrow(/home_mounts\[\]\.mode must be "ro" or "rw"/)
-  })
-
-  it('rejects empty home_mounts path', () => {
-    expect(() =>
-      loadConfig(`
-transport: http
-runtime: docker
-docker:
-  home_mounts:
-    - path: ""
-      mode: rw
-agents:
-  qa:
-    workdir: ./qa
-`),
-    ).toThrow(/home_mounts\[\]\.path must be a non-empty string/)
+    ).toThrow(/docker\.home_mounts is removed/i)
   })
 
   it('rejects unknown transport', () => {
@@ -307,6 +271,128 @@ agents:
   })
 })
 
+describe('loadConfig — per-agent adapter + docker block', () => {
+  it('parses per-agent adapter', () => {
+    const config = loadConfig(`
+transport: http
+runtime: docker
+docker: { image: budd/claude:latest }
+agents:
+  qa:
+    workdir: ./qa
+  ship:
+    workdir: ./ship
+    adapter: codex
+    docker:
+      image: budd/codex:latest
+`)
+    expect(config.agents.qa.adapter).toBeUndefined()
+    expect(config.agents.ship.adapter).toBe('codex')
+    expect(config.agents.qa.docker?.image).toBeUndefined()
+    expect(config.agents.ship.docker?.image).toBe('budd/codex:latest')
+  })
+
+  it('parses per-agent docker.mounts.extra', () => {
+    const config = loadConfig(`
+transport: http
+runtime: docker
+agents:
+  qa:
+    workdir: ./qa
+    docker:
+      mounts:
+        extra:
+          - path: ./shared-docs
+            target: /workspace/docs
+            mode: ro
+          - path: /abs/cache
+            target: /cache
+            mode: rw
+`)
+    expect(config.agents.qa.docker?.mounts?.extra).toEqual([
+      { path: './shared-docs', target: '/workspace/docs', mode: 'ro' },
+      { path: '/abs/cache', target: '/cache', mode: 'rw' },
+    ])
+  })
+
+  it('parses per-agent docker.mounts.workspace_readonly_disable', () => {
+    const config = loadConfig(`
+transport: http
+runtime: docker
+agents:
+  qa:
+    workdir: ./qa
+    docker:
+      mounts:
+        workspace_readonly_disable: [CLAUDE.md]
+`)
+    expect(config.agents.qa.docker?.mounts?.workspace_readonly_disable).toEqual([
+      'CLAUDE.md',
+    ])
+  })
+
+  it('rejects mounts.extra with missing target', () => {
+    expect(() =>
+      loadConfig(`
+transport: http
+runtime: docker
+agents:
+  qa:
+    workdir: ./qa
+    docker:
+      mounts:
+        extra:
+          - path: ./docs
+            mode: ro
+`),
+    ).toThrow(/extra\[\]\.target is required/i)
+  })
+
+  it('rejects mounts.extra with invalid mode', () => {
+    expect(() =>
+      loadConfig(`
+transport: http
+runtime: docker
+agents:
+  qa:
+    workdir: ./qa
+    docker:
+      mounts:
+        extra:
+          - path: ./docs
+            target: /docs
+            mode: exec
+`),
+    ).toThrow(/extra\[\]\.mode must be "ro" or "rw"/i)
+  })
+
+  it('rejects agents.*.docker when runtime is not docker', () => {
+    expect(() =>
+      loadConfig(`
+transport: http
+runtime: local
+agents:
+  qa:
+    workdir: ./qa
+    docker:
+      image: budd/claude:latest
+`),
+    ).toThrow(/docker.*only.*when runtime.*docker/i)
+  })
+
+  it('parser accepts any adapter name string (validation is in buildRunnersFromConfig)', () => {
+    const config = loadConfig(`
+transport: http
+runtime: docker
+agents:
+  qa:
+    workdir: ./qa
+    adapter: opencode
+`)
+    expect(config.agents.qa.adapter).toBe('opencode')
+  })
+})
+
 describe('mergeCliFlags', () => {
   function baseConfig(overrides: Partial<BuddConfig> = {}): BuddConfig {
     return {
@@ -348,18 +434,6 @@ describe('mergeCliFlags', () => {
     })
     const merged = mergeCliFlags(dockerBase, { image: 'custom:2.0' })
     expect(merged.docker?.image).toBe('custom:2.0')
-  })
-
-  it('preserves home_mounts from base config through merge', () => {
-    const dockerBase = baseConfig({
-      runtime: 'docker',
-      docker: {
-        image: 'budd/claude-code:latest',
-        home_mounts: [{ path: '.claude', mode: 'rw' as const }],
-      },
-    })
-    const merged = mergeCliFlags(dockerBase, {})
-    expect(merged.docker?.home_mounts).toEqual([{ path: '.claude', mode: 'rw' }])
   })
 
   it('rejects unknown --runtime values from CLI flags', () => {

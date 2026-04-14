@@ -108,14 +108,21 @@ port: 8080
 runtime: docker              # docker (default) or local
 
 docker:                      # ignored when runtime: local
-  image: budd/claude-code:latest
-  home_mounts:               # optional — override adapter defaults
-    - path: .claude/settings.json
-      mode: ro
-    - path: .claude/projects
-      mode: rw
-    - path: .claude/memory
-      mode: rw
+  image: budd/claude-code:latest   # daemon-wide default image
+
+agents:
+  qa:
+    workdir: ./workspaces/qa
+    # adapter: claude       # optional, defaults to "claude"
+    # docker:
+    #   image: budd/codex:latest         # per-agent image override
+    #   mounts:
+    #     extra:                          # additional bind mounts
+    #       - path: ./shared-docs
+    #         target: /workspace/docs
+    #         mode: ro
+    #     workspace_readonly_disable:     # subtract adapter RO carveouts
+    #       - CLAUDE.md
 
 hooks:
   pre_turn: "git pull --rebase"
@@ -130,11 +137,14 @@ CLI flags (`--port`, `--runtime`, `--image`, `--workdir`, `--pre-turn`,
 - **`docker`** *(default)* — budd runs on the host, spawns the agent inside
   a container per session. Workspace is bind-mounted at `/workspace`. Only
   allowlisted env vars (`ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `SESSION_ID`,
-  `MESSAGE_TEXT`, `WORKDIR`) are forwarded. Agent home directories (e.g.
-  `~/.claude/projects`, `~/.claude/memory`) are mounted from the host so
-  session state persists across container runs. Each adapter declares its
-  default mounts; override them via `docker.home_mounts` in daemon.yaml.
-  Suitable for untrusted prompts and shared infrastructure.
+  `MESSAGE_TEXT`, `WORKDIR`) are forwarded. Each adapter declares its
+  mount defaults: which workspace paths are read-only (e.g. `CLAUDE.md`,
+  `.claude`), which home paths are read-only (e.g. `~/.claude/settings.json`),
+  and a single session-state directory that persists across runs (e.g.
+  `~/.claude/projects/-workspace`). Per-agent `docker.mounts.extra[]` layers
+  additional binds on top; `docker.mounts.workspace_readonly_disable`
+  subtracts individual RO carveouts. Suitable for untrusted prompts and
+  shared infrastructure.
 - **`local`** — budd spawns the agent directly on the host with the full
   process environment. Suitable for development and trusted single-user
   deploys. The base image uses this internally because budd and the

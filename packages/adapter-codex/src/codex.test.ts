@@ -117,3 +117,15 @@ describe('codexAdapter.isAvailable', () => {
     expect(codexAdapter.isAvailable('/nonexistent')).toBe(false)
   })
 })
+
+describe('codexAdapter mount defaults', () => {
+  it('declares workspaceReadOnly for AGENTS.md and .codex', () => {
+    expect(codexAdapter.workspaceReadOnly).toEqual(['AGENTS.md', '.codex'])
+  })
+  it('declares homeReadOnly for .codex/config.toml', () => {
+    expect(codexAdapter.homeReadOnly).toEqual(['.codex/config.toml'])
+  })
+  it('sessionStateDir is .codex/sessions', () => {
+    expect(codexAdapter.sessionStateDir?.('/workspace')).toBe('.codex/sessions')
+  })
+})

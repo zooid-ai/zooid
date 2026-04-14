@@ -1,11 +1,18 @@
 import { Chunker } from './chunker.js'
 import { runHook } from './hooks.js'
-import { detectAdapter } from '../adapters/registry.js'
-import type { AgentAdapter, Runtime, SessionEvent } from '../types.js'
+import type {
+  AgentAdapter,
+  ExtraMount,
+  Runtime,
+  SessionEvent,
+  SpawnConfig,
+} from '../types.js'
 
 export interface SessionRunnerOptions {
   runtime: Runtime
-  adapters: AgentAdapter[]
+  /** The single adapter this runner drives. Picked by `buildRunnersFromConfig`
+   *  from the per-agent `adapter:` field (default: first registered). */
+  adapter: AgentAdapter
   hooks: { pre_turn?: string; post_turn?: string }
   cwd?: string
   /** Prepended to PATH when detecting and spawning the adapter. Used in tests. */
@@ -17,6 +24,10 @@ export interface SessionRunnerOptions {
   /** Chunking tuning — defaults match the spec (3s idle, 64 KiB). */
   idleMs?: number
   maxBytes?: number
+  /** Per-agent extra mounts from daemon.yaml, passed through to the runtime. */
+  extraMounts?: ExtraMount[]
+  /** Subtractive override for adapter-declared workspaceReadOnly, from daemon.yaml. */
+  workspaceReadOnlyDisable?: string[]
 }
 
 export interface RunOpts {
@@ -44,114 +55,80 @@ export interface RunResult {
 export class SessionRunner {
   constructor(private opts: SessionRunnerOptions) {}
 
+  /** Exposed for test introspection — buildRunnersFromConfig tests assert
+   *  that the right adapter lands on each per-agent runner. */
+  get adapter(): AgentAdapter {
+    return this.opts.adapter
+  }
+
+  /** Exposed for test introspection — buildRunnersFromConfig tests assert
+   *  that the right runtime (image) lands on each per-agent runner. */
+  get runtime(): Runtime {
+    return this.opts.runtime
+  }
+
   /**
-   * Side-effect-free pre-flight check. Resolves the same PATH the runner
-   * would use at run() time and asks the adapter registry whether any
-   * adapter is available. Used by transports (e.g. HTTP) to surface a
-   * `503` before opening a stream rather than emitting a terminal event
-   * mid-response.
+   * Side-effect-free pre-flight check. Containerized runtimes (docker) are
+   * trusted — image-missing surfaces later as exit code 125. Local runtime
+   * checks the adapter binary on the resolved PATH.
    */
   checkReady(): { ready: boolean; error?: string } {
-    // Containerized runtimes (e.g. Docker) host the agent CLI inside the
-    // sandbox, not on the host PATH. We can't cheaply probe the image so
-    // we trust it — image-missing surfaces later as a docker exit code 125.
-    if (this.opts.runtime.containerized) {
-      if (this.opts.adapters.length === 0) {
-        return { ready: false, error: 'no agent adapter registered' }
-      }
-      return { ready: true }
+    if (this.opts.runtime.containerized) return { ready: true }
+    const resolvedPath = this.resolvedPath()
+    if (!this.opts.adapter.isAvailable(resolvedPath)) {
+      return { ready: false, error: 'no agent adapter detected' }
     }
-
-    const resolvedPath =
-      this.opts.overridePath ??
-      (this.opts.pathPrefix
-        ? `${this.opts.pathPrefix}:${process.env.PATH ?? ''}`
-        : (process.env.PATH ?? ''))
-    const adapter = detectAdapter(this.opts.adapters, resolvedPath)
-    if (!adapter) return { ready: false, error: 'no agent adapter detected' }
     return { ready: true }
   }
 
   /**
    * Open a live event stream for an existing session id by delegating to the
-   * adapter's `openStream`. Used by transports (HTTP `GET /sessions/:id/events`)
-   * to let clients reattach to a session after a disconnect, or to read its
-   * history without re-running the agent.
-   *
-   * Returns `null` when:
-   *   - no adapter is registered / detected,
-   *   - the detected adapter doesn't implement `openStream` (its CLI doesn't
-   *     persist sessions in a tailable form), or
-   *   - the adapter implements it but reports no state for `id` under the
-   *     current cwd (e.g. the file doesn't exist for the claude adapter).
-   *
-   * The transport surfaces all three as 404 — they're indistinguishable from
-   * the client's perspective ("there is no readable stream for that id here").
+   * adapter's `openStream`. Returns `null` when the adapter does not implement
+   * `openStream` or reports no state for `id` under the current cwd. The
+   * transport surfaces both as 404.
    */
   async openSessionStream(
     id: string,
   ): Promise<AsyncIterable<SessionEvent> | null> {
-    const containerized = this.opts.runtime.containerized === true
-    const resolvedPath = containerized
-      ? (process.env.PATH ?? '')
-      : (this.opts.overridePath ??
-        (this.opts.pathPrefix
-          ? `${this.opts.pathPrefix}:${process.env.PATH ?? ''}`
-          : (process.env.PATH ?? '')))
-    const adapter = containerized
-      ? (this.opts.adapters[0] ?? null)
-      : detectAdapter(this.opts.adapters, resolvedPath)
-    if (!adapter || !adapter.openStream) return null
+    const adapter = this.opts.adapter
+    if (!adapter.openStream) return null
     const cwd = this.opts.cwd ?? process.cwd()
     return adapter.openStream(id, cwd)
   }
 
   /**
    * Decide whether a session is currently mid-turn by delegating to the
-   * adapter. Used by the HTTP transport to 409 a `POST /sessions/:id/turns`
-   * that races an in-flight turn — see the long comment on
-   * `AgentAdapter.isSessionBusy` for the rationale and the SIGKILL gap.
-   *
-   * Returns `false` when no adapter is detected or the detected adapter
-   * doesn't implement the check (we'd rather let the request through and
-   * surface whatever the CLI does than refuse based on missing information).
+   * adapter. Returns `false` when the adapter doesn't implement the check
+   * (we'd rather let the request through and surface whatever the CLI does
+   * than refuse based on missing information).
    */
   async isSessionBusy(id: string): Promise<boolean> {
-    const containerized = this.opts.runtime.containerized === true
-    const resolvedPath = containerized
-      ? (process.env.PATH ?? '')
-      : (this.opts.overridePath ??
-        (this.opts.pathPrefix
-          ? `${this.opts.pathPrefix}:${process.env.PATH ?? ''}`
-          : (process.env.PATH ?? '')))
-    const adapter = containerized
-      ? (this.opts.adapters[0] ?? null)
-      : detectAdapter(this.opts.adapters, resolvedPath)
-    if (!adapter || !adapter.isSessionBusy) return false
+    const adapter = this.opts.adapter
+    if (!adapter.isSessionBusy) return false
     const cwd = this.opts.cwd ?? process.cwd()
     return adapter.isSessionBusy(id, cwd)
+  }
+
+  private resolvedPath(): string {
+    if (this.opts.runtime.containerized) return process.env.PATH ?? ''
+    if (this.opts.overridePath !== undefined) return this.opts.overridePath
+    if (this.opts.pathPrefix) {
+      return `${this.opts.pathPrefix}:${process.env.PATH ?? ''}`
+    }
+    return process.env.PATH ?? ''
   }
 
   async run({ prompt, session_id, onEvent }: RunOpts): Promise<RunResult> {
     const cwd = this.opts.cwd ?? process.cwd()
     const resuming = session_id !== undefined
 
-    // 1. Detect adapter. For containerized runtimes the agent CLI lives
-    //    inside the image (not on the host PATH), so use the first
-    //    registered adapter unconditionally — host detection would
-    //    incorrectly fail. Detection runs before id assignment because the
-    //    adapter is what decides the id strategy.
+    // 1. Resolve PATH and verify the adapter is available. For containerized
+    //    runtimes the agent CLI lives inside the image (not on the host PATH)
+    //    so we skip detection — image-missing surfaces later as docker exit 125.
     const containerized = this.opts.runtime.containerized === true
-    const resolvedPath = containerized
-      ? (process.env.PATH ?? '')
-      : (this.opts.overridePath ??
-        (this.opts.pathPrefix
-          ? `${this.opts.pathPrefix}:${process.env.PATH ?? ''}`
-          : (process.env.PATH ?? '')))
-    const adapter = containerized
-      ? (this.opts.adapters[0] ?? null)
-      : detectAdapter(this.opts.adapters, resolvedPath)
-    if (!adapter) {
+    const resolvedPath = this.resolvedPath()
+    const adapter = this.opts.adapter
+    if (!containerized && !adapter.isAvailable(resolvedPath)) {
       throw new Error('no agent adapter detected')
     }
 
@@ -216,21 +193,28 @@ export class SessionRunner {
     }
     onEvent({ type: 'turn.start' })
 
-    // 5. Spawn the agent.
+    // 5. Spawn the agent. Thread adapter-declared mount defaults and
+    //    per-agent overrides into SpawnConfig — the Docker runtime turns
+    //    them into `-v` flags; the local runtime ignores them.
     const spawnConfig = adapter.spawn({
       prompt,
       session_id: sessionId,
       resume: resuming,
     })
-    const child = this.opts.runtime.spawn({
+    const spawnCfg: SpawnConfig = {
       ...spawnConfig,
       env: {
         ...spawnConfig.env,
         PATH: resolvedPath,
         ...this.opts.adapterEnv,
       },
-      homeMounts: adapter.homeMounts,
-    })
+      workspaceReadOnly: adapter.workspaceReadOnly,
+      workspaceReadOnlyDisable: this.opts.workspaceReadOnlyDisable,
+      homeReadOnly: adapter.homeReadOnly,
+      sessionStateDir: adapter.sessionStateDir?.('/workspace'),
+      extraMounts: this.opts.extraMounts,
+    }
+    const child = this.opts.runtime.spawn(spawnCfg)
 
     // 6. Pipe stdout/stderr through chunkers, plus a line-splitter on
     //    stdout for deferred adapters so we can extract the session id.

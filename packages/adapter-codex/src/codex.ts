@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
-import type { AgentAdapter, HomeMount, SpawnConfig } from '@zooid/budd-core'
+import type { AgentAdapter, SpawnConfig } from '@zooid/budd-core'
 import {
   findCodexSessionFile,
   isCodexSessionBusy,
@@ -27,9 +27,13 @@ function findOnPath(binary: string, pathString: string): string | null {
  */
 export const codexAdapter: AgentAdapter = {
   name: 'codex',
-  homeMounts: [
-    { path: '.codex/sessions', mode: 'rw' },
-  ] satisfies HomeMount[],
+  workspaceReadOnly: ['AGENTS.md', '.codex'],
+  homeReadOnly: ['.codex/config.toml'],
+  sessionStateDir() {
+    // Codex buckets its session JSONLs by date under .codex/sessions; the
+    // partitioning is internal to the CLI, so we just mount the top-level dir.
+    return '.codex/sessions'
+  },
   isAvailable(pathOverride) {
     const p = pathOverride ?? process.env.PATH ?? ''
     return findOnPath('codex', p) !== null

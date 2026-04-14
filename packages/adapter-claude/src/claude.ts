@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
-import type { AgentAdapter, HomeMount, SpawnConfig } from '@zooid/budd-core'
+import type { AgentAdapter, SpawnConfig } from '@zooid/budd-core'
 import {
   claudeSessionFilePath,
   isClaudeSessionBusy,
@@ -27,11 +27,14 @@ function findOnPath(binary: string, pathString: string): string | null {
  */
 export const claudeAdapter: AgentAdapter = {
   name: 'claude',
-  homeMounts: [
-    { path: '.claude/settings.json', mode: 'ro' },
-    { path: '.claude/projects', mode: 'rw' },
-    { path: '.claude/memory', mode: 'rw' },
-  ] satisfies HomeMount[],
+  workspaceReadOnly: ['CLAUDE.md', '.claude'],
+  homeReadOnly: ['.claude/settings.json'],
+  sessionStateDir(containerWorkdir) {
+    // Claude Code encodes the cwd by replacing '/' with '-'; an absolute
+    // workdir like '/workspace' becomes the directory '-workspace' under
+    // '~/.claude/projects/'.
+    return `.claude/projects/${containerWorkdir.replace(/\//g, '-')}`
+  },
   isAvailable(pathOverride) {
     const p = pathOverride ?? process.env.PATH ?? ''
     return findOnPath('claude', p) !== null

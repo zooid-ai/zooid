@@ -34,7 +34,7 @@ function makeRunner(
 ): SessionRunner {
   return new SessionRunner({
     runtime: new LocalRuntime(),
-    adapters: [claudeAdapter],
+    adapter: claudeAdapter,
     hooks: opts.hooks ?? {},
     pathPrefix: FIXTURES_BIN,
     adapterEnv: opts.adapterEnv,
@@ -145,7 +145,7 @@ describe('SessionRunner (integration with stub claude)', () => {
   it('rejects when no adapter is available', async () => {
     const runner = new SessionRunner({
       runtime: new LocalRuntime(),
-      adapters: [claudeAdapter],
+      adapter: claudeAdapter,
       hooks: {},
       overridePath: '/definitely/not/a/real/dir',
     })
@@ -157,7 +157,7 @@ describe('SessionRunner (integration with stub claude)', () => {
   it('checkReady returns false when no adapter is present', () => {
     const runner = new SessionRunner({
       runtime: new LocalRuntime(),
-      adapters: [claudeAdapter],
+      adapter: claudeAdapter,
       hooks: {},
       overridePath: '/definitely/not/a/real/dir',
     })
@@ -221,7 +221,7 @@ describe('SessionRunner — deferred id strategy', () => {
       '{"type":"message","text":"hello"}\n'
     const runner = new SessionRunner({
       runtime: new LocalRuntime(),
-      adapters: [makeDeferredAdapter({ stdout, capturedSpawnId: captured })],
+      adapter: makeDeferredAdapter({ stdout, capturedSpawnId: captured }),
       hooks: {},
       // Smaller idle so the chunker flushes promptly during the test.
       idleMs: 10,
@@ -256,12 +256,10 @@ describe('SessionRunner — deferred id strategy', () => {
     const captured: { value: string | undefined } = { value: undefined }
     const runner = new SessionRunner({
       runtime: new LocalRuntime(),
-      adapters: [
-        makeDeferredAdapter({
-          stdout: '{"type":"message","text":"follow up"}\n',
-          capturedSpawnId: captured,
-        }),
-      ],
+      adapter: makeDeferredAdapter({
+        stdout: '{"type":"message","text":"follow up"}\n',
+        capturedSpawnId: captured,
+      }),
       hooks: {},
       idleMs: 10,
     })
@@ -281,12 +279,10 @@ describe('SessionRunner — deferred id strategy', () => {
   it('RunResult.session_id is undefined when a deferred adapter exits before surfacing one', async () => {
     const runner = new SessionRunner({
       runtime: new LocalRuntime(),
-      adapters: [
-        makeDeferredAdapter({
-          // Crashes before printing thread.started.
-          stdout: '{"type":"message","text":"oops"}\n',
-        }),
-      ],
+      adapter: makeDeferredAdapter({
+        // Crashes before printing thread.started.
+        stdout: '{"type":"message","text":"oops"}\n',
+      }),
       hooks: {},
       idleMs: 10,
     })
@@ -309,7 +305,7 @@ describe('SessionRunner — deferred id strategy', () => {
     }
     const runner = new SessionRunner({
       runtime: new LocalRuntime(),
-      adapters: [broken],
+      adapter: broken,
       hooks: {},
     })
     await expect(
@@ -323,11 +319,9 @@ describe('SessionRunner — deferred id strategy', () => {
     try {
       const runner = new SessionRunner({
         runtime: new LocalRuntime(),
-        adapters: [
-          makeDeferredAdapter({
-            stdout: '{"type":"thread.started","thread_id":"xyz-9"}\n',
-          }),
-        ],
+        adapter: makeDeferredAdapter({
+          stdout: '{"type":"thread.started","thread_id":"xyz-9"}\n',
+        }),
         hooks: {
           // Write SESSION_ID to a file with explicit quotes around its value
           // so we can assert it was empty (vs unset).
@@ -348,11 +342,9 @@ describe('SessionRunner — deferred id strategy', () => {
     try {
       const runner = new SessionRunner({
         runtime: new LocalRuntime(),
-        adapters: [
-          makeDeferredAdapter({
-            stdout: '{"type":"thread.started","thread_id":"xyz-9"}\n',
-          }),
-        ],
+        adapter: makeDeferredAdapter({
+          stdout: '{"type":"thread.started","thread_id":"xyz-9"}\n',
+        }),
         hooks: {
           post_turn: `printf 'SID=[%s] EC=[%s]\\n' "$SESSION_ID" "$EXIT_CODE" > ${envFile}`,
         },
@@ -375,7 +367,7 @@ function makeCodexRunner(
 ): SessionRunner {
   return new SessionRunner({
     runtime: new LocalRuntime(),
-    adapters: [codexAdapter],
+    adapter: codexAdapter,
     hooks: {},
     pathPrefix: CODEX_FIXTURES_BIN,
     adapterEnv: opts.adapterEnv,
@@ -444,5 +436,78 @@ describe('SessionRunner (integration with stub codex)', () => {
     })
     expect(events.some((e) => e.type === 'session.start')).toBe(false)
     expect(events[0].type).toBe('turn.start')
+  })
+})
+
+// ─── SessionRunner → SpawnConfig threading ───────────────────────────────
+//
+// Asserts that SessionRunner pulls workspaceReadOnly / homeReadOnly /
+// sessionStateDir from its adapter and forwards extraMounts /
+// workspaceReadOnlyDisable from its own opts into the spawned SpawnConfig.
+// The docker runtime is where these actually become `-v` flags — but we
+// don't need to spin up docker to verify the wiring.
+
+import type { Runtime, SpawnConfig } from '@zooid/budd-core'
+import { EventEmitter } from 'node:events'
+
+function makeFakeContainerizedRuntime(): {
+  runtime: Runtime
+  captured: SpawnConfig[]
+} {
+  const captured: SpawnConfig[] = []
+  const runtime: Runtime = {
+    containerized: true,
+    spawn(cfg) {
+      captured.push(cfg)
+      const ee = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter
+        stderr: EventEmitter
+        kill(): void
+      }
+      ee.stdout = new EventEmitter()
+      ee.stderr = new EventEmitter()
+      ee.kill = () => {}
+      // Emit exit on next tick so run() resolves promptly.
+      setImmediate(() => ee.emit('exit', 0))
+      return ee as unknown as ReturnType<Runtime['spawn']>
+    },
+  }
+  return { runtime, captured }
+}
+
+describe('SessionRunner → SpawnConfig threading', () => {
+  it('SpawnConfig carries workspaceReadOnly, homeReadOnly, sessionStateDir from the (per-agent) adapter', async () => {
+    const { runtime, captured } = makeFakeContainerizedRuntime()
+    const runner = new SessionRunner({
+      runtime,
+      adapter: claudeAdapter,
+      hooks: {},
+      cwd: '/some/workspace',
+      idleMs: 1,
+    })
+    await runner.run({ prompt: 'hi', onEvent: () => {} })
+    const cfg = captured[0]
+    expect(cfg.workspaceReadOnly).toEqual(['CLAUDE.md', '.claude'])
+    expect(cfg.homeReadOnly).toEqual(['.claude/settings.json'])
+    expect(cfg.sessionStateDir).toBe('.claude/projects/-workspace')
+  })
+
+  it('SpawnConfig forwards extraMounts and workspaceReadOnlyDisable from runner opts', async () => {
+    const { runtime, captured } = makeFakeContainerizedRuntime()
+    const runner = new SessionRunner({
+      runtime,
+      adapter: claudeAdapter,
+      hooks: {},
+      cwd: '/some/workspace',
+      idleMs: 1,
+      extraMounts: [{ path: '/abs/cache', target: '/cache', mode: 'rw' }],
+      workspaceReadOnlyDisable: ['CLAUDE.md'],
+    })
+    await runner.run({ prompt: 'hi', onEvent: () => {} })
+    const cfg = captured[0]
+    expect(cfg.extraMounts).toEqual([
+      { path: '/abs/cache', target: '/cache', mode: 'rw' },
+    ])
+    expect(cfg.workspaceReadOnlyDisable).toEqual(['CLAUDE.md'])
   })
 })

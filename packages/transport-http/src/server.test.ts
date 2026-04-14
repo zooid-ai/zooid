@@ -37,7 +37,7 @@ function makeApp(
 ) {
   const runner = new SessionRunner({
     runtime: new LocalRuntime(),
-    adapters: [claudeAdapter],
+    adapter: claudeAdapter,
     hooks: opts.hooks ?? {},
     pathPrefix: opts.noAdapter ? undefined : FIXTURES_BIN,
     overridePath: opts.noAdapter ? '/definitely/not/a/real/dir' : undefined,
@@ -297,7 +297,7 @@ function makeMultiAgentApp(opts: {
   for (const name of opts.agents) {
     runners[name] = new SessionRunner({
       runtime: new LocalRuntime(),
-      adapters: [claudeAdapter],
+      adapter: claudeAdapter,
       hooks: opts.hooks ?? {},
       pathPrefix: FIXTURES_BIN,
     })
@@ -407,7 +407,7 @@ function makeFakeStreamAdapter(opts: {
 function makeAppWithAdapter(adapter: AgentAdapter, extra: Partial<SessionRunnerOptions> = {}) {
   const runner = new SessionRunner({
     runtime: new LocalRuntime(),
-    adapters: [adapter],
+    adapter,
     hooks: {},
     pathPrefix: FIXTURES_BIN, // satisfies isAvailable detection
     ...extra,

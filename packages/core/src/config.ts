@@ -1,36 +1,96 @@
 import { parse } from 'yaml'
 import type {
   AgentConfig,
+  AgentDockerConfig,
   BuddConfig,
   CliFlags,
   DockerConfig,
-  HomeMount,
+  ExtraMount,
 } from './types.js'
 
 export const DEFAULT_DOCKER_IMAGE = 'budd/claude-code:latest'
 
 const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
 
-function parseHomeMounts(raw: unknown): HomeMount[] | undefined {
-  if (!Array.isArray(raw)) return undefined
-  const mounts: HomeMount[] = []
-  for (const entry of raw) {
-    if (typeof entry !== 'object' || entry === null) continue
-    const path = entry.path
-    const mode = entry.mode
-    if (typeof path !== 'string' || path.length === 0) {
-      throw new Error(`home_mounts[].path must be a non-empty string`)
-    }
-    if (mode !== 'ro' && mode !== 'rw') {
-      throw new Error(`home_mounts[].mode must be "ro" or "rw" (got "${mode}")`)
-    }
-    mounts.push({ path, mode })
+function parseExtraMounts(agentName: string, raw: unknown): ExtraMount[] | undefined {
+  if (raw === undefined) return undefined
+  if (!Array.isArray(raw)) {
+    throw new Error(`agents.${agentName}.docker.mounts.extra must be an array`)
   }
-  return mounts.length > 0 ? mounts : undefined
+  const mounts: ExtraMount[] = []
+  for (const entry of raw) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      throw new Error(
+        `agents.${agentName}.docker.mounts.extra[] must be a mapping`,
+      )
+    }
+    const e = entry as Record<string, unknown>
+    if (typeof e.path !== 'string' || e.path.length === 0) {
+      throw new Error(
+        `agents.${agentName}.docker.mounts.extra[].path is required`,
+      )
+    }
+    if (typeof e.target !== 'string' || e.target.length === 0) {
+      throw new Error(
+        `agents.${agentName}.docker.mounts.extra[].target is required`,
+      )
+    }
+    const mode = e.mode ?? 'ro'
+    if (mode !== 'ro' && mode !== 'rw') {
+      throw new Error(
+        `agents.${agentName}.docker.mounts.extra[].mode must be "ro" or "rw" (got "${mode}")`,
+      )
+    }
+    mounts.push({ path: e.path, target: e.target, mode })
+  }
+  return mounts
+}
+
+function parseAgentDocker(name: string, raw: unknown): AgentDockerConfig {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`agents.${name}.docker must be a mapping`)
+  }
+  const d = raw as Record<string, unknown>
+  const out: AgentDockerConfig = {}
+  if (d.image !== undefined) {
+    if (typeof d.image !== 'string' || d.image.length === 0) {
+      throw new Error(`agents.${name}.docker.image must be a non-empty string`)
+    }
+    out.image = d.image
+  }
+  if (d.mounts !== undefined) {
+    if (typeof d.mounts !== 'object' || d.mounts === null || Array.isArray(d.mounts)) {
+      throw new Error(`agents.${name}.docker.mounts must be a mapping`)
+    }
+    const m = d.mounts as Record<string, unknown>
+    const mounts: NonNullable<AgentDockerConfig['mounts']> = {}
+    const extra = parseExtraMounts(name, m.extra)
+    if (extra) mounts.extra = extra
+    if (m.workspace_readonly_disable !== undefined) {
+      if (!Array.isArray(m.workspace_readonly_disable)) {
+        throw new Error(
+          `agents.${name}.docker.mounts.workspace_readonly_disable must be an array of strings`,
+        )
+      }
+      const list: string[] = []
+      for (const v of m.workspace_readonly_disable) {
+        if (typeof v !== 'string' || v.length === 0) {
+          throw new Error(
+            `agents.${name}.docker.mounts.workspace_readonly_disable[] must be a non-empty string`,
+          )
+        }
+        list.push(v)
+      }
+      mounts.workspace_readonly_disable = list
+    }
+    if (mounts.extra || mounts.workspace_readonly_disable) out.mounts = mounts
+  }
+  return out
 }
 
 function parseAgents(
   raw: unknown,
+  runtime: 'local' | 'docker',
   daemonHooks: { pre_turn?: string; post_turn?: string },
 ): Record<string, AgentConfig> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -71,7 +131,33 @@ function parseAgents(
         else delete agentHooks.post_turn
       }
     }
-    result[name] = { name, workdir: entry.workdir, hooks: agentHooks }
+
+    let adapter: string | undefined
+    if (entry.adapter !== undefined) {
+      if (typeof entry.adapter !== 'string' || entry.adapter.length === 0) {
+        throw new Error(`agents.${name}.adapter must be a non-empty string`)
+      }
+      adapter = entry.adapter
+    }
+
+    let dockerBlock: AgentDockerConfig | undefined
+    if (entry.docker !== undefined && entry.docker !== null) {
+      if (runtime !== 'docker') {
+        throw new Error(
+          `agents.${name}.docker is only valid when runtime: docker (got runtime: ${runtime})`,
+        )
+      }
+      dockerBlock = parseAgentDocker(name, entry.docker)
+    }
+
+    const agentCfg: AgentConfig = {
+      name,
+      workdir: entry.workdir,
+      hooks: agentHooks,
+    }
+    if (adapter) agentCfg.adapter = adapter
+    if (dockerBlock) agentCfg.docker = dockerBlock
+    result[name] = agentCfg
   }
   return result
 }
@@ -117,13 +203,26 @@ export function loadConfig(yamlText: string): BuddConfig {
     )
   }
 
+  // Reject daemon-wide docker.home_mounts with a migration pointer. It
+  // didn't generalise across mixed-adapter daemons; replacement is
+  // per-adapter `homeReadOnly`/`sessionStateDir` + per-agent `docker.mounts.extra`.
+  if (
+    raw.docker &&
+    typeof raw.docker === 'object' &&
+    (raw.docker as Record<string, unknown>).home_mounts !== undefined
+  ) {
+    throw new Error(
+      'docker.home_mounts is removed. Use per-agent docker.mounts.extra and adapter-declared homeReadOnly/sessionStateDir instead.',
+    )
+  }
+
   const daemonHooks: BuddConfig['hooks'] = {}
   if (raw.hooks && typeof raw.hooks === 'object') {
     if (typeof raw.hooks.pre_turn === 'string') daemonHooks.pre_turn = raw.hooks.pre_turn
     if (typeof raw.hooks.post_turn === 'string') daemonHooks.post_turn = raw.hooks.post_turn
   }
 
-  const agents = parseAgents(raw.agents, daemonHooks)
+  const agents = parseAgents(raw.agents, runtime, daemonHooks)
 
   const config: BuddConfig = {
     transport,
@@ -140,8 +239,6 @@ export function loadConfig(yamlText: string): BuddConfig {
         ? rawDocker.image
         : DEFAULT_DOCKER_IMAGE
     const docker: DockerConfig = { image }
-    const homeMounts = parseHomeMounts(rawDocker.home_mounts)
-    if (homeMounts) docker.home_mounts = homeMounts
     config.docker = docker
   }
 
@@ -176,8 +273,7 @@ export function mergeCliFlags(base: BuddConfig, flags: CliFlags): BuddConfig {
   if (runtime === 'docker') {
     const baseDocker = base.docker ?? { image: DEFAULT_DOCKER_IMAGE }
     merged.docker = {
-      image: flags.image ?? baseDocker.image,
-      ...(baseDocker.home_mounts ? { home_mounts: baseDocker.home_mounts } : {}),
+      image: flags.image ?? baseDocker.image ?? DEFAULT_DOCKER_IMAGE,
     }
   }
   return merged

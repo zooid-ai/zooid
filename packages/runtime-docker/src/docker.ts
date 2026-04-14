@@ -1,6 +1,8 @@
+import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { Runtime, SpawnConfig, HomeMount } from '@zooid/budd-core'
+import type { ExtraMount, Runtime, SpawnConfig } from '@zooid/budd-core'
 
 /**
  * Default env allowlist for the Docker runtime. Only these host env vars
@@ -38,46 +40,71 @@ export interface DockerRuntimeOptions {
    * the default; pass an explicit list to override.
    */
   envAllowlist?: readonly string[]
-  /**
-   * Override adapter-provided home mounts. When set, replaces the mounts
-   * from `SpawnConfig.homeMounts` entirely (daemon.yaml `docker.home_mounts`).
-   */
-  homeMountsOverride?: HomeMount[]
 }
 
 export interface BuildDockerArgsInput {
   image: string
   command: string
   args: string[]
+  /** Host workdir; mounted RW at /workspace. */
   workdir: string
   envAllowlist: readonly string[]
   hostEnv: Record<string, string | undefined>
-  homeMounts: HomeMount[]
-  /** $HOME on the host, used as source for home mount -v flags. */
   hostHome: string
-  /** $HOME inside the container (node:20-slim runs as root → /root). */
   containerHome: string
+  workspaceReadOnly?: string[]
+  workspaceReadOnlyDisable?: string[]
+  homeReadOnly?: string[]
+  sessionStateDir?: string
+  extraMounts?: ExtraMount[]
 }
 
 /**
- * Build the argv for `docker run ...`. Pure function — no side effects,
- * easy to unit test.
+ * Build the argv for `docker run ...`. Pure w.r.t. its inputs except for
+ * one documented side effect: `mkdirSync` on the host `sessionStateDir`
+ * before the bind mount, since Docker creates missing bind-mount sources
+ * as root-owned dirs which the container user may not be able to write to.
+ *
+ * Ordering contract (later `-v` flags override earlier ones on nested paths):
+ *   run --rm -i, workspace RW, workspace RO, home RO, sessionState RW,
+ *   extras, env, --entrypoint <command>, image, args
  */
 export function buildDockerArgs(input: BuildDockerArgsInput): string[] {
   const argv: string[] = ['run', '--rm', '-i']
 
-  // Mount the host workdir into /workspace.
+  // 1. Workspace RW.
   argv.push('-v', `${input.workdir}:/workspace`)
   argv.push('-w', '/workspace')
 
-  // Home-directory mounts for agent state persistence.
-  for (const mount of input.homeMounts) {
-    const src = `${input.hostHome}/${mount.path}`
-    const dst = `${input.containerHome}/${mount.path}`
-    argv.push('-v', `${src}:${dst}:${mount.mode}`)
+  // 2. Workspace RO carveouts (skip disabled; skip non-existent).
+  const disabled = new Set(input.workspaceReadOnlyDisable ?? [])
+  for (const rel of input.workspaceReadOnly ?? []) {
+    if (disabled.has(rel)) continue
+    const src = join(input.workdir, rel)
+    if (!existsSync(src)) continue
+    argv.push('-v', `${src}:/workspace/${rel}:ro`)
   }
 
-  // Env passthrough — allowlist only, skip undefined values.
+  // 3. Home RO files (skip non-existent).
+  for (const rel of input.homeReadOnly ?? []) {
+    const src = join(input.hostHome, rel)
+    if (!existsSync(src)) continue
+    argv.push('-v', `${src}:${input.containerHome}/${rel}:ro`)
+  }
+
+  // 4. Session-state dir — pre-create on host, mount RW.
+  if (input.sessionStateDir) {
+    const src = join(input.hostHome, input.sessionStateDir)
+    mkdirSync(src, { recursive: true })
+    argv.push('-v', `${src}:${input.containerHome}/${input.sessionStateDir}:rw`)
+  }
+
+  // 5. Extra user-declared mounts.
+  for (const extra of input.extraMounts ?? []) {
+    argv.push('-v', `${extra.path}:${extra.target}:${extra.mode}`)
+  }
+
+  // 6. Env passthrough — allowlist only, skip undefined values.
   for (const key of input.envAllowlist) {
     const value = input.hostEnv[key]
     if (value === undefined) continue
@@ -117,8 +144,11 @@ export function mapDockerExitCode(
  * the host. Implements the Runtime interface so it can be swapped in
  * for LocalRuntime in the SessionRunner. The container gets:
  *
- *   - The configured workdir mounted at /workspace
- *   - Agent home-directory paths mounted for state persistence
+ *   - The configured workdir mounted at /workspace (RW)
+ *   - Adapter-declared workspaceReadOnly carveouts layered on top (RO)
+ *   - Adapter-declared homeReadOnly files under $HOME (RO)
+ *   - Adapter-declared sessionStateDir under $HOME (RW)
+ *   - Per-agent extraMounts from daemon.yaml
  *   - Only allowlisted host env vars forwarded via `-e`
  *   - `--rm` so the container disappears on exit
  *   - `-i` so stdin is wired up (chunkers in SessionRunner read stdout)
@@ -132,12 +162,17 @@ export class DockerRuntime implements Runtime {
 
   constructor(private opts: DockerRuntimeOptions) {}
 
+  /** Exposed for test introspection — buildRunnersFromConfig tests assert
+   *  that per-agent images land on the per-agent runtime. */
+  get image(): string {
+    return this.opts.image
+  }
+
   spawn(config: SpawnConfig): ChildProcess {
     const allowlist =
       this.opts.envAllowlist && this.opts.envAllowlist.length > 0
         ? this.opts.envAllowlist
         : DEFAULT_DOCKER_ENV_ALLOWLIST
-    const homeMounts = this.opts.homeMountsOverride ?? config.homeMounts ?? []
     const argv = buildDockerArgs({
       image: this.opts.image,
       command: config.command,
@@ -145,9 +180,13 @@ export class DockerRuntime implements Runtime {
       workdir: this.opts.workdir,
       envAllowlist: allowlist,
       hostEnv: { ...process.env, ...(config.env ?? {}) },
-      homeMounts,
       hostHome: homedir(),
       containerHome: '/root',
+      workspaceReadOnly: config.workspaceReadOnly,
+      workspaceReadOnlyDisable: config.workspaceReadOnlyDisable,
+      homeReadOnly: config.homeReadOnly,
+      sessionStateDir: config.sessionStateDir,
+      extraMounts: config.extraMounts,
     })
     return spawn('docker', argv, { stdio: ['ignore', 'pipe', 'pipe'] })
   }
