@@ -1,16 +1,22 @@
 # Triage agent — budd configuration.
 #
-# In MVP mode, budd runs one session per CLI invocation against the
-# detected agent CLI (claude). Once the slack/zooid transports land, swap
-# `transport: http` for one of those and the same agent will respond on a
-# channel automatically.
+# Single-agent budd setup. The `default` agent name has no special meaning
+# — every agent must be named, and that name appears in the HTTP path
+# (POST /agents/default/sessions).
 
 transport: http
 runtime: local
 
+agents:
+  default:
+    workdir: .
+
 # No hooks for the triage agent — it's a read-only workflow that writes a
 # single ticket file. If you want to e.g. open a real GitHub issue from each
-# ticket, add a post_turn hook here:
+# ticket, add a per-agent post_turn hook here:
 #
-# hooks:
-#   post_turn: "scripts/open-github-issue.sh tickets/$(ls -t tickets | head -1)"
+# agents:
+#   default:
+#     workdir: .
+#     hooks:
+#       post_turn: "scripts/open-github-issue.sh tickets/$(ls -t tickets | head -1)"

@@ -1,5 +1,6 @@
 import {
   SessionRunner,
+  type BuddConfig,
   type Runtime,
   type SessionRunnerOptions,
   type DockerConfig,
@@ -44,26 +45,41 @@ export function buildRuntime(choice: DefaultRuntimeChoice): Runtime {
   return new LocalRuntime()
 }
 
+export interface BuildRunnersOptions {
+  /** Test-only PATH prefix, threaded through to each SessionRunner. */
+  pathPrefix?: string
+  overridePath?: string
+  adapterEnv?: Record<string, string>
+}
+
 /**
- * Construct a SessionRunner pre-wired with a runtime and the built-in
- * adapter set. Tests and the bin entry both go through this so the
- * wiring lives in one place.
+ * Build one SessionRunner per agent in the config. Runtime + image + adapter
+ * set are shared daemon-wide; per-agent workdir and hooks are wired into
+ * each runner. Used by the bin entry and by integration tests.
  */
-export function createDefaultSessionRunner(
-  overrides: Partial<SessionRunnerOptions> & {
-    runtimeChoice?: DefaultRuntimeChoice
-  } = {},
-): SessionRunner {
-  const { runtimeChoice, ...rest } = overrides
-  const runtime =
-    rest.runtime ??
-    buildRuntime(runtimeChoice ?? { runtime: 'local' })
-  return new SessionRunner({
-    runtime,
-    adapters: rest.adapters ?? BUILTIN_ADAPTERS,
-    hooks: rest.hooks ?? {},
-    ...rest,
-  })
+export function buildRunnersFromConfig(
+  config: BuddConfig,
+  opts: BuildRunnersOptions = {},
+): Record<string, SessionRunner> {
+  const runners: Record<string, SessionRunner> = {}
+  for (const [name, agent] of Object.entries(config.agents)) {
+    const runtime = buildRuntime({
+      runtime: config.runtime,
+      docker: config.docker,
+      workdir: agent.workdir,
+    })
+    const runnerOpts: SessionRunnerOptions = {
+      runtime,
+      adapters: BUILTIN_ADAPTERS,
+      hooks: agent.hooks,
+      cwd: agent.workdir,
+    }
+    if (opts.pathPrefix !== undefined) runnerOpts.pathPrefix = opts.pathPrefix
+    if (opts.overridePath !== undefined) runnerOpts.overridePath = opts.overridePath
+    if (opts.adapterEnv !== undefined) runnerOpts.adapterEnv = opts.adapterEnv
+    runners[name] = new SessionRunner(runnerOpts)
+  }
+  return runners
 }
 
 export { SessionRunner, LocalRuntime, DockerRuntime, claudeAdapter, codexAdapter }

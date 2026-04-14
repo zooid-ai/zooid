@@ -1,7 +1,15 @@
 import { parse } from 'yaml'
-import type { BuddConfig, CliFlags, DockerConfig, HomeMount } from './types.js'
+import type {
+  AgentConfig,
+  BuddConfig,
+  CliFlags,
+  DockerConfig,
+  HomeMount,
+} from './types.js'
 
 export const DEFAULT_DOCKER_IMAGE = 'budd/claude-code:latest'
+
+const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
 
 function parseHomeMounts(raw: unknown): HomeMount[] | undefined {
   if (!Array.isArray(raw)) return undefined
@@ -19,6 +27,53 @@ function parseHomeMounts(raw: unknown): HomeMount[] | undefined {
     mounts.push({ path, mode })
   }
   return mounts.length > 0 ? mounts : undefined
+}
+
+function parseAgents(
+  raw: unknown,
+  daemonHooks: { pre_turn?: string; post_turn?: string },
+): Record<string, AgentConfig> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('agents: must be a mapping')
+  }
+  const entries = Object.entries(raw as Record<string, unknown>)
+  if (entries.length === 0) {
+    throw new Error('agents: must have at least one entry')
+  }
+  const result: Record<string, AgentConfig> = {}
+  for (const [name, val] of entries) {
+    if (!AGENT_NAME_RE.test(name)) {
+      throw new Error(
+        `agents.${name}: name must match /^[a-z][a-z0-9-]{0,31}$/`,
+      )
+    }
+    if (!val || typeof val !== 'object' || Array.isArray(val)) {
+      throw new Error(`agents.${name} must be a mapping`)
+    }
+    const entry = val as Record<string, unknown>
+    if (typeof entry.workdir !== 'string' || entry.workdir.length === 0) {
+      throw new Error(`agents.${name}.workdir is required`)
+    }
+    const agentHooks: AgentConfig['hooks'] = {}
+    if (daemonHooks.pre_turn !== undefined) agentHooks.pre_turn = daemonHooks.pre_turn
+    if (daemonHooks.post_turn !== undefined) agentHooks.post_turn = daemonHooks.post_turn
+    if (entry.hooks !== undefined && entry.hooks !== null) {
+      if (typeof entry.hooks !== 'object' || Array.isArray(entry.hooks)) {
+        throw new Error(`agents.${name}.hooks must be a mapping`)
+      }
+      const h = entry.hooks as Record<string, unknown>
+      if (Object.prototype.hasOwnProperty.call(h, 'pre_turn')) {
+        if (typeof h.pre_turn === 'string') agentHooks.pre_turn = h.pre_turn
+        else delete agentHooks.pre_turn
+      }
+      if (Object.prototype.hasOwnProperty.call(h, 'post_turn')) {
+        if (typeof h.post_turn === 'string') agentHooks.post_turn = h.post_turn
+        else delete agentHooks.post_turn
+      }
+    }
+    result[name] = { name, workdir: entry.workdir, hooks: agentHooks }
+  }
+  return result
 }
 
 export function loadConfig(yamlText: string): BuddConfig {
@@ -47,13 +102,36 @@ export function loadConfig(yamlText: string): BuddConfig {
     throw new Error(`port must be an integer (got ${JSON.stringify(port)})`)
   }
 
-  const hooks: BuddConfig['hooks'] = {}
-  if (raw.hooks && typeof raw.hooks === 'object') {
-    if (typeof raw.hooks.pre_turn === 'string') hooks.pre_turn = raw.hooks.pre_turn
-    if (typeof raw.hooks.post_turn === 'string') hooks.post_turn = raw.hooks.post_turn
+  // Top-level workdir was the flat-form sugar; it's gone. Reject it with a
+  // pointer at the new shape so old configs fail loudly instead of silently
+  // ignoring the field.
+  if (raw.workdir !== undefined) {
+    throw new Error(
+      'top-level workdir is not supported; define agents: { <name>: { workdir: ... } } instead',
+    )
   }
 
-  const config: BuddConfig = { transport, port, runtime, hooks }
+  if (raw.agents === undefined) {
+    throw new Error(
+      'agents: is required — daemon.yaml must define at least one agent',
+    )
+  }
+
+  const daemonHooks: BuddConfig['hooks'] = {}
+  if (raw.hooks && typeof raw.hooks === 'object') {
+    if (typeof raw.hooks.pre_turn === 'string') daemonHooks.pre_turn = raw.hooks.pre_turn
+    if (typeof raw.hooks.post_turn === 'string') daemonHooks.post_turn = raw.hooks.post_turn
+  }
+
+  const agents = parseAgents(raw.agents, daemonHooks)
+
+  const config: BuddConfig = {
+    transport,
+    port,
+    runtime,
+    agents,
+    hooks: daemonHooks,
+  }
 
   if (runtime === 'docker') {
     const rawDocker = raw.docker && typeof raw.docker === 'object' ? raw.docker : {}
@@ -67,9 +145,6 @@ export function loadConfig(yamlText: string): BuddConfig {
     config.docker = docker
   }
 
-  if (typeof raw.workdir === 'string' && raw.workdir.length > 0) {
-    config.workdir = raw.workdir
-  }
   return config
 }
 
@@ -95,6 +170,7 @@ export function mergeCliFlags(base: BuddConfig, flags: CliFlags): BuddConfig {
     transport: 'http',
     port: flags.port ?? base.port,
     runtime,
+    agents: base.agents,
     hooks: { ...base.hooks },
   }
   if (runtime === 'docker') {
@@ -104,12 +180,5 @@ export function mergeCliFlags(base: BuddConfig, flags: CliFlags): BuddConfig {
       ...(baseDocker.home_mounts ? { home_mounts: baseDocker.home_mounts } : {}),
     }
   }
-  if (flags.workdir !== undefined) {
-    merged.workdir = flags.workdir
-  } else if (base.workdir !== undefined) {
-    merged.workdir = base.workdir
-  }
-  if (flags.preTurn !== undefined) merged.hooks.pre_turn = flags.preTurn
-  if (flags.postTurn !== undefined) merged.hooks.post_turn = flags.postTurn
   return merged
 }

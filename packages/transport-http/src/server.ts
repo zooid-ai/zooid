@@ -4,7 +4,13 @@ import { timingSafeEqual } from 'node:crypto'
 import type { SessionRunner, SessionEvent } from '@zooid/budd-core'
 
 export interface CreateAppOptions {
-  runner: SessionRunner
+  /**
+   * Map of agent name → SessionRunner. Every HTTP request is routed to the
+   * runner whose name appears in the path: `POST /agents/:name/sessions`,
+   * `POST /agents/:name/sessions/:id/turns`, `GET /agents/:name/sessions/:id/events`.
+   * An unknown name returns 404.
+   */
+  runners: Record<string, SessionRunner>
   /**
    * Bearer token clients must present in the `Authorization: Bearer <token>`
    * header. Compared in constant time. Generate one with `budd --print-token`.
@@ -47,19 +53,19 @@ async function readJson(c: Context): Promise<unknown | { error: string }> {
   }
 }
 
-export function createApp({ runner, token }: CreateAppOptions) {
+export function createApp({ runners, token }: CreateAppOptions) {
   const app = new Hono()
 
   /**
    * Stream a runner.run() invocation as Server-Sent Events.
    *
-   * Shared between `POST /sessions` (new session) and `POST /sessions/:id/turns`
-   * (resume). Once we open the SSE stream the response is committed to 200 —
-   * any error during the run surfaces as a terminal `turn.end` frame instead
-   * of a non-200 status.
+   * Shared between new-session and resume routes. Once we open the SSE
+   * stream the response is committed to 200 — any error during the run
+   * surfaces as a terminal `turn.end` frame instead of a non-200 status.
    */
   function streamRun(
     c: Context,
+    runner: SessionRunner,
     args: { prompt: string; session_id?: string },
   ) {
     return streamSSE(c, async (stream) => {
@@ -84,17 +90,27 @@ export function createApp({ runner, token }: CreateAppOptions) {
     })
   }
 
+  function resolveRunner(c: Context): SessionRunner | Response {
+    const name = c.req.param('name') ?? ''
+    const runner = runners[name]
+    if (!runner) return c.json({ error: 'unknown agent' }, 404)
+    return runner
+  }
+
   /**
-   * POST /sessions — start a new agent session.
+   * POST /agents/:name/sessions — start a new agent session.
    *
    * Body: `{ "prompt": "..." }`. The runner asks the adapter to mint a fresh
    * session id (preassigned strategy) or watches for one mid-stream (deferred
    * strategy). Either way the id is surfaced via the `session.start` SSE event.
    */
-  app.post('/sessions', async (c) => {
+  app.post('/agents/:name/sessions', async (c) => {
     if (!isAuthorized(token, c.req.header('authorization'))) {
       return c.json({ error: 'unauthorized' }, 401)
     }
+    const runner = resolveRunner(c)
+    if (runner instanceof Response) return runner
+
     const parsed = await readJson(c)
     if (parsed && typeof parsed === 'object' && 'error' in parsed) {
       return c.json({ error: (parsed as { error: string }).error }, 400)
@@ -107,11 +123,11 @@ export function createApp({ runner, token }: CreateAppOptions) {
     if (!readiness.ready) {
       return c.json({ error: readiness.error ?? 'not ready' }, 503)
     }
-    return streamRun(c, { prompt: body.prompt })
+    return streamRun(c, runner, { prompt: body.prompt })
   })
 
   /**
-   * POST /sessions/:id/turns — append a turn to an existing session.
+   * POST /agents/:name/sessions/:id/turns — append a turn to an existing session.
    *
    * Body: `{ "prompt": "..." }`. The id in the path is passed to the adapter
    * as the resume id (`claude --resume <id>`, `codex exec resume <id>`).
@@ -122,10 +138,13 @@ export function createApp({ runner, token }: CreateAppOptions) {
    * fast with 400 instead of leaking the format requirement out of the
    * Claude adapter via a mid-stream `turn.end`.
    */
-  app.post('/sessions/:id/turns', async (c) => {
+  app.post('/agents/:name/sessions/:id/turns', async (c) => {
     if (!isAuthorized(token, c.req.header('authorization'))) {
       return c.json({ error: 'unauthorized' }, 401)
     }
+    const runner = resolveRunner(c)
+    if (runner instanceof Response) return runner
+
     const id = c.req.param('id')
     if (!UUID_RE.test(id)) {
       return c.json({ error: 'session id must be a UUID' }, 400)
@@ -152,42 +171,34 @@ export function createApp({ runner, token }: CreateAppOptions) {
     // and `stream` body field point at the reattach endpoint so a polite
     // client can subscribe to the in-flight turn rather than retrying blindly.
     if (await runner.isSessionBusy(id)) {
-      c.header('Location', `/sessions/${id}/events`)
-      return c.json(
-        { error: 'session is busy', stream: `/sessions/${id}/events` },
-        409,
-      )
+      const name = c.req.param('name')
+      const stream = `/agents/${name}/sessions/${id}/events`
+      c.header('Location', stream)
+      return c.json({ error: 'session is busy', stream }, 409)
     }
-    return streamRun(c, { prompt: body.prompt, session_id: id })
+    return streamRun(c, runner, { prompt: body.prompt, session_id: id })
   })
 
   /**
-   * GET /sessions/:id/events — tap into a session's event stream.
+   * GET /agents/:name/sessions/:id/events — tap into a session's event stream.
    *
    * Uses the adapter's `openStream` to live-tail whatever persistent state
    * the underlying CLI keeps (Claude Code: the `.jsonl` session file under
    * `~/.claude/projects/...`; future adapters: whatever they want — budd
    * doesn't care about the storage shape).
    *
-   * Use cases:
-   *   - **Reattach after disconnect.** Client lost the original POST stream;
-   *     opens this to pick up where it left off.
-   *   - **Multi-instance / horizontally-scaled budd.** Replica A is running
-   *     a turn; replica B serves a GET against the same id and reads from
-   *     the shared volume (FUSE / Fly volume / EFS) where the session file
-   *     lives.
-   *   - **History inspection.** Anyone with a session id can read the full
-   *     event log without spawning the agent.
-   *
    * Returns 404 when there's no readable stream for the id (adapter doesn't
    * support it, or no state exists). The 404 vs 200 distinction is the only
    * thing the client sees — what kind of storage the adapter uses, and
    * whether the session is "live" or "ended", are deliberately invisible.
    */
-  app.get('/sessions/:id/events', async (c) => {
+  app.get('/agents/:name/sessions/:id/events', async (c) => {
     if (!isAuthorized(token, c.req.header('authorization'))) {
       return c.json({ error: 'unauthorized' }, 401)
     }
+    const runner = resolveRunner(c)
+    if (runner instanceof Response) return runner
+
     const id = c.req.param('id')
     if (!UUID_RE.test(id)) {
       return c.json({ error: 'session id must be a UUID' }, 400)

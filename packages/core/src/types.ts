@@ -188,8 +188,28 @@ export interface DockerConfig {
 }
 
 /**
- * Parsed daemon.yaml shape (MVP subset). transport-specific fields and
- * runtime-specific fields will widen this in future epics.
+ * Per-agent config inside a multi-agent daemon.yaml. Each agent has its own
+ * workspace and hooks; runtime + image + adapter are shared daemon-wide.
+ */
+export interface AgentConfig {
+  /** Routing name. Must match /^[a-z][a-z0-9-]{0,31}$/ */
+  name: string
+  /** Host directory mounted at /workspace. Required — agents are defined
+   *  by their workspace; sharing one across agents is almost always a
+   *  config mistake. */
+  workdir: string
+  /** Per-agent hooks. Daemon-wide hooks are merged in at load time;
+   *  per-agent overrides win, and an explicit `null` disables a daemon-wide hook. */
+  hooks: {
+    pre_turn?: string
+    post_turn?: string
+  }
+}
+
+/**
+ * Parsed daemon.yaml shape. Always multi-agent — `agents:` is required and
+ * must have at least one entry. There is no flat-form sugar and no synthesized
+ * `default` agent.
  */
 export interface BuddConfig {
   transport: 'http'
@@ -197,8 +217,9 @@ export interface BuddConfig {
   runtime: 'local' | 'docker'
   /** Docker-specific config. Populated when `runtime === 'docker'`. */
   docker?: DockerConfig
-  /** Host directory to mount into the container. Undefined → CLI defaults to cwd. */
-  workdir?: string
+  /** Required. Must have at least one entry. */
+  agents: Record<string, AgentConfig>
+  /** Daemon-wide hook defaults. Merged into each agent.hooks at load time. */
   hooks: {
     pre_turn?: string
     post_turn?: string
@@ -211,7 +232,4 @@ export interface CliFlags {
   runtime?: string
   /** Docker image override (shorthand for docker.image). */
   image?: string
-  workdir?: string
-  preTurn?: string
-  postTurn?: string
 }

@@ -19,6 +19,7 @@ export type {
   SessionIdPlan,
   ParsedLine,
   DockerConfig,
+  AgentConfig,
   BuddConfig,
   CliFlags,
   Transport,

@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { createApp } from './server.js'
 import { parseEventStream } from './sse.js'
-import { SessionRunner, type SessionEvent } from '@zooid/budd-core'
+import {
+  SessionRunner,
+  type AgentAdapter,
+  type SessionEvent,
+  type SessionRunnerOptions,
+} from '@zooid/budd-core'
 import { LocalRuntime } from '@zooid/budd-runtime-local'
 import { claudeAdapter } from '@zooid/budd-adapter-claude'
 import { fileURLToPath } from 'node:url'
@@ -20,6 +25,9 @@ const TOKEN = 'test-token-0123456789abcdef'
 // can't just use "01EXISTING" anymore.
 const EXISTING_ID = '11111111-2222-3333-4444-555555555555'
 
+// Single-agent shorthand: every existing-shape test routes to /agents/qa/...
+const AGENT = 'qa'
+
 function makeApp(
   opts: {
     hooks?: { pre_turn?: string; post_turn?: string }
@@ -35,7 +43,7 @@ function makeApp(
     overridePath: opts.noAdapter ? '/definitely/not/a/real/dir' : undefined,
     adapterEnv: opts.adapterEnv,
   })
-  return createApp({ runner, token: TOKEN })
+  return createApp({ runners: { [AGENT]: runner }, token: TOKEN })
 }
 
 async function postJson(
@@ -60,10 +68,12 @@ async function readSseStream(res: Response): Promise<SessionEvent[]> {
   return parseEventStream(text)
 }
 
-describe('POST /sessions', () => {
+describe('POST /agents/:name/sessions', () => {
   it('happy path: 200, event-stream, session.start → turn.start → stdout → turn.end', async () => {
     const app = makeApp()
-    const res = await postJson(app, '/sessions', { prompt: 'fix the auth bug' })
+    const res = await postJson(app, `/agents/${AGENT}/sessions`, {
+      prompt: 'fix the auth bug',
+    })
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toContain('text/event-stream')
 
@@ -84,7 +94,9 @@ describe('POST /sessions', () => {
     const argvFile = join(dir, 'argv.txt')
     try {
       const app = makeApp({ adapterEnv: { STUB_ARGV_FILE: argvFile } })
-      const res = await postJson(app, '/sessions', { prompt: 'fix bug' })
+      const res = await postJson(app, `/agents/${AGENT}/sessions`, {
+        prompt: 'fix bug',
+      })
       await res.text() // drain
       const argv = readFileSync(argvFile, 'utf8').split('\n').filter(Boolean)
       expect(argv).toContain('--session-id')
@@ -98,7 +110,7 @@ describe('POST /sessions', () => {
     const app = makeApp()
     const res = await postJson(
       app,
-      '/sessions',
+      `/agents/${AGENT}/sessions`,
       { prompt: 'fix bug' },
       'Bearer not-the-token',
     )
@@ -108,7 +120,12 @@ describe('POST /sessions', () => {
 
   it('missing Authorization header → 401', async () => {
     const app = makeApp()
-    const res = await postJson(app, '/sessions', { prompt: 'fix bug' }, null)
+    const res = await postJson(
+      app,
+      `/agents/${AGENT}/sessions`,
+      { prompt: 'fix bug' },
+      null,
+    )
     expect(res.status).toBe(401)
   })
 
@@ -116,7 +133,7 @@ describe('POST /sessions', () => {
     const app = makeApp()
     const res = await postJson(
       app,
-      '/sessions',
+      `/agents/${AGENT}/sessions`,
       { prompt: 'fix bug' },
       `Basic ${TOKEN}`,
     )
@@ -127,7 +144,7 @@ describe('POST /sessions', () => {
     const app = makeApp()
     const res = await postJson(
       app,
-      '/sessions',
+      `/agents/${AGENT}/sessions`,
       { prompt: 'fix bug' },
       'Bearer short',
     )
@@ -136,7 +153,7 @@ describe('POST /sessions', () => {
 
   it('missing prompt → 400', async () => {
     const app = makeApp()
-    const res = await postJson(app, '/sessions', {})
+    const res = await postJson(app, `/agents/${AGENT}/sessions`, {})
     expect(res.status).toBe(400)
     expect(await res.json()).toMatchObject({
       error: expect.stringMatching(/prompt/),
@@ -145,7 +162,7 @@ describe('POST /sessions', () => {
 
   it('non-JSON body → 400', async () => {
     const app = makeApp()
-    const res = await app.request('/sessions', {
+    const res = await app.request(`/agents/${AGENT}/sessions`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -158,7 +175,9 @@ describe('POST /sessions', () => {
 
   it('no adapter available → 503', async () => {
     const app = makeApp({ noAdapter: true })
-    const res = await postJson(app, '/sessions', { prompt: 'fix bug' })
+    const res = await postJson(app, `/agents/${AGENT}/sessions`, {
+      prompt: 'fix bug',
+    })
     expect(res.status).toBe(503)
     expect(await res.json()).toMatchObject({
       error: expect.stringMatching(/no agent adapter/),
@@ -167,7 +186,9 @@ describe('POST /sessions', () => {
 
   it('pre_turn failure → 200 event-stream with turn.end only', async () => {
     const app = makeApp({ hooks: { pre_turn: 'echo nope >&2 && exit 1' } })
-    const res = await postJson(app, '/sessions', { prompt: 'fix bug' })
+    const res = await postJson(app, `/agents/${AGENT}/sessions`, {
+      prompt: 'fix bug',
+    })
     expect(res.status).toBe(200)
     const events = await readSseStream(res)
     expect(events).toHaveLength(1)
@@ -178,22 +199,26 @@ describe('POST /sessions', () => {
 
   it('agent non-zero exit → turn.end with that exit code', async () => {
     const app = makeApp({ adapterEnv: { STUB_EXIT_CODE: '2' } })
-    const res = await postJson(app, '/sessions', { prompt: 'fix bug' })
+    const res = await postJson(app, `/agents/${AGENT}/sessions`, {
+      prompt: 'fix bug',
+    })
     const events = await readSseStream(res)
     const ended = events[events.length - 1]
     expect((ended as { exit_code: number }).exit_code).toBe(2)
   })
 })
 
-describe('POST /sessions/:id/turns', () => {
+describe('POST /agents/:name/sessions/:id/turns', () => {
   it('passes --resume <id> to the adapter and omits session.start', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'budd-argv-'))
     const argvFile = join(dir, 'argv.txt')
     try {
       const app = makeApp({ adapterEnv: { STUB_ARGV_FILE: argvFile } })
-      const res = await postJson(app, `/sessions/${EXISTING_ID}/turns`, {
-        prompt: 'also add tests',
-      })
+      const res = await postJson(
+        app,
+        `/agents/${AGENT}/sessions/${EXISTING_ID}/turns`,
+        { prompt: 'also add tests' },
+      )
       const events = await readSseStream(res)
 
       const argv = readFileSync(argvFile, 'utf8').split('\n').filter(Boolean)
@@ -211,9 +236,11 @@ describe('POST /sessions/:id/turns', () => {
 
   it('non-UUID id → 400', async () => {
     const app = makeApp()
-    const res = await postJson(app, '/sessions/not-a-uuid/turns', {
-      prompt: 'whatever',
-    })
+    const res = await postJson(
+      app,
+      `/agents/${AGENT}/sessions/not-a-uuid/turns`,
+      { prompt: 'whatever' },
+    )
     expect(res.status).toBe(400)
     expect(await res.json()).toMatchObject({
       error: expect.stringMatching(/UUID/),
@@ -224,7 +251,7 @@ describe('POST /sessions/:id/turns', () => {
     const app = makeApp()
     const res = await postJson(
       app,
-      `/sessions/${EXISTING_ID}/turns`,
+      `/agents/${AGENT}/sessions/${EXISTING_ID}/turns`,
       { prompt: 'x' },
       'Bearer not-the-token',
     )
@@ -233,15 +260,21 @@ describe('POST /sessions/:id/turns', () => {
 
   it('missing prompt → 400', async () => {
     const app = makeApp()
-    const res = await postJson(app, `/sessions/${EXISTING_ID}/turns`, {})
+    const res = await postJson(
+      app,
+      `/agents/${AGENT}/sessions/${EXISTING_ID}/turns`,
+      {},
+    )
     expect(res.status).toBe(400)
   })
 
   it('no adapter available → 503', async () => {
     const app = makeApp({ noAdapter: true })
-    const res = await postJson(app, `/sessions/${EXISTING_ID}/turns`, {
-      prompt: 'x',
-    })
+    const res = await postJson(
+      app,
+      `/agents/${AGENT}/sessions/${EXISTING_ID}/turns`,
+      { prompt: 'x' },
+    )
     expect(res.status).toBe(503)
   })
 })
@@ -254,7 +287,91 @@ describe('legacy /run is gone', () => {
   })
 })
 
-// ─── GET /sessions/:id/events ────────────────────────────────────────────
+// ─── multi-agent routing ─────────────────────────────────────────────────
+
+function makeMultiAgentApp(opts: {
+  agents: string[]
+  hooks?: { pre_turn?: string; post_turn?: string }
+}) {
+  const runners: Record<string, SessionRunner> = {}
+  for (const name of opts.agents) {
+    runners[name] = new SessionRunner({
+      runtime: new LocalRuntime(),
+      adapters: [claudeAdapter],
+      hooks: opts.hooks ?? {},
+      pathPrefix: FIXTURES_BIN,
+    })
+  }
+  return createApp({ runners, token: TOKEN })
+}
+
+describe('POST /agents/:name/sessions — multi-agent routing', () => {
+  it('routes to the named runner, returns session.start then turn.end', async () => {
+    const app = makeMultiAgentApp({ agents: ['qa', 'product'] })
+    const res = await postJson(app, '/agents/qa/sessions', { prompt: 'hi' })
+    expect(res.status).toBe(200)
+    const events = await readSseStream(res)
+    expect(events[0].type).toBe('session.start')
+    expect(events[events.length - 1].type).toBe('turn.end')
+  })
+
+  it('404 for unknown agent', async () => {
+    const app = makeMultiAgentApp({ agents: ['qa'] })
+    const res = await postJson(app, '/agents/nobody/sessions', { prompt: 'x' })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'unknown agent' })
+  })
+
+  it('401 before agent lookup', async () => {
+    const app = makeMultiAgentApp({ agents: ['qa'] })
+    const res = await postJson(app, '/agents/nobody/sessions', { prompt: 'x' }, null)
+    expect(res.status).toBe(401)
+  })
+
+  it('resume route threads id to correct runner', async () => {
+    const app = makeMultiAgentApp({ agents: ['qa'] })
+    const res = await postJson(
+      app,
+      `/agents/qa/sessions/${EXISTING_ID}/turns`,
+      { prompt: 'continue' },
+    )
+    expect(res.status).toBe(200)
+  })
+
+  it('events route 404s on unknown agent', async () => {
+    const app = makeMultiAgentApp({ agents: ['qa'] })
+    const res = await app.request(
+      `/agents/nobody/sessions/${EXISTING_ID}/events`,
+      { headers: { authorization: `Bearer ${TOKEN}` } },
+    )
+    expect(res.status).toBe(404)
+    expect(await res.json()).toEqual({ error: 'unknown agent' })
+  })
+})
+
+describe('legacy /sessions routes are gone', () => {
+  it('POST /sessions returns 404 — no alias support', async () => {
+    const app = makeMultiAgentApp({ agents: ['qa'] })
+    const res = await postJson(app, '/sessions', { prompt: 'hi' })
+    expect(res.status).toBe(404)
+  })
+
+  it('POST /sessions/:id/turns returns 404', async () => {
+    const app = makeMultiAgentApp({ agents: ['qa'] })
+    const res = await postJson(app, `/sessions/${EXISTING_ID}/turns`, { prompt: 'x' })
+    expect(res.status).toBe(404)
+  })
+
+  it('GET /sessions/:id/events returns 404', async () => {
+    const app = makeMultiAgentApp({ agents: ['qa'] })
+    const res = await app.request(`/sessions/${EXISTING_ID}/events`, {
+      headers: { authorization: `Bearer ${TOKEN}` },
+    })
+    expect(res.status).toBe(404)
+  })
+})
+
+// ─── GET /agents/:name/sessions/:id/events ───────────────────────────────
 //
 // The HTTP route delegates to runner.openSessionStream, which delegates to
 // adapter.openStream. We don't want this test file to depend on Claude Code's
@@ -262,8 +379,6 @@ describe('legacy /run is gone', () => {
 // Here we use a tiny fake adapter that returns a fixed async iterable, so the
 // tests are about the *route shape* (auth, UUID validation, 404 vs 200, SSE
 // framing) not about JSONL parsing.
-
-import type { AgentAdapter, SessionRunnerOptions } from '@zooid/budd-core'
 
 function makeFakeStreamAdapter(opts: {
   events?: SessionEvent[] | null // null = openStream returns null (404 case)
@@ -297,10 +412,10 @@ function makeAppWithAdapter(adapter: AgentAdapter, extra: Partial<SessionRunnerO
     pathPrefix: FIXTURES_BIN, // satisfies isAvailable detection
     ...extra,
   })
-  return createApp({ runner, token: TOKEN })
+  return createApp({ runners: { [AGENT]: runner }, token: TOKEN })
 }
 
-describe('GET /sessions/:id/events', () => {
+describe('GET /agents/:name/sessions/:id/events', () => {
   const ID = '11111111-2222-3333-4444-555555555555'
 
   it('streams events from the adapter as SSE', async () => {
@@ -311,7 +426,7 @@ describe('GET /sessions/:id/events', () => {
       { type: 'turn.end', exit_code: 0 },
     ]
     const app = makeAppWithAdapter(makeFakeStreamAdapter({ events }))
-    const res = await app.request(`/sessions/${ID}/events`, {
+    const res = await app.request(`/agents/${AGENT}/sessions/${ID}/events`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     })
     expect(res.status).toBe(200)
@@ -322,7 +437,7 @@ describe('GET /sessions/:id/events', () => {
 
   it('returns 404 when the adapter has no stream for the id', async () => {
     const app = makeAppWithAdapter(makeFakeStreamAdapter({ events: null }))
-    const res = await app.request(`/sessions/${ID}/events`, {
+    const res = await app.request(`/agents/${AGENT}/sessions/${ID}/events`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     })
     expect(res.status).toBe(404)
@@ -336,7 +451,7 @@ describe('GET /sessions/:id/events', () => {
     // null because no session file exists for this id under cwd. Same outcome
     // for the client either way: 404.
     const app = makeApp()
-    const res = await app.request(`/sessions/${ID}/events`, {
+    const res = await app.request(`/agents/${AGENT}/sessions/${ID}/events`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     })
     expect(res.status).toBe(404)
@@ -344,7 +459,7 @@ describe('GET /sessions/:id/events', () => {
 
   it('non-UUID id → 400', async () => {
     const app = makeAppWithAdapter(makeFakeStreamAdapter({ events: [] }))
-    const res = await app.request('/sessions/not-a-uuid/events', {
+    const res = await app.request(`/agents/${AGENT}/sessions/not-a-uuid/events`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     })
     expect(res.status).toBe(400)
@@ -352,7 +467,7 @@ describe('GET /sessions/:id/events', () => {
 
   it('wrong token → 401', async () => {
     const app = makeAppWithAdapter(makeFakeStreamAdapter({ events: [] }))
-    const res = await app.request(`/sessions/${ID}/events`, {
+    const res = await app.request(`/agents/${AGENT}/sessions/${ID}/events`, {
       headers: { authorization: 'Bearer wrong' },
     })
     expect(res.status).toBe(401)
@@ -360,7 +475,7 @@ describe('GET /sessions/:id/events', () => {
 
   it('missing Authorization → 401', async () => {
     const app = makeAppWithAdapter(makeFakeStreamAdapter({ events: [] }))
-    const res = await app.request(`/sessions/${ID}/events`)
+    const res = await app.request(`/agents/${AGENT}/sessions/${ID}/events`)
     expect(res.status).toBe(401)
   })
 })
@@ -373,7 +488,7 @@ describe('GET /sessions/:id/events', () => {
 // if the session is mid-turn, return 409 with a `Location` header pointing
 // at the reattach endpoint instead.
 
-describe('POST /sessions/:id/turns concurrency guard', () => {
+describe('POST /agents/:name/sessions/:id/turns concurrency guard', () => {
   const ID = '11111111-2222-3333-4444-555555555555'
 
   it('returns 409 + Location header when the adapter reports the session busy', async () => {
@@ -382,7 +497,7 @@ describe('POST /sessions/:id/turns concurrency guard', () => {
     const app = makeAppWithAdapter(
       makeFakeStreamAdapter({ events: [], busy: true }),
     )
-    const res = await app.request(`/sessions/${ID}/turns`, {
+    const res = await app.request(`/agents/${AGENT}/sessions/${ID}/turns`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
@@ -391,18 +506,20 @@ describe('POST /sessions/:id/turns concurrency guard', () => {
       body: JSON.stringify({ prompt: 'hi' }),
     })
     expect(res.status).toBe(409)
-    expect(res.headers.get('location')).toBe(`/sessions/${ID}/events`)
+    expect(res.headers.get('location')).toBe(
+      `/agents/${AGENT}/sessions/${ID}/events`,
+    )
     expect(await res.json()).toEqual({
       error: 'session is busy',
-      stream: `/sessions/${ID}/events`,
+      stream: `/agents/${AGENT}/sessions/${ID}/events`,
     })
   })
 
   // Idle path (busy=false) is already covered by every existing
-  // `POST /sessions/:id/turns` test in this file — they all run against
-  // claudeAdapter, whose real isSessionBusy returns false because the
+  // `POST /agents/:name/sessions/:id/turns` test in this file — they all run
+  // against claudeAdapter, whose real isSessionBusy returns false because the
   // session id never has a real on-disk JSONL under the temp HOME.
   //
-  // Likewise, POST /sessions never consults isSessionBusy (a fresh
-  // session id can't race itself), so no need to test it here.
+  // Likewise, POST /agents/:name/sessions never consults isSessionBusy (a
+  // fresh session id can't race itself), so no need to test it here.
 })
