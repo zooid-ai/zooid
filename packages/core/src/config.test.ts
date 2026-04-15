@@ -276,7 +276,7 @@ describe('loadConfig — per-agent adapter + docker block', () => {
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude:latest }
+docker: { image: budd/claude-code:latest }
 agents:
   qa:
     workdir: ./qa
@@ -375,7 +375,7 @@ agents:
   qa:
     workdir: ./qa
     docker:
-      image: budd/claude:latest
+      image: budd/claude-code:latest
 `),
     ).toThrow(/docker.*only.*when runtime.*docker/i)
   })

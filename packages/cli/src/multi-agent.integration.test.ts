@@ -45,7 +45,7 @@ describe('buildRunnersFromConfig — per-agent adapter + image', () => {
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude:latest }
+docker: { image: budd/claude-code:latest }
 agents:
   qa:
     workdir: .
@@ -63,7 +63,7 @@ agents:
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude:latest }
+docker: { image: budd/claude-code:latest }
 agents:
   qa:
     workdir: .
@@ -73,7 +73,7 @@ agents:
     docker: { image: budd/codex:latest }
 `)
     const runners = buildRunnersFromConfig(config)
-    expect((runners.qa.runtime as DockerRuntime).image).toBe('budd/claude:latest')
+    expect((runners.qa.runtime as DockerRuntime).image).toBe('budd/claude-code:latest')
     expect((runners.ship.runtime as DockerRuntime).image).toBe('budd/codex:latest')
   })
 
@@ -81,7 +81,7 @@ agents:
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude:latest }
+docker: { image: budd/claude-code:latest }
 agents:
   qa:
     workdir: .
@@ -112,7 +112,7 @@ agents:
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude:latest }
+docker: { image: budd/claude-code:latest }
 agents:
   qa:
     workdir: .
