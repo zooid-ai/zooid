@@ -65,6 +65,13 @@ export function buildRunnersFromConfig(
       )
     }
 
+    // Resolve the agent's workdir to an absolute path. Docker bind-mount
+    // sources must be absolute (a relative `.` is interpreted as a volume
+    // name), and the SessionRunner's cwd is used for hook execution and
+    // adapter file lookups — also needs to be absolute for deterministic
+    // behaviour regardless of where budd was launched from.
+    const absWorkdir = resolve(configDir, agent.workdir)
+
     let runtime: Runtime
     if (config.runtime === 'docker') {
       const image = agent.docker?.image ?? config.docker?.image
@@ -73,7 +80,7 @@ export function buildRunnersFromConfig(
           `agents.${name}: image is required when runtime: docker (set agents.${name}.docker.image or top-level docker.image)`,
         )
       }
-      runtime = new DockerRuntime({ image, workdir: agent.workdir })
+      runtime = new DockerRuntime({ image, workdir: absWorkdir })
     } else {
       runtime = sharedLocal!
     }
@@ -89,7 +96,7 @@ export function buildRunnersFromConfig(
       runtime,
       adapter,
       hooks: agent.hooks,
-      cwd: agent.workdir,
+      cwd: absWorkdir,
     }
     if (opts.pathPrefix !== undefined) runnerOpts.pathPrefix = opts.pathPrefix
     if (opts.overridePath !== undefined) runnerOpts.overridePath = opts.overridePath

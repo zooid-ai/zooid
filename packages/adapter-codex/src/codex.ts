@@ -91,7 +91,7 @@ export const codexAdapter: AgentAdapter = {
    * Tail Codex's persistent session file as a stream of SessionEvents.
    * Returns null if no file exists for that id (the route surfaces this as 404).
    */
-  async openStream(id, cwd) {
+  async openStream(id, _cwd) {
     const filePath = await findCodexSessionFile(id)
     if (!filePath) return null
     return tailCodexSessionFile(filePath)
@@ -101,7 +101,7 @@ export const codexAdapter: AgentAdapter = {
    * mid-turn. Used by the HTTP transport to 409 a `POST /sessions/:id/turns`
    * that races an in-flight turn.
    */
-  async isSessionBusy(id, cwd) {
+  async isSessionBusy(id, _cwd) {
     const filePath = await findCodexSessionFile(id)
     if (!filePath) return false
     return isCodexSessionBusy(filePath)
