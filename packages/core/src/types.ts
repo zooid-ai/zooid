@@ -103,12 +103,45 @@ export type ParsedLine =
   | { kind: 'ignore' }
 
 /**
+ * How an agent names its adapter in daemon.yaml. String form (`adapter: claude`)
+ * is sugar for `{ type: 'claude' }`. Parser normalizes to the object form so
+ * downstream code only ever sees one shape.
+ */
+export type AgentAdapterRef =
+  | string
+  | { type: string; options?: Record<string, unknown> }
+
+/**
+ * Builds an AgentAdapter from per-agent options. The CLI's BUILTIN_ADAPTERS
+ * registry maps adapter-name → factory. Trivial adapters (claude, codex) wrap
+ * their singleton in `() => singleton`. Parameterized adapters (opencode)
+ * inspect `opts` and configure themselves accordingly.
+ *
+ * Factories validate their own options and throw a clear Error on bad input;
+ * `buildRunnersFromConfig` catches and re-throws with an `agents.<name>.adapter.options:`
+ * prefix so the user knows which agent block to fix.
+ */
+export type AgentAdapterFactory = (opts: Record<string, unknown>) => AgentAdapter
+
+/**
  * An AgentAdapter knows how to invoke a specific CLI agent (claude, codex,
  * opencode, pi). It builds the spawn config, detects whether the binary is
  * available on the host, and tells the runner how session ids are assigned.
  */
 export interface AgentAdapter {
   name: string
+  /**
+   * Env vars to forward from the daemon process into each session container
+   * (Docker runtime only). The runtime emits `-e KEY=value` for each name
+   * present in `process.env`; names absent from the daemon's env are silently
+   * dropped (a Claude-only persona shouldn't fail to start on a VM that only
+   * exports OPENAI_API_KEY).
+   *
+   * Adapter-declared names are same-name only — the CLI inside the container
+   * reads exactly these names. Renames live exclusively in the user's
+   * `agents.*.docker.forward_env` list.
+   */
+  envPassthrough?: string[]
   isAvailable(pathOverride?: string): boolean
   /** Called once per *new* session (skipped on resume). */
   prepareNewSession(): SessionIdPlan
@@ -224,6 +257,16 @@ export interface AgentDockerConfig {
     /** Subtractive override: disable adapter-declared workspaceReadOnly entries. */
     workspace_readonly_disable?: string[]
   }
+  /**
+   * Additional env vars to forward into this agent's container, on top of
+   * whatever the adapter declares. Each entry is either:
+   *   - "NAME"               — pass-through same-name from process.env
+   *   - "HOST:CONTAINER"     — read process.env[HOST], expose as CONTAINER
+   *
+   * BUDD_TOKEN and any BUDD_* var are blocked unconditionally, on either
+   * side of a rename. Missing source vars contribute nothing.
+   */
+  forward_env?: string[]
 }
 
 /**
@@ -244,8 +287,9 @@ export interface AgentConfig {
     pre_turn?: string
     post_turn?: string
   }
-  /** Adapter name. Optional; defaults to the first registered adapter. */
-  adapter?: string
+  /** Adapter reference. Optional; defaults to the first registered adapter.
+   *  Always normalized to object form by the parser. */
+  adapter?: { type: string; options?: Record<string, unknown> }
   /** Docker-only block. Rejected at parse time when runtime !== 'docker'. */
   docker?: AgentDockerConfig
 }

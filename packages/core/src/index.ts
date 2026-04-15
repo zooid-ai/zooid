@@ -16,6 +16,8 @@ export type {
   SpawnConfig,
   Runtime,
   AgentAdapter,
+  AgentAdapterRef,
+  AgentAdapterFactory,
   SessionIdPlan,
   ParsedLine,
   DockerConfig,

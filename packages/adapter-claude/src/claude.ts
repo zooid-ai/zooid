@@ -27,6 +27,7 @@ function findOnPath(binary: string, pathString: string): string | null {
  */
 export const claudeAdapter: AgentAdapter = {
   name: 'claude',
+  envPassthrough: ['ANTHROPIC_API_KEY'],
   workspaceReadOnly: ['CLAUDE.md', '.claude'],
   homeReadOnly: ['.claude/settings.json'],
   sessionStateDir(containerWorkdir) {

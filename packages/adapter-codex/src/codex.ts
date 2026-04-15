@@ -27,6 +27,7 @@ function findOnPath(binary: string, pathString: string): string | null {
  */
 export const codexAdapter: AgentAdapter = {
   name: 'codex',
+  envPassthrough: ['CODEX_API_KEY'],
   workspaceReadOnly: ['AGENTS.md', '.codex'],
   homeReadOnly: ['.codex/config.toml'],
   sessionStateDir() {

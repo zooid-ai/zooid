@@ -85,6 +85,33 @@ function parseAgentDocker(name: string, raw: unknown): AgentDockerConfig {
     }
     if (mounts.extra || mounts.workspace_readonly_disable) out.mounts = mounts
   }
+  if (d.forward_env !== undefined) {
+    if (!Array.isArray(d.forward_env)) {
+      throw new Error(`agents.${name}.docker.forward_env must be an array of strings`)
+    }
+    const list: string[] = []
+    for (const v of d.forward_env) {
+      if (typeof v !== 'string' || v.length === 0) {
+        throw new Error(
+          `agents.${name}.docker.forward_env[] must be a non-empty string`,
+        )
+      }
+      // Validate rename syntax at parse time so the runtime layer can stay simple.
+      const parts = v.split(':')
+      if (parts.length > 2) {
+        throw new Error(
+          `agents.${name}.docker.forward_env[] "${v}" is not a valid env spec (expected NAME or HOST:CONTAINER)`,
+        )
+      }
+      if (parts.length === 2 && (parts[0]!.length === 0 || parts[1]!.length === 0)) {
+        throw new Error(
+          `agents.${name}.docker.forward_env[] has empty host or container name in "${v}"`,
+        )
+      }
+      list.push(v)
+    }
+    out.forward_env = list
+  }
   return out
 }
 
@@ -132,12 +159,33 @@ function parseAgents(
       }
     }
 
-    let adapter: string | undefined
+    let adapter: AgentConfig['adapter']
     if (entry.adapter !== undefined) {
-      if (typeof entry.adapter !== 'string' || entry.adapter.length === 0) {
-        throw new Error(`agents.${name}.adapter must be a non-empty string`)
+      if (typeof entry.adapter === 'string') {
+        if (entry.adapter.length === 0) {
+          throw new Error(`agents.${name}.adapter must be a non-empty string`)
+        }
+        adapter = { type: entry.adapter }
+      } else if (
+        typeof entry.adapter === 'object' &&
+        entry.adapter !== null &&
+        !Array.isArray(entry.adapter)
+      ) {
+        const a = entry.adapter as Record<string, unknown>
+        if (typeof a.type !== 'string' || a.type.length === 0) {
+          throw new Error(`agents.${name}.adapter.type is required and must be a non-empty string`)
+        }
+        const ref: { type: string; options?: Record<string, unknown> } = { type: a.type }
+        if (a.options !== undefined) {
+          if (typeof a.options !== 'object' || a.options === null || Array.isArray(a.options)) {
+            throw new Error(`agents.${name}.adapter.options must be a mapping`)
+          }
+          ref.options = a.options as Record<string, unknown>
+        }
+        adapter = ref
+      } else {
+        throw new Error(`agents.${name}.adapter must be a string or a mapping`)
       }
-      adapter = entry.adapter
     }
 
     let dockerBlock: AgentDockerConfig | undefined

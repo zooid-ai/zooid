@@ -2,32 +2,8 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { ExtraMount, Runtime, SpawnConfig } from '@zooid/budd-core'
-
-/**
- * Default env allowlist for the Docker runtime. Only these host env vars
- * are forwarded into the container. Anything else stays on the host —
- * the whole point of running the agent inside Docker is sandboxing, so
- * we never `--env-file` the entire process.env in.
- *
- * Includes:
- *   - API keys for supported agent CLIs (Anthropic, Codex)
- *   - Per-session vars set by SessionRunner / hooks (SESSION_ID,
- *     MESSAGE_TEXT, WORKDIR)
- *   - STUB_* vars used by the e2e test stub image so tests can drive
- *     the stub `claude` binary's exit code and behaviour. These have
- *     no effect with the real production image.
- */
-export const DEFAULT_DOCKER_ENV_ALLOWLIST: readonly string[] = [
-  'ANTHROPIC_API_KEY',
-  'CODEX_API_KEY',
-  'SESSION_ID',
-  'MESSAGE_TEXT',
-  'WORKDIR',
-  // Test-only stub controls
-  'STUB_EXIT_CODE',
-  'STUB_STDERR',
-]
+import type { AgentAdapter, ExtraMount, Runtime, SpawnConfig } from '@zooid/budd-core'
+import { resolveEnvPassthrough } from './env.js'
 
 export interface DockerRuntimeOptions {
   /** Image to run, e.g. `budd/claude-code:latest`. */
@@ -35,11 +11,14 @@ export interface DockerRuntimeOptions {
   /** Host directory to mount at /workspace inside the container. */
   workdir: string
   /**
-   * Env vars to forward from the host into the container. Defaults to
-   * `DEFAULT_DOCKER_ENV_ALLOWLIST`. Pass an empty array to fall back to
-   * the default; pass an explicit list to override.
+   * Adapter is needed at construction time so we can resolve its
+   * envPassthrough at spawn time; runner and runtime share the adapter.
    */
-  envAllowlist?: readonly string[]
+  adapter: AgentAdapter
+  /** User-declared forward_env from daemon.yaml. */
+  forwardEnv?: string[]
+  /** Override for tests. Defaults to process.env. */
+  processEnv?: Record<string, string | undefined>
 }
 
 export interface BuildDockerArgsInput {
@@ -48,8 +27,8 @@ export interface BuildDockerArgsInput {
   args: string[]
   /** Host workdir; mounted RW at /workspace. */
   workdir: string
-  envAllowlist: readonly string[]
-  hostEnv: Record<string, string | undefined>
+  /** Pre-resolved env entries to expose as `-e KEY=VALUE`, in order. */
+  envPassthrough: Array<[string, string]>
   hostHome: string
   containerHome: string
   workspaceReadOnly?: string[]
@@ -104,10 +83,8 @@ export function buildDockerArgs(input: BuildDockerArgsInput): string[] {
     argv.push('-v', `${extra.path}:${extra.target}:${extra.mode}`)
   }
 
-  // 6. Env passthrough — allowlist only, skip undefined values.
-  for (const key of input.envAllowlist) {
-    const value = input.hostEnv[key]
-    if (value === undefined) continue
+  // 6. Env passthrough — pre-resolved by caller, emitted in order.
+  for (const [key, value] of input.envPassthrough) {
     argv.push('-e', `${key}=${value}`)
   }
 
@@ -149,7 +126,8 @@ export function mapDockerExitCode(
  *   - Adapter-declared homeReadOnly files under $HOME (RO)
  *   - Adapter-declared sessionStateDir under $HOME (RW)
  *   - Per-agent extraMounts from daemon.yaml
- *   - Only allowlisted host env vars forwarded via `-e`
+ *   - Adapter-declared envPassthrough + per-agent forward_env (deny-listed
+ *     for BUDD_*) forwarded via `-e`
  *   - `--rm` so the container disappears on exit
  *   - `-i` so stdin is wired up (chunkers in SessionRunner read stdout)
  */
@@ -168,18 +146,39 @@ export class DockerRuntime implements Runtime {
     return this.opts.image
   }
 
-  spawn(config: SpawnConfig): ChildProcess {
-    const allowlist =
-      this.opts.envAllowlist && this.opts.envAllowlist.length > 0
-        ? this.opts.envAllowlist
-        : DEFAULT_DOCKER_ENV_ALLOWLIST
-    const argv = buildDockerArgs({
+  /**
+   * Build the docker argv for a given SpawnConfig. Composes
+   * `resolveEnvPassthrough(adapter, forwardEnv, processEnv)` with the
+   * synthetic per-call vars in `config.env` (SESSION_ID, MESSAGE_TEXT,
+   * WORKDIR — set by SessionRunner / hooks), then hands off to
+   * buildDockerArgs.
+   *
+   * Per-call config.env vars are appended verbatim — they're owned by the
+   * runner, not user-controlled, so the BUDD_* deny list doesn't apply
+   * (and SessionRunner never sets BUDD_*).
+   */
+  buildArgv(config: SpawnConfig): string[] {
+    const processEnv = this.opts.processEnv ?? process.env
+    const adapterEnv = resolveEnvPassthrough(
+      this.opts.adapter,
+      this.opts.forwardEnv,
+      processEnv,
+    )
+    const synthetic: Array<[string, string]> = Object.entries(config.env ?? {})
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => [k, v as string])
+    // Synthetic vars override adapter vars on collision (last wins).
+    const merged = new Map<string, string>()
+    for (const [k, v] of adapterEnv) merged.set(k, v)
+    for (const [k, v] of synthetic) merged.set(k, v)
+    const envPassthrough = [...merged.entries()].sort(([a], [b]) => a.localeCompare(b))
+
+    return buildDockerArgs({
       image: this.opts.image,
       command: config.command,
       args: config.args,
       workdir: this.opts.workdir,
-      envAllowlist: allowlist,
-      hostEnv: { ...process.env, ...(config.env ?? {}) },
+      envPassthrough,
       hostHome: homedir(),
       containerHome: '/root',
       workspaceReadOnly: config.workspaceReadOnly,
@@ -188,6 +187,11 @@ export class DockerRuntime implements Runtime {
       sessionStateDir: config.sessionStateDir,
       extraMounts: config.extraMounts,
     })
-    return spawn('docker', argv, { stdio: ['ignore', 'pipe', 'pipe'] })
+  }
+
+  spawn(config: SpawnConfig): ChildProcess {
+    return spawn('docker', this.buildArgv(config), {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
   }
 }

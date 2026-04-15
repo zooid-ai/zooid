@@ -287,7 +287,7 @@ agents:
       image: budd/codex:latest
 `)
     expect(config.agents.qa.adapter).toBeUndefined()
-    expect(config.agents.ship.adapter).toBe('codex')
+    expect(config.agents.ship.adapter).toEqual({ type: 'codex' })
     expect(config.agents.qa.docker?.image).toBeUndefined()
     expect(config.agents.ship.docker?.image).toBe('budd/codex:latest')
   })
@@ -389,7 +389,7 @@ agents:
     workdir: ./qa
     adapter: opencode
 `)
-    expect(config.agents.qa.adapter).toBe('opencode')
+    expect(config.agents.qa.adapter).toEqual({ type: 'opencode' })
   })
 })
 
@@ -446,5 +446,181 @@ describe('mergeCliFlags', () => {
     expect(() => mergeCliFlags(baseConfig(), { transport: 'slack' })).toThrow(
       /transport must be "http"/,
     )
+  })
+})
+
+describe('parseAgents — adapter: AgentAdapterRef', () => {
+  const base = `
+transport: http
+runtime: docker
+docker: { image: budd/claude-code:latest }
+agents:
+`
+
+  it('accepts string shorthand and normalizes to object form', () => {
+    const cfg = loadConfig(`${base}
+  qa:
+    workdir: .
+    adapter: claude
+`)
+    expect(cfg.agents.qa.adapter).toEqual({ type: 'claude' })
+  })
+
+  it('accepts object form verbatim with options passthrough', () => {
+    const cfg = loadConfig(`${base}
+  review:
+    workdir: .
+    adapter:
+      type: opencode
+      options:
+        model: anthropic/claude-sonnet-4-6
+`)
+    expect(cfg.agents.review.adapter).toEqual({
+      type: 'opencode',
+      options: { model: 'anthropic/claude-sonnet-4-6' },
+    })
+  })
+
+  it('accepts object form without options', () => {
+    const cfg = loadConfig(`${base}
+  qa:
+    workdir: .
+    adapter:
+      type: claude
+`)
+    expect(cfg.agents.qa.adapter).toEqual({ type: 'claude' })
+  })
+
+  it('rejects object form with no type, naming the agent key', () => {
+    expect(() =>
+      loadConfig(`${base}
+  qa:
+    workdir: .
+    adapter:
+      options: { model: foo/bar }
+`),
+    ).toThrow(/agents\.qa\.adapter\.type is required/i)
+  })
+
+  it('rejects non-string non-object adapter', () => {
+    expect(() =>
+      loadConfig(`${base}
+  qa:
+    workdir: .
+    adapter: 42
+`),
+    ).toThrow(/agents\.qa\.adapter must be a string or a mapping/i)
+  })
+
+  it('rejects empty-string shorthand', () => {
+    expect(() =>
+      loadConfig(`${base}
+  qa:
+    workdir: .
+    adapter: ""
+`),
+    ).toThrow(/agents\.qa\.adapter/i)
+  })
+})
+
+describe('parseAgentDocker — forward_env', () => {
+  const base = `
+transport: http
+runtime: docker
+docker: { image: budd/claude-code:latest }
+agents:
+`
+
+  it('accepts plain pass-through entries', () => {
+    const cfg = loadConfig(`${base}
+  qa:
+    workdir: .
+    docker:
+      forward_env:
+        - HTTPS_PROXY
+        - JIRA_URL
+`)
+    expect(cfg.agents.qa.docker?.forward_env).toEqual(['HTTPS_PROXY', 'JIRA_URL'])
+  })
+
+  it('accepts rename entries (HOST:CONTAINER)', () => {
+    const cfg = loadConfig(`${base}
+  qa:
+    workdir: .
+    docker:
+      forward_env:
+        - CORP_JIRA_TOKEN:JIRA_TOKEN
+`)
+    expect(cfg.agents.qa.docker?.forward_env).toEqual(['CORP_JIRA_TOKEN:JIRA_TOKEN'])
+  })
+
+  it('rejects non-string entries', () => {
+    expect(() =>
+      loadConfig(`${base}
+  qa:
+    workdir: .
+    docker:
+      forward_env:
+        - 42
+`),
+    ).toThrow(/agents\.qa\.docker\.forward_env\[\] must be a non-empty string/i)
+  })
+
+  it('rejects empty-string entries', () => {
+    expect(() =>
+      loadConfig(`${base}
+  qa:
+    workdir: .
+    docker:
+      forward_env: [""]
+`),
+    ).toThrow(/agents\.qa\.docker\.forward_env\[\] must be a non-empty string/i)
+  })
+
+  it('rejects ":FOO" (empty host name)', () => {
+    expect(() =>
+      loadConfig(`${base}
+  qa:
+    workdir: .
+    docker:
+      forward_env: [":FOO"]
+`),
+    ).toThrow(/agents\.qa\.docker\.forward_env\[\] has empty host or container name/i)
+  })
+
+  it('rejects "FOO:" (empty container name)', () => {
+    expect(() =>
+      loadConfig(`${base}
+  qa:
+    workdir: .
+    docker:
+      forward_env: ["FOO:"]
+`),
+    ).toThrow(/agents\.qa\.docker\.forward_env\[\] has empty host or container name/i)
+  })
+
+  it('rejects forward_env when runtime !== docker', () => {
+    expect(() =>
+      loadConfig(`
+transport: http
+runtime: local
+agents:
+  qa:
+    workdir: .
+    docker:
+      forward_env: [FOO]
+`),
+    ).toThrow(/agents\.qa\.docker is only valid when runtime: docker/i)
+  })
+
+  it('rejects forward_env not being an array', () => {
+    expect(() =>
+      loadConfig(`${base}
+  qa:
+    workdir: .
+    docker:
+      forward_env: "FOO"
+`),
+    ).toThrow(/agents\.qa\.docker\.forward_env must be an array of strings/i)
   })
 })

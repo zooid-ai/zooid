@@ -10,13 +10,11 @@ describe('buildDockerArgs — base shape', () => {
     command: 'claude',
     args: ['-p', 'fix bug', '--session-id', '01JQXYZ', '--output-format', 'stream-json'],
     workdir: '/Users/alice/projects/myapp',
-    envAllowlist: ['ANTHROPIC_API_KEY', 'SESSION_ID', 'MESSAGE_TEXT'],
-    hostEnv: {
-      ANTHROPIC_API_KEY: 'sk-...',
-      SESSION_ID: '01JQXYZ',
-      MESSAGE_TEXT: 'fix bug',
-      IRRELEVANT: 'leave me out',
-    },
+    envPassthrough: [
+      ['ANTHROPIC_API_KEY', 'sk-...'],
+      ['SESSION_ID', '01JQXYZ'],
+      ['MESSAGE_TEXT', 'fix bug'],
+    ] as Array<[string, string]>,
     hostHome: '/Users/alice',
     containerHome: '/root',
   }
@@ -38,7 +36,6 @@ describe('buildDockerArgs — base shape', () => {
     expect(argv).toContain('ANTHROPIC_API_KEY=sk-...')
     expect(argv).toContain('SESSION_ID=01JQXYZ')
     expect(argv).toContain('MESSAGE_TEXT=fix bug')
-    expect(argv.find((a) => a.startsWith('IRRELEVANT='))).toBeUndefined()
 
     const epIdx = argv.indexOf('--entrypoint')
     expect(epIdx).toBeGreaterThan(-1)
@@ -55,38 +52,12 @@ describe('buildDockerArgs — base shape', () => {
     ])
   })
 
-  it('drops env vars not in the allowlist even if they are set', () => {
-    const argv = buildDockerArgs({
-      ...baseInput,
-      args: [],
-      workdir: '/tmp',
-      envAllowlist: ['ANTHROPIC_API_KEY'],
-      hostEnv: { ANTHROPIC_API_KEY: 'sk-', SECRET_FOO: 'nope', HOME: '/root' },
-    })
-    expect(argv.find((a) => a.startsWith('SECRET_FOO='))).toBeUndefined()
-    expect(argv.find((a) => a.startsWith('HOME='))).toBeUndefined()
-    expect(argv).toContain('ANTHROPIC_API_KEY=sk-')
-  })
-
-  it('omits env entries for allowlisted keys that are undefined', () => {
-    const argv = buildDockerArgs({
-      ...baseInput,
-      args: [],
-      workdir: '/tmp',
-      envAllowlist: ['ANTHROPIC_API_KEY', 'CODEX_API_KEY'],
-      hostEnv: { ANTHROPIC_API_KEY: 'sk-' },
-    })
-    expect(argv).toContain('ANTHROPIC_API_KEY=sk-')
-    expect(argv.find((a) => a.startsWith('CODEX_API_KEY='))).toBeUndefined()
-  })
-
   it('emits only the workspace -v flag when no mount fields are set', () => {
     const argv = buildDockerArgs({
       ...baseInput,
       args: [],
       workdir: '/tmp',
-      envAllowlist: [],
-      hostEnv: {},
+      envPassthrough: [],
     })
     const vFlags = argv.reduce(
       (acc, a, i) => (a === '-v' ? [...acc, argv[i + 1]] : acc),
@@ -112,8 +83,7 @@ describe('buildDockerArgs — workspace RO carveouts', () => {
       command: 'claude',
       args: ['-p', 'hi'],
       workdir: host,
-      envAllowlist: [],
-      hostEnv: {},
+      envPassthrough: [],
       hostHome: '/tmp/fakehome',
       containerHome: '/root',
       workspaceReadOnly: ['CLAUDE.md', '.claude'],
@@ -133,8 +103,7 @@ describe('buildDockerArgs — workspace RO carveouts', () => {
       command: 'c',
       args: [],
       workdir: host,
-      envAllowlist: [],
-      hostEnv: {},
+      envPassthrough: [],
       hostHome: '/tmp/fake',
       containerHome: '/root',
       workspaceReadOnly: ['CLAUDE.md', '.claude', 'DOES_NOT_EXIST.md'],
@@ -150,8 +119,7 @@ describe('buildDockerArgs — workspace RO carveouts', () => {
       command: 'c',
       args: [],
       workdir: host,
-      envAllowlist: [],
-      hostEnv: {},
+      envPassthrough: [],
       hostHome: '/tmp/fake',
       containerHome: '/root',
       workspaceReadOnly: ['CLAUDE.md', '.claude'],
@@ -178,8 +146,7 @@ describe('buildDockerArgs — home RO files', () => {
       command: 'c',
       args: [],
       workdir: '/tmp/ws',
-      envAllowlist: [],
-      hostEnv: {},
+      envPassthrough: [],
       hostHome,
       containerHome: '/root',
       workspaceReadOnly: [],
@@ -205,8 +172,7 @@ describe('buildDockerArgs — sessionStateDir', () => {
       command: 'c',
       args: [],
       workdir: '/tmp/ws',
-      envAllowlist: [],
-      hostEnv: {},
+      envPassthrough: [],
       hostHome,
       containerHome: '/root',
       workspaceReadOnly: [],
@@ -226,8 +192,7 @@ describe('buildDockerArgs — extra mounts', () => {
       command: 'c',
       args: [],
       workdir: '/tmp/ws',
-      envAllowlist: [],
-      hostEnv: {},
+      envPassthrough: [],
       hostHome: '/tmp/h',
       containerHome: '/root',
       workspaceReadOnly: [],
@@ -255,8 +220,7 @@ describe('buildDockerArgs — argv ordering contract', () => {
       command: 'cmd',
       args: ['a1', 'a2'],
       workdir: host,
-      envAllowlist: ['ANTHROPIC_API_KEY'],
-      hostEnv: { ANTHROPIC_API_KEY: 'sk-x' },
+      envPassthrough: [['ANTHROPIC_API_KEY', 'sk-x']],
       hostHome,
       containerHome: '/root',
       workspaceReadOnly: ['CLAUDE.md'],
@@ -288,6 +252,47 @@ describe('buildDockerArgs — argv ordering contract', () => {
 
     rmSync(host, { recursive: true, force: true })
     rmSync(hostHome, { recursive: true, force: true })
+  })
+})
+
+describe('buildDockerArgs — envPassthrough input shape', () => {
+  const base = {
+    image: 'budd/claude-code:latest',
+    command: 'claude',
+    args: [] as string[],
+    workdir: '/tmp/w',
+    hostHome: '/Users/alice',
+    containerHome: '/root',
+  }
+
+  it('emits -e KEY=VALUE for each entry in envPassthrough', () => {
+    const argv = buildDockerArgs({
+      ...base,
+      envPassthrough: [
+        ['ANTHROPIC_API_KEY', 'sk-abc'],
+        ['JIRA_TOKEN', 'tok'],
+      ],
+    })
+    expect(argv).toContain('ANTHROPIC_API_KEY=sk-abc')
+    expect(argv).toContain('JIRA_TOKEN=tok')
+  })
+
+  it('emits no -e flags when envPassthrough is empty', () => {
+    const argv = buildDockerArgs({ ...base, envPassthrough: [] })
+    expect(argv.find((a) => a === '-e')).toBeUndefined()
+  })
+
+  it('preserves caller-provided ordering of envPassthrough entries', () => {
+    const argv = buildDockerArgs({
+      ...base,
+      envPassthrough: [
+        ['ALPHA', '1'],
+        ['MIKE', '2'],
+        ['ZED', '3'],
+      ],
+    })
+    const eIdxs = argv.flatMap((v, i) => (v === '-e' ? [i] : []))
+    expect(eIdxs.map((i) => argv[i + 1])).toEqual(['ALPHA=1', 'MIKE=2', 'ZED=3'])
   })
 })
 

@@ -101,3 +101,9 @@ describe('claudeAdapter mount defaults', () => {
     )
   })
 })
+
+describe('claudeAdapter — envPassthrough', () => {
+  it('declares ANTHROPIC_API_KEY', () => {
+    expect(claudeAdapter.envPassthrough).toEqual(['ANTHROPIC_API_KEY'])
+  })
+})

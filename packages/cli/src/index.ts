@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import {
   SessionRunner,
   type AgentAdapter,
+  type AgentAdapterFactory,
   type BuddConfig,
   type DockerConfig,
   type ExtraMount,
@@ -14,13 +15,13 @@ import { claudeAdapter } from '@zooid/budd-adapter-claude'
 import { codexAdapter } from '@zooid/budd-adapter-codex'
 
 /**
- * Built-in agent adapters, keyed by their `name`. The first key is the
- * default adapter — when an agent in daemon.yaml omits `adapter:`, it
- * picks this one. Mixed-adapter daemons specify `adapter:` per agent.
+ * Built-in adapter factories. Trivial adapters (claude, codex) ignore options
+ * and return their singleton. Parameterized adapters (opencode, future) build
+ * a per-instance adapter from the options block.
  */
-export const BUILTIN_ADAPTERS: Record<string, AgentAdapter> = {
-  claude: claudeAdapter,
-  codex: codexAdapter,
+export const BUILTIN_ADAPTERS: Record<string, AgentAdapterFactory> = {
+  claude: () => claudeAdapter,
+  codex: () => codexAdapter,
 }
 
 const DEFAULT_ADAPTER_NAME = 'claude'
@@ -33,8 +34,8 @@ export interface BuildRunnersOptions {
   /** Base directory used to resolve relative `docker.mounts.extra[].path`
    *  entries. Defaults to `process.cwd()`. */
   configDir?: string
-  /** Override the set of registered adapters. Tests only. */
-  adapters?: Record<string, AgentAdapter>
+  /** Override the registered adapter factories. Tests only. */
+  adapters?: Record<string, AgentAdapterFactory>
 }
 
 /**
@@ -57,12 +58,19 @@ export function buildRunnersFromConfig(
   const sharedLocal = config.runtime === 'local' ? new LocalRuntime() : null
 
   for (const [name, agent] of Object.entries(config.agents)) {
-    const adapterName = agent.adapter ?? DEFAULT_ADAPTER_NAME
-    const adapter = adapters[adapterName]
-    if (!adapter) {
+    const ref = agent.adapter ?? { type: DEFAULT_ADAPTER_NAME }
+    const factory = adapters[ref.type]
+    if (!factory) {
       throw new Error(
-        `agents.${name}.adapter "${adapterName}" not registered (known: ${Object.keys(adapters).join(', ')})`,
+        `agents.${name}.adapter "${ref.type}" not registered (known: ${Object.keys(adapters).join(', ')})`,
       )
+    }
+    let adapter: AgentAdapter
+    try {
+      adapter = factory(ref.options ?? {})
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      throw new Error(`agents.${name}.adapter.options: ${msg}`)
     }
 
     // Resolve the agent's workdir to an absolute path. Docker bind-mount
@@ -80,7 +88,12 @@ export function buildRunnersFromConfig(
           `agents.${name}: image is required when runtime: docker (set agents.${name}.docker.image or top-level docker.image)`,
         )
       }
-      runtime = new DockerRuntime({ image, workdir: absWorkdir })
+      runtime = new DockerRuntime({
+        image,
+        workdir: absWorkdir,
+        adapter,
+        forwardEnv: agent.docker?.forward_env,
+      })
     } else {
       runtime = sharedLocal!
     }

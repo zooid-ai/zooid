@@ -129,3 +129,9 @@ describe('codexAdapter mount defaults', () => {
     expect(codexAdapter.sessionStateDir?.('/workspace')).toBe('.codex/sessions')
   })
 })
+
+describe('codexAdapter — envPassthrough', () => {
+  it('declares CODEX_API_KEY', () => {
+    expect(codexAdapter.envPassthrough).toEqual(['CODEX_API_KEY'])
+  })
+})
