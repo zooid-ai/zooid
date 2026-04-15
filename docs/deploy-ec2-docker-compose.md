@@ -17,35 +17,18 @@ automatic HTTPS. This is the recommended AWS deployment for budd because:
 
 ## 1. Write your agent
 
-Same as any budd deployment — a directory with your agent's personality:
+No Dockerfile needed — use the published `budd/claude-code:latest` image and
+bind-mount your persona files into the container. A persona is just a
+`CLAUDE.md` and a `.claude/settings.json`; updating either is a file
+edit, not a rebuild.
 
 ```
 my-agent/
 ├── CLAUDE.md                    # Agent instructions
 ├── .claude/
 │   └── settings.json            # Tool permissions
-├── Dockerfile                   # Agent image
 ├── docker-compose.yml           # Compose stack
 └── Caddyfile                    # Reverse proxy + auto-TLS
-```
-
-**Dockerfile:**
-
-```dockerfile
-FROM node:20-slim
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN npm i -g @anthropic-ai/claude-code @zooid/budd
-
-WORKDIR /workspace
-COPY CLAUDE.md .
-COPY .claude/ .claude/
-
-EXPOSE 8080
-ENTRYPOINT ["budd", "--runtime", "local"]
 ```
 
 **docker-compose.yml:**
@@ -53,14 +36,15 @@ ENTRYPOINT ["budd", "--runtime", "local"]
 ```yaml
 services:
   budd:
-    build: .
+    image: budd/claude-code:latest
     restart: unless-stopped
+    command: ["--runtime", "local"]
     environment:
       - BUDD_TOKEN=${BUDD_TOKEN}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
-      # Persist session state across container restarts
-      - claude-data:/root/.claude
+      - ./:/workspace                  # CLAUDE.md + .claude/ live here
+      - claude-data:/root/.claude      # persist session state across restarts
     expose:
       - "8080"
 
@@ -92,6 +76,13 @@ agent.yourdomain.com {
 That's the entire stack. Caddy handles Let's Encrypt certificates
 automatically — no certbot, no cron, no renewal scripts.
 
+> Pin a version in production (`budd/claude-code:0.3.0`) so `docker compose pull`
+> doesn't silently upgrade you. If you need to pin the Claude CLI version
+> or bake site-specific tooling in, see
+> [deploy-dind-multi-agent.md §8](deploy-dind-multi-agent.md#8-building-a-custom-dind-image)
+> for the custom-image path — the same pattern applies to the single-agent
+> image.
+
 ## 2. Test locally
 
 ```bash
@@ -101,7 +92,7 @@ cd my-agent
 echo "BUDD_TOKEN=$(openssl rand -hex 32)" > .env
 echo "ANTHROPIC_API_KEY=sk-ant-..." >> .env
 
-docker compose up --build
+docker compose up
 ```
 
 Test in another terminal:
@@ -234,7 +225,7 @@ ANTHROPIC_API_KEY=<your-key>
 EOF
 
 # Start the stack
-docker compose up -d --build
+docker compose up -d
 ```
 
 Check it's running:
@@ -257,19 +248,26 @@ Caddy has already obtained a TLS certificate. HTTPS just works.
 
 ## Updating the agent
 
-When you change `CLAUDE.md` or any agent files:
+When you change `CLAUDE.md` or any agent files, copy them to the instance.
+The workspace is bind-mounted, so no rebuild and no container restart is
+needed — new sessions pick up the updated persona immediately. (In-flight
+sessions continue with their original mounted snapshot.)
 
 ```bash
-# From your local machine — copy updated files
-scp -i your-key.pem -r my-agent/ ec2-user@<instance-ip>:~/
-
-# On the instance — rebuild and restart
-ssh -i your-key.pem ec2-user@<instance-ip>
-cd my-agent
-docker compose up -d --build
+# From your local machine
+scp -i your-key.pem CLAUDE.md ec2-user@<instance-ip>:~/my-agent/
+scp -i your-key.pem -r .claude/ ec2-user@<instance-ip>:~/my-agent/
 ```
 
-Or set up a git repo on the instance and `git pull && docker compose up -d --build`.
+Or keep personas in git on the instance and `git pull`.
+
+To upgrade the budd / Claude CLI itself:
+
+```bash
+ssh -i your-key.pem ec2-user@<instance-ip>
+cd my-agent
+docker compose pull && docker compose up -d
+```
 
 ## Session persistence
 
@@ -285,14 +283,14 @@ docker compose exec budd tar czf - /root/.claude > claude-backup.tar.gz
 
 ## Upgrading to DinD (sandboxed runtime)
 
-If you later need per-session container isolation (multi-tenant, untrusted
-prompts), this same EC2 instance supports rootless DinD. Replace the
-Dockerfile with the DinD image build and change `--runtime local` to
-`--runtime docker`. EC2 allows the user namespace syscalls that App Runner
-and Fargate block.
+If you later need per-session container isolation or want to run mixed
+Claude/Codex personas from one daemon, this same EC2 instance supports
+rootless DinD. Swap `budd/claude-code:latest` for `budd/dind:latest` and change
+`--runtime local` to `--runtime docker`. EC2 allows the user namespace
+syscalls that App Runner and Fargate block.
 
-See the DinD section in the main [README](../README.md) for the image build
-workflow.
+See [deploy-dind-multi-agent.md](deploy-dind-multi-agent.md) for the full
+DinD walkthrough.
 
 ## Cost
 

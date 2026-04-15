@@ -4,9 +4,19 @@ App Runner is the simplest way to run budd on AWS: push an image, get an
 HTTPS endpoint. No VPC, no load balancer, no EC2 instances to manage.
 
 budd runs in **local runtime** mode on App Runner (budd + claude live in the
-same container). App Runner doesn't support privileged containers, so
-Docker-in-Docker isn't an option here — but the local runtime is all you
-need for a single-agent deployment.
+same container). The local runtime is all you need for a single-agent
+deployment.
+
+> **DinD on App Runner?** Our rootless-DinD image (`budd/dind`) uses
+> RootlessKit + user namespaces and does *not* need `--privileged` on
+> Linux hosts — it only needs it on Mac/Docker-Desktop. App Runner runs
+> on Linux, so it should in theory be able to host the multi-agent DinD
+> image, giving you per-session sandboxing without an EC2 box. We
+> haven't verified this end-to-end (App Runner also blocks
+> `--security-opt` and `--device`, which rootless dockerd sometimes
+> wants for fuse-overlayfs), so treat it as a promising but unproven
+> path. If you try it, please report back. The rest of this doc covers
+> the shipping-today **local runtime** path.
 
 ## Prerequisites
 
