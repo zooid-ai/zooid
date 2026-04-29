@@ -8,7 +8,7 @@ import type {
   ExtraMount,
 } from './types.js'
 
-export const DEFAULT_DOCKER_IMAGE = 'budd/claude-code:latest'
+export const DEFAULT_DOCKER_IMAGE = 'ghcr.io/zooid-ai/budd-agent-claude-code:latest'
 
 const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
 

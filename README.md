@@ -4,7 +4,7 @@ A small daemon that puts a CLI coding agent (Claude Code, Codex, …) behind an
 HTTP API. You hand it a prompt; it spawns the agent against a workspace
 directory and streams the agent's stdout back as Server-Sent Events.
 
-Designed to be deployed as a container: `FROM budd/claude-code`, layer in
+Designed to be deployed as a container: `FROM ghcr.io/zooid-ai/budd-agent-claude-code`, layer in
 your `daemon.yaml` and `CLAUDE.md`, push it anywhere that runs containers,
 and you have an addressable agent endpoint.
 
@@ -38,7 +38,7 @@ docker run --rm -p 8080:8080 \
   -e BUDD_TOKEN=$(openssl rand -hex 32) \
   -e ANTHROPIC_API_KEY=sk-... \
   -v "$PWD:/workspace" \
-  budd/claude-code
+  ghcr.io/zooid-ai/budd-agent-claude-code
 ```
 
 Then, from another terminal:
@@ -83,7 +83,7 @@ data: {"type":"turn.end","exit_code":0}
 The base image is meant to be extended:
 
 ```dockerfile
-FROM budd/claude-code
+FROM ghcr.io/zooid-ai/budd-agent-claude-code
 
 # Your agent's personality + scope
 COPY CLAUDE.md /workspace/CLAUDE.md
@@ -108,14 +108,14 @@ port: 8080
 runtime: docker              # docker (default) or local
 
 docker:                      # ignored when runtime: local
-  image: budd/claude-code:latest   # daemon-wide default image
+  image: ghcr.io/zooid-ai/budd-agent-claude-code:latest   # daemon-wide default image
 
 agents:
   qa:
     workdir: ./workspaces/qa
     # adapter: claude       # optional, defaults to "claude"
     # docker:
-    #   image: budd/codex:latest         # per-agent image override
+    #   image: ghcr.io/zooid-ai/budd-agent-codex:latest         # per-agent image override
     #   mounts:
     #     extra:                          # additional bind mounts
     #       - path: ./shared-docs
@@ -196,7 +196,7 @@ examples/triage-agent/
 The Dockerfile is minimal — just layer your instructions onto the base:
 
 ```dockerfile
-FROM budd/claude-code:local
+FROM ghcr.io/zooid-ai/budd-agent-claude-code:local
 COPY CLAUDE.md /workspace/CLAUDE.md
 COPY .claude/settings.json /workspace/.claude/settings.json
 WORKDIR /workspace
@@ -208,7 +208,7 @@ WORKDIR /workspace
 # From the budd repo root — build the base image
 docker build \
   -f packages/runtime-docker/docker/claude/Dockerfile.local \
-  -t budd/claude-code:local .
+  -t ghcr.io/zooid-ai/budd-agent-claude-code:local .
 
 # From the agent directory — build the child image
 cd examples/triage-agent
@@ -231,7 +231,7 @@ startup — no registry pull needed.
 ```bash
 docker build \
   -f packages/runtime-docker/docker/dind/Dockerfile.local \
-  -t budd/dind:triage-agent .
+  -t ghcr.io/zooid-ai/budd-runtime-dind:triage-agent .
 ```
 
 This produces a single image that contains:
@@ -248,7 +248,7 @@ This produces a single image that contains:
 app = "triage-agent"
 
 [build]
-  image = "budd/dind:triage-agent"
+  image = "ghcr.io/zooid-ai/budd-runtime-dind:triage-agent"
 
 [env]
   # Use `fly secrets set` for these instead of plain env:
@@ -283,7 +283,7 @@ container creation). ECS on EC2, Fly Machines, and bare VMs all work.
 ```bash
 # Push to ECR
 aws ecr get-login-password | docker login --username AWS --password-stdin <account>.dkr.ecr.<region>.amazonaws.com
-docker tag budd/dind:triage-agent <account>.dkr.ecr.<region>.amazonaws.com/budd-triage:latest
+docker tag ghcr.io/zooid-ai/budd-runtime-dind:triage-agent <account>.dkr.ecr.<region>.amazonaws.com/budd-triage:latest
 docker push <account>.dkr.ecr.<region>.amazonaws.com/budd-triage:latest
 ```
 
@@ -306,7 +306,7 @@ curl -N -H "Authorization: Bearer $BUDD_TOKEN" \
 Your machine                          Cloud (Fly/AWS)
 ─────────────                         ───────────────
 CLAUDE.md ─┐
-settings ──┤ docker build             budd/dind:triage-agent
+settings ──┤ docker build             ghcr.io/zooid-ai/budd-runtime-dind:triage-agent
            ├──────────────► tar ──►   ├─ rootless dockerd
            │                          ├─ budd --runtime docker
            │                          ├─ triage-agent:local (pre-loaded)

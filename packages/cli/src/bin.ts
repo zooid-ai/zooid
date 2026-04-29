@@ -22,7 +22,7 @@ Flags:
   --port <n>                   Port for the HTTP transport. Default: 8080 (or daemon.yaml).
   --runtime <local|docker>     Runtime for spawning the agent. Default: docker.
   --image <ref>                Container image to run when --runtime docker.
-                               Default: budd/claude-code:latest (or daemon.yaml docker.image).
+                               Default: ghcr.io/zooid-ai/budd-agent-claude-code:latest (or daemon.yaml docker.image).
   --print-token                Print a fresh 32-byte hex token and exit.
   --help, -h                   Print this help and exit.
 

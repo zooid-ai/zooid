@@ -54,9 +54,9 @@ agents:
     expect(config.runtime).toBe('docker')
   })
 
-  it('default image is budd/claude-code:latest when runtime is docker', () => {
+  it('default image is ghcr.io/zooid-ai/budd-agent-claude-code:latest when runtime is docker', () => {
     const config = loadConfig(`transport: http\nruntime: docker\n${QA_AGENT_YAML}`)
-    expect(config.docker?.image).toBe('budd/claude-code:latest')
+    expect(config.docker?.image).toBe('ghcr.io/zooid-ai/budd-agent-claude-code:latest')
   })
 
   it('accepts runtime: docker', () => {
@@ -70,12 +70,12 @@ agents:
 transport: http
 runtime: docker
 docker:
-  image: budd/claude-code:1.2.3
+  image: ghcr.io/zooid-ai/budd-agent-claude-code:1.2.3
 agents:
   qa:
     workdir: ./qa
 `)
-    expect(config.docker?.image).toBe('budd/claude-code:1.2.3')
+    expect(config.docker?.image).toBe('ghcr.io/zooid-ai/budd-agent-claude-code:1.2.3')
   })
 
   it('docker block is undefined when runtime is local', () => {
@@ -97,7 +97,7 @@ agents:
 transport: http
 runtime: docker
 docker:
-  image: budd/claude-code:latest
+  image: ghcr.io/zooid-ai/budd-agent-claude-code:latest
   home_mounts:
     - { path: .claude/projects, mode: rw }
 agents:
@@ -276,7 +276,7 @@ describe('loadConfig — per-agent adapter + docker block', () => {
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
   qa:
     workdir: ./qa
@@ -284,12 +284,12 @@ agents:
     workdir: ./ship
     adapter: codex
     docker:
-      image: budd/codex:latest
+      image: ghcr.io/zooid-ai/budd-agent-codex:latest
 `)
     expect(config.agents.qa.adapter).toBeUndefined()
     expect(config.agents.ship.adapter).toEqual({ type: 'codex' })
     expect(config.agents.qa.docker?.image).toBeUndefined()
-    expect(config.agents.ship.docker?.image).toBe('budd/codex:latest')
+    expect(config.agents.ship.docker?.image).toBe('ghcr.io/zooid-ai/budd-agent-codex:latest')
   })
 
   it('parses per-agent docker.mounts.extra', () => {
@@ -375,7 +375,7 @@ agents:
   qa:
     workdir: ./qa
     docker:
-      image: budd/claude-code:latest
+      image: ghcr.io/zooid-ai/budd-agent-claude-code:latest
 `),
     ).toThrow(/docker.*only.*when runtime.*docker/i)
   })
@@ -424,13 +424,13 @@ describe('mergeCliFlags', () => {
   it('accepts --runtime docker from CLI flags', () => {
     const merged = mergeCliFlags(baseConfig(), { runtime: 'docker' })
     expect(merged.runtime).toBe('docker')
-    expect(merged.docker?.image).toBe('budd/claude-code:latest')
+    expect(merged.docker?.image).toBe('ghcr.io/zooid-ai/budd-agent-claude-code:latest')
   })
 
   it('CLI --image overrides docker.image', () => {
     const dockerBase = baseConfig({
       runtime: 'docker',
-      docker: { image: 'budd/claude-code:1.0.0' },
+      docker: { image: 'ghcr.io/zooid-ai/budd-agent-claude-code:1.0.0' },
     })
     const merged = mergeCliFlags(dockerBase, { image: 'custom:2.0' })
     expect(merged.docker?.image).toBe('custom:2.0')
@@ -453,7 +453,7 @@ describe('parseAgents — adapter: AgentAdapterRef', () => {
   const base = `
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
 `
 
@@ -527,7 +527,7 @@ describe('parseAgentDocker — forward_env', () => {
   const base = `
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
 `
 

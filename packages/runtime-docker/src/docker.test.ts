@@ -6,7 +6,7 @@ import { buildDockerArgs, mapDockerExitCode } from './docker.js'
 
 describe('buildDockerArgs — base shape', () => {
   const baseInput = {
-    image: 'budd/claude-code:latest',
+    image: 'ghcr.io/zooid-ai/budd-agent-claude-code:latest',
     command: 'claude',
     args: ['-p', 'fix bug', '--session-id', '01JQXYZ', '--output-format', 'stream-json'],
     workdir: '/Users/alice/projects/myapp',
@@ -41,7 +41,7 @@ describe('buildDockerArgs — base shape', () => {
     expect(epIdx).toBeGreaterThan(-1)
     expect(argv[epIdx + 1]).toBe('claude')
 
-    const imgIdx = argv.indexOf('budd/claude-code:latest')
+    const imgIdx = argv.indexOf('ghcr.io/zooid-ai/budd-agent-claude-code:latest')
     expect(argv.slice(imgIdx + 1)).toEqual([
       '-p',
       'fix bug',
@@ -79,7 +79,7 @@ describe('buildDockerArgs — workspace RO carveouts', () => {
 
   it('adds RO binds AFTER the RW workspace bind (later wins)', () => {
     const argv = buildDockerArgs({
-      image: 'budd/claude-code:latest',
+      image: 'ghcr.io/zooid-ai/budd-agent-claude-code:latest',
       command: 'claude',
       args: ['-p', 'hi'],
       workdir: host,
@@ -257,7 +257,7 @@ describe('buildDockerArgs — argv ordering contract', () => {
 
 describe('buildDockerArgs — envPassthrough input shape', () => {
   const base = {
-    image: 'budd/claude-code:latest',
+    image: 'ghcr.io/zooid-ai/budd-agent-claude-code:latest',
     command: 'claude',
     args: [] as string[],
     workdir: '/tmp/w',

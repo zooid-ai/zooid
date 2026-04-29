@@ -1,9 +1,9 @@
-# budd/claude-code — base image users `FROM` to ship a coding-agent endpoint.
+# ghcr.io/zooid-ai/budd-agent-claude-code — base image users `FROM` to ship a coding-agent endpoint.
 #
 # Bundles budd + the Claude Code CLI on a Node 20 slim base. The user
 # layers their own daemon.yaml + CLAUDE.md on top:
 #
-#   FROM budd/claude-code
+#   FROM ghcr.io/zooid-ai/budd-agent-claude-code
 #   COPY daemon.yaml CLAUDE.md ./
 #
 # Inside this image both budd and claude live in the same container, so

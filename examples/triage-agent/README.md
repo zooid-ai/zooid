@@ -31,7 +31,7 @@ The fastest path is `docker compose`. From this directory:
    BUDD_TOKEN=<output of: openssl rand -hex 32>
    ```
 
-2. Bring it up — this builds `budd/claude-code:local` from the local
+2. Bring it up — this builds `ghcr.io/zooid-ai/budd-agent-claude-code:local` from the local
    workspace via `Dockerfile.local`:
 
    ```bash

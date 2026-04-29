@@ -1,0 +1,9 @@
+runtime: docker
+docker:
+  image: ghcr.io/zooid-ai/budd-agent-claude-code:latest
+  forward_env:
+    - ANTHROPIC_API_KEY
+
+agents:
+  code:
+    adapter: claude

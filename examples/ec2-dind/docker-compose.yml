@@ -1,0 +1,34 @@
+# budd DinD demo — single EC2 host, rootless Docker-in-Docker.
+#
+# Each session spawns an isolated claude agent container inside the
+# inner rootless dockerd. No --privileged needed; seccomp=unconfined
+# is sufficient for rootless DinD on standard Linux kernels.
+#
+# Setup:
+#   1. Copy .env.example → .env and fill in the values.
+#   2. docker compose up -d
+#   3. curl -N http://localhost:8080/agents/code/sessions \
+#        -H "Authorization: Bearer $BUDD_TOKEN" \
+#        -H "Content-Type: application/json" \
+#        -d '{"prompt":"what files are in /workspace?"}'
+
+services:
+  budd:
+    image: ghcr.io/zooid-ai/budd-runtime-dind:latest
+    container_name: budd
+    ports:
+      - "8080:8080"
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      BUDD_TOKEN: ${BUDD_TOKEN:?set BUDD_TOKEN in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
+    volumes:
+      # daemon.yaml, CLAUDE.md, and session output all live here.
+      - ./workspace:/workspace
+      # Named volume keeps the inner docker image cache across restarts.
+      - inner-docker:/home/rootless/.local/share/docker
+    restart: unless-stopped
+
+volumes:
+  inner-docker:

@@ -6,7 +6,7 @@ import type { AgentAdapter, ExtraMount, Runtime, SpawnConfig } from '@zooid/budd
 import { resolveEnvPassthrough } from './env.js'
 
 export interface DockerRuntimeOptions {
-  /** Image to run, e.g. `budd/claude-code:latest`. */
+  /** Image to run, e.g. `ghcr.io/zooid-ai/budd-agent-claude-code:latest`. */
   image: string
   /** Host directory to mount at /workspace inside the container. */
   workdir: string

@@ -8,14 +8,14 @@
 #
 #   docker build \
 #     -f packages/runtime-docker/docker/dind/Dockerfile.local \
-#     -t budd/dind:local .
+#     -t ghcr.io/zooid-ai/budd-runtime-dind:local .
 #
 # Pre-bake an agent image (optional):
 #
 #   docker save triage-agent:local -o images/triage-agent.tar
 #   docker build \
 #     -f packages/runtime-docker/docker/dind/Dockerfile.local \
-#     -t budd/dind:local .
+#     -t ghcr.io/zooid-ai/budd-runtime-dind:local .
 #
 # Run:
 #
@@ -23,7 +23,7 @@
 #     -e BUDD_TOKEN=$(openssl rand -hex 32) \
 #     -e ANTHROPIC_API_KEY=sk-... \
 #     -v "$PWD:/workspace" \
-#     budd/dind:local \
+#     ghcr.io/zooid-ai/budd-runtime-dind:local \
 #     --runtime docker --image triage-agent:local
 
 # ─── Stage 1: build budd from local source ────────────────────────────────
@@ -70,9 +70,10 @@ USER rootless
 # Copy built budd.
 COPY --from=builder /out /opt/budd
 
-# Pre-baked agent image tars. Place .tar files in images/ before building.
-# If the directory doesn't exist, the COPY is skipped.
-COPY --chown=rootless images/*.tar /images/
+# Pre-baked agent image tars (optional). Place .tar files in images/ before
+# building. The directory must exist in the build context (it has a .gitkeep).
+RUN mkdir -p /images
+COPY --chown=rootless images/ /images/
 
 # Our entrypoint: start dockerd → load images → exec budd.
 COPY packages/runtime-docker/docker/dind/entrypoint-budd.sh /usr/local/bin/

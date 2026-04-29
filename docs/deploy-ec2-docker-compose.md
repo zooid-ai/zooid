@@ -17,7 +17,7 @@ automatic HTTPS. This is the recommended AWS deployment for budd because:
 
 ## 1. Write your agent
 
-No Dockerfile needed — use the published `budd/claude-code:latest` image and
+No Dockerfile needed — use the published `ghcr.io/zooid-ai/budd-agent-claude-code:latest` image and
 bind-mount your persona files into the container. A persona is just a
 `CLAUDE.md` and a `.claude/settings.json`; updating either is a file
 edit, not a rebuild.
@@ -36,7 +36,7 @@ my-agent/
 ```yaml
 services:
   budd:
-    image: budd/claude-code:latest
+    image: ghcr.io/zooid-ai/budd-agent-claude-code:latest
     restart: unless-stopped
     command: ["--runtime", "local"]
     environment:
@@ -76,7 +76,7 @@ agent.yourdomain.com {
 That's the entire stack. Caddy handles Let's Encrypt certificates
 automatically — no certbot, no cron, no renewal scripts.
 
-> Pin a version in production (`budd/claude-code:0.3.0`) so `docker compose pull`
+> Pin a version in production (`ghcr.io/zooid-ai/budd-agent-claude-code:0.3.0`) so `docker compose pull`
 > doesn't silently upgrade you. If you need to pin the Claude CLI version
 > or bake site-specific tooling in, see
 > [deploy-dind-multi-agent.md §8](deploy-dind-multi-agent.md#8-building-a-custom-dind-image)
@@ -285,7 +285,7 @@ docker compose exec budd tar czf - /root/.claude > claude-backup.tar.gz
 
 If you later need per-session container isolation or want to run mixed
 Claude/Codex personas from one daemon, this same EC2 instance supports
-rootless DinD. Swap `budd/claude-code:latest` for `budd/dind:latest` and change
+rootless DinD. Swap `ghcr.io/zooid-ai/budd-agent-claude-code:latest` for `ghcr.io/zooid-ai/budd-runtime-dind:latest` and change
 `--runtime local` to `--runtime docker`. EC2 allows the user namespace
 syscalls that App Runner and Fargate block.
 

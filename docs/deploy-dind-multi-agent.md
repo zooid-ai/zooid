@@ -2,7 +2,7 @@
 
 This guide walks through running a **single budd daemon that hosts multiple
 agents** — e.g. a Claude persona and a Codex persona under one HTTP API —
-using the `budd/dind` image. The daemon runs budd + a rootless Docker
+using the `ghcr.io/zooid-ai/budd-runtime-dind` image. The daemon runs budd + a rootless Docker
 daemon in the same container; each incoming session gets its own
 short-lived agent container spawned by the inner dockerd.
 
@@ -26,10 +26,10 @@ simpler and cheaper.
 ```
 ┌─────────────────────────────── EC2 / Fly VM ───────────────────────────┐
 │                                                                         │
-│  ┌────────── budd/dind container ─────────────────────────────────────┐ │
+│  ┌────────── ghcr.io/zooid-ai/budd-runtime-dind container ─────────────────────────────────────┐ │
 │  │                                                                    │ │
-│  │  [rootless dockerd]  ──pulls──►  [budd/claude-code:latest (Docker Hub)]│ │
-│  │                      ──pulls──►  [budd/codex:latest   (Docker Hub)]│ │
+│  │  [rootless dockerd]  ──pulls──►  [ghcr.io/zooid-ai/budd-agent-claude-code:latest (Docker Hub)]│ │
+│  │                      ──pulls──►  [ghcr.io/zooid-ai/budd-agent-codex:latest   (Docker Hub)]│ │
 │  │                      ──spawns─►  [qa session]                      │ │
 │  │                      ──spawns─►  [ship session]                    │ │
 │  │                                                                    │ │
@@ -44,8 +44,8 @@ simpler and cheaper.
 ```
 
 Key idea: **agent personas are files on the host, not custom Docker images.**
-The inner dockerd pulls stock public adapter images (`budd/claude-code`,
-`budd/codex`) once per VM, and budd bind-mounts your persona files into each
+The inner dockerd pulls stock public adapter images (`ghcr.io/zooid-ai/budd-agent-claude-code`,
+`ghcr.io/zooid-ai/budd-agent-codex`) once per VM, and budd bind-mounts your persona files into each
 session via the adapter's built-in read-only carveouts. Updating a persona
 is a file edit, not a rebuild.
 
@@ -92,7 +92,7 @@ agents:
     workdir: ./agents/qa
     adapter: claude
     docker:
-      image: budd/claude-code:latest  # public image on Docker Hub
+      image: ghcr.io/zooid-ai/budd-agent-claude-code:latest  # public image on Docker Hub
       # Optional: forward extra vars from the daemon's environment.
       # ANTHROPIC_API_KEY is forwarded automatically by the claude adapter.
       # forward_env:
@@ -102,7 +102,7 @@ agents:
     workdir: ./agents/ship
     adapter: codex
     docker:
-      image: budd/codex:latest     # public image on Docker Hub
+      image: ghcr.io/zooid-ai/budd-agent-codex:latest     # public image on Docker Hub
       mounts:
         extra:
           # Example: share a RO docs directory into every ship session
@@ -127,19 +127,19 @@ No per-agent image build, no tarballs.
 Use the published image from Docker Hub:
 
 ```
-budd/dind:latest
+ghcr.io/zooid-ai/budd-runtime-dind:latest
 ```
 
 It bundles budd + rootless dockerd + the supported adapter CLIs
 (`claude-code`, `codex`). You don't need to build anything — compose and
 Fly will pull it directly.
 
-Pin a specific version in production (`budd/dind:0.3.0` rather than
+Pin a specific version in production (`ghcr.io/zooid-ai/budd-runtime-dind:0.3.0` rather than
 `:latest`) so `docker compose pull` / `flyctl deploy` don't silently
 upgrade you.
 
 The first time a DinD container runs, its inner rootless dockerd pulls
-`budd/claude-code:latest` and `budd/codex:latest` from Docker Hub. Subsequent
+`ghcr.io/zooid-ai/budd-agent-claude-code:latest` and `ghcr.io/zooid-ai/budd-agent-codex:latest` from Docker Hub. Subsequent
 sessions reuse the cache (see §4.4 and §5.2 for the volume that makes
 this cache survive container restarts).
 
@@ -165,7 +165,7 @@ docker run -d --rm --name budd-test -p 8080:8080 \
   -e ANTHROPIC_API_KEY \
   -e CODEX_API_KEY \
   -v "$(pwd)/deploy:/workspace" \
-  budd/dind:latest
+  ghcr.io/zooid-ai/budd-runtime-dind:latest
 
 docker logs -f budd-test       # wait for "budd listening"
 ```
@@ -228,7 +228,7 @@ On the EC2 instance, at `~/deploy/docker-compose.yml`:
 ```yaml
 services:
   budd:
-    image: budd/dind:latest
+    image: ghcr.io/zooid-ai/budd-runtime-dind:latest
     restart: unless-stopped
     # No `privileged: true` on Linux — rootless dockerd works with plain
     # user namespaces.
@@ -286,8 +286,8 @@ docker compose up -d
 docker compose logs -f budd
 ```
 
-First boot takes a minute while the inner dockerd pulls `budd/claude-code` and
-`budd/codex` from Docker Hub. Subsequent boots reuse the `budd-inner-docker`
+First boot takes a minute while the inner dockerd pulls `ghcr.io/zooid-ai/budd-agent-claude-code` and
+`ghcr.io/zooid-ai/budd-agent-codex` from Docker Hub. Subsequent boots reuse the `budd-inner-docker`
 volume cache and start in seconds.
 
 Hit it:
@@ -325,7 +325,7 @@ app = "budd-agents"
 primary_region = "iad"
 
 [build]
-  image = "docker.io/budd/dind:latest"
+  image = "ghcr.io/zooid-ai/budd-runtime-dind:latest"
 
 [processes]
   app = "--runtime docker"
@@ -529,7 +529,7 @@ mount).
 
 Use this path if you need to pin adapter CLI versions, add an adapter
 not yet in the official image, or bake in site-specific tooling. For the
-common case, stick with `budd/dind:latest` — nothing below is required
+common case, stick with `ghcr.io/zooid-ai/budd-runtime-dind:latest` — nothing below is required
 to deploy.
 
 ```bash
@@ -544,7 +544,7 @@ docker build \
 docker push myorg/budd-dind:0.3.0
 ```
 
-Then reference your tag wherever the guide above uses `budd/dind:latest`:
+Then reference your tag wherever the guide above uses `ghcr.io/zooid-ai/budd-runtime-dind:latest`:
 
 - **EC2 compose:** `image: myorg/budd-dind:0.3.0`
 - **Fly:** `[build] image = "docker.io/myorg/budd-dind:0.3.0"`

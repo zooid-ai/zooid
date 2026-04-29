@@ -45,14 +45,14 @@ describe('buildRunnersFromConfig — per-agent adapter + image', () => {
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
   qa:
     workdir: .
   ship:
     workdir: .
     adapter: codex
-    docker: { image: budd/codex:latest }
+    docker: { image: ghcr.io/zooid-ai/budd-agent-codex:latest }
 `)
     const runners = buildRunnersFromConfig(config)
     expect(runners.qa.adapter).toBe(claudeAdapter)
@@ -63,25 +63,25 @@ agents:
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
   qa:
     workdir: .
   ship:
     workdir: .
     adapter: codex
-    docker: { image: budd/codex:latest }
+    docker: { image: ghcr.io/zooid-ai/budd-agent-codex:latest }
 `)
     const runners = buildRunnersFromConfig(config)
-    expect((runners.qa.runtime as DockerRuntime).image).toBe('budd/claude-code:latest')
-    expect((runners.ship.runtime as DockerRuntime).image).toBe('budd/codex:latest')
+    expect((runners.qa.runtime as DockerRuntime).image).toBe('ghcr.io/zooid-ai/budd-agent-claude-code:latest')
+    expect((runners.ship.runtime as DockerRuntime).image).toBe('ghcr.io/zooid-ai/budd-agent-codex:latest')
   })
 
   it('unknown adapter name → clear error at build time', () => {
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
   qa:
     workdir: .
@@ -112,7 +112,7 @@ agents:
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
   qa:
     workdir: .
@@ -156,7 +156,7 @@ describe('buildRunnersFromConfig — factory invocation', () => {
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
   review:
     workdir: .
@@ -188,7 +188,7 @@ agents:
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
   qa:
     workdir: .
@@ -215,7 +215,7 @@ agents:
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
   review:
     workdir: .
@@ -238,7 +238,7 @@ agents:
     const config = loadConfig(`
 transport: http
 runtime: docker
-docker: { image: budd/claude-code:latest }
+docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 agents:
   qa:
     workdir: .

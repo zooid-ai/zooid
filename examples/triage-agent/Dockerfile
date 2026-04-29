@@ -4,7 +4,7 @@
 #   Build the base image first (from the budd repo root):
 #     docker build \
 #       -f packages/runtime-docker/docker/claude/Dockerfile.local \
-#       -t budd/claude-code:local .
+#       -t ghcr.io/zooid-ai/budd-agent-claude-code:local .
 #
 #   Then build this child image (from this directory):
 #     docker build -t triage-agent:local .
@@ -14,7 +14,7 @@
 # and .claude/settings.json give the agent its personality and
 # permissions without needing them on the host.
 
-FROM budd/claude-code:local
+FROM ghcr.io/zooid-ai/budd-agent-claude-code:local
 
 # Agent personality and permissions
 COPY CLAUDE.md /workspace/CLAUDE.md

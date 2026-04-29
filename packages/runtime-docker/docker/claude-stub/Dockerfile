@@ -2,7 +2,7 @@
 #
 # Provides a tiny `/usr/local/bin/claude` script that mimics
 # `claude --output-format stream-json`. The host runs budd with
-# --runtime docker --image budd/claude-code-stub:test, and the
+# --runtime docker --image ghcr.io/zooid-ai/budd-agent-claude-code-stub:test, and the
 # container exec'd by docker run is just this script.
 #
 # Built locally by tests/e2e/docker.e2e.test.ts; never published.

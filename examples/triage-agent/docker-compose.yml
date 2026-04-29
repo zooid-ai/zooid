@@ -29,7 +29,7 @@ services:
     build:
       context: ../..
       dockerfile: packages/runtime-docker/docker/claude/Dockerfile.local
-    image: budd/claude-code:local
+    image: ghcr.io/zooid-ai/budd-agent-claude-code:local
     container_name: budd-triage
     ports:
       - "8080:8080"

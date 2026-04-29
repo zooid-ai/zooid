@@ -63,7 +63,7 @@ agents:
   qa:
     workdir: .
     adapter: claude
-    docker: { image: budd/claude-code:latest }
+    docker: { image: ghcr.io/zooid-ai/budd-agent-claude-code:latest }
 `)
     const runners = buildRunnersFromConfig(config)
     const adapter = runners.qa.adapter

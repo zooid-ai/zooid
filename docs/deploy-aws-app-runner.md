@@ -7,7 +7,7 @@ budd runs in **local runtime** mode on App Runner (budd + claude live in the
 same container). The local runtime is all you need for a single-agent
 deployment.
 
-> **DinD on App Runner?** Our rootless-DinD image (`budd/dind`) uses
+> **DinD on App Runner?** Our rootless-DinD image (`ghcr.io/zooid-ai/budd-runtime-dind`) uses
 > RootlessKit + user namespaces and does *not* need `--privileged` on
 > Linux hosts — it only needs it on Mac/Docker-Desktop. App Runner runs
 > on Linux, so it should in theory be able to host the multi-agent DinD
@@ -60,7 +60,7 @@ my-agent/
     └── settings.json            # Tool permissions
 ```
 
-> **Tip:** If you're iterating locally, you can also `FROM budd/claude-code:local`
+> **Tip:** If you're iterating locally, you can also `FROM ghcr.io/zooid-ai/budd-agent-claude-code:local`
 > using the locally-built base image. The Dockerfile above installs from npm
 > so it works without the budd repo checked out.
 

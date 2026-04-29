@@ -1,4 +1,4 @@
-# budd/claude-code:local — local-source build for end-to-end testing.
+# ghcr.io/zooid-ai/budd-agent-claude-code:local — local-source build for end-to-end testing.
 #
 # Same shape as ./Dockerfile (the published base image), except budd is
 # built from the working tree via `pnpm deploy` instead of installed from
@@ -8,7 +8,7 @@
 #
 #   docker build \
 #     -f packages/runtime-docker/docker/claude/Dockerfile.local \
-#     -t budd/claude-code:local \
+#     -t ghcr.io/zooid-ai/budd-agent-claude-code:local \
 #     .
 #
 # Run with your workspace mounted and a real Anthropic key:
@@ -17,7 +17,7 @@
 #     -e BUDD_TOKEN=$(openssl rand -hex 32) \
 #     -e ANTHROPIC_API_KEY=sk-... \
 #     -v "$PWD:/workspace" \
-#     budd/claude-code:local
+#     ghcr.io/zooid-ai/budd-agent-claude-code:local
 
 # ─── Stage 1: build budd from local source ────────────────────────────────
 FROM node:22-slim AS builder

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 
-const STUB_IMAGE = 'budd/claude-code-stub:test'
+const STUB_IMAGE = 'ghcr.io/zooid-ai/budd-agent-claude-code-stub:test'
 const PKG_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const CLI_BIN = resolve(PKG_DIR, '../cli/dist/bin.js')
 

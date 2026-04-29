@@ -1,7 +1,7 @@
-# budd/claude-code — inner agent image for the DinD runtime.
+# ghcr.io/zooid-ai/budd-agent-claude-code — inner agent image for the DinD runtime.
 #
 # Contains only the Claude Code CLI. This image is spawned per-session
-# by the inner rootless dockerd inside budd/dind. budd sets the entrypoint
+# by the inner rootless dockerd inside ghcr.io/zooid-ai/budd-runtime-dind. budd sets the entrypoint
 # via `docker run --entrypoint claude` and bind-mounts the workspace.
 #
 # It does NOT contain budd — for the single-container (runtime: local)
@@ -10,12 +10,12 @@
 # Build:
 #   docker build \
 #     -f packages/runtime-docker/docker/claude-agent/Dockerfile \
-#     -t budd/claude-code:latest .
+#     -t ghcr.io/zooid-ai/budd-agent-claude-code:latest .
 #
 # daemon.yaml usage:
 #   runtime: docker
 #   docker:
-#     image: budd/claude-code:latest
+#     image: ghcr.io/zooid-ai/budd-agent-claude-code:latest
 
 FROM node:22-slim
 
