@@ -65,6 +65,9 @@ RUN apk add --no-cache nodejs npm git
 ARG CLAUDE_CODE_VERSION=latest
 RUN npm i -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
+# Create dirs as root before switching user; rootless can't mkdir at /.
+RUN mkdir -p /images /opt/budd
+
 USER rootless
 
 # Copy built budd.
@@ -72,7 +75,6 @@ COPY --from=builder /out /opt/budd
 
 # Pre-baked agent image tars (optional). Place .tar files in images/ before
 # building. The directory must exist in the build context (it has a .gitkeep).
-RUN mkdir -p /images
 COPY --chown=rootless images/ /images/
 
 # Our entrypoint: start dockerd → load images → exec budd.
