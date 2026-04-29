@@ -17,7 +17,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsup",
@@ -30,7 +30,7 @@
     "hono": "^4.6.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
     "@zooid/budd-adapter-claude": "workspace:^",
     "@zooid/budd-runtime-local": "workspace:^",
     "tsup": "^8.5.1",

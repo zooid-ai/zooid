@@ -93,6 +93,10 @@ agents:
     adapter: claude
     docker:
       image: budd/claude-code:latest  # public image on Docker Hub
+      # Optional: forward extra vars from the daemon's environment.
+      # ANTHROPIC_API_KEY is forwarded automatically by the claude adapter.
+      # forward_env:
+      #   - JIRA_URL
 
   ship:
     workdir: ./agents/ship
@@ -422,10 +426,28 @@ semantics as above.
 
 ### Secrets inside inner containers
 
-budd's docker runtime forwards only an allow-listed set of env vars into
-each agent container: `ANTHROPIC_API_KEY`, `CODEX_API_KEY`, `SESSION_ID`,
-`MESSAGE_TEXT`, `WORKDIR`. **Other env vars, including `BUDD_TOKEN`, do
-not reach the agent.**
+budd forwards env vars into each agent container in two layers:
+
+1. **Adapter-declared** — each adapter lists the vars its CLI needs
+   (`claudeAdapter` declares `ANTHROPIC_API_KEY`; `codexAdapter` declares
+   `CODEX_API_KEY`). These are forwarded automatically if present in the
+   daemon's environment.
+
+2. **User-declared** — add one-off vars per agent in `daemon.yaml`:
+
+   ```yaml
+   agents:
+     qa:
+       docker:
+         forward_env:
+           - JIRA_URL                   # pass-through same-name
+           - CORP_ANTHROPIC_KEY:ANTHROPIC_API_KEY   # rename HOST→CONTAINER
+   ```
+
+**`BUDD_TOKEN` and any `BUDD_*` variable are blocked unconditionally** —
+they never reach an agent container regardless of what appears in
+`forward_env`. Per-turn runtime vars (`SESSION_ID`, `MESSAGE_TEXT`,
+`WORKDIR`) are injected by the runner and bypass this list.
 
 ### Read-only carveouts are per-adapter
 

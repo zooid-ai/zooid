@@ -25,7 +25,7 @@
     "access": "public"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "tsup",
@@ -46,7 +46,7 @@
     "yaml": "^2.5.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^22.0.0",
     "release-it": "^19.2.4",
     "tsup": "^8.5.1",
     "typescript": "^5.5.0",

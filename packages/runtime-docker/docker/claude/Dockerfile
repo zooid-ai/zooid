@@ -9,7 +9,7 @@
 # Inside this image both budd and claude live in the same container, so
 # daemon.yaml should set `runtime: local`.
 
-FROM node:20-slim
+FROM node:22-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
