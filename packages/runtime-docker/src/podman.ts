@@ -13,16 +13,11 @@ export type PodmanRuntimeOptions = {
 }
 
 /**
- * PodmanRuntime spawns agent containers using `podman run` instead of
- * `docker run`. The CLI flags are identical to DockerRuntime — Podman's
- * CLI is Docker-compatible for the subset budd uses.
+ * PodmanRuntime spawns agent containers via `podman run` on a bare-metal Linux
+ * host (EC2, Fly, Hetzner). No workaround flags needed — overlay storage,
+ * cgroups, and network namespaces all work natively when Podman runs on the host.
  *
- * Advantages over DockerRuntime (DinD) for EC2 / rootless deployments:
- *   - No inner daemon to start; each session forks a fresh `podman run`.
- *   - No rootlesskit user-namespace dance; Podman handles isolation itself.
- *   - No --privileged required on the host container.
- *
- * Use with `runtime: podman` in daemon.yaml and the budd-runtime-podman image.
+ * For local dev use DockerRuntime (`runtime: docker`) with Docker Desktop.
  */
 export class PodmanRuntime implements Runtime {
   readonly containerized = true
@@ -63,24 +58,7 @@ export class PodmanRuntime implements Runtime {
       extraMounts: config.extraMounts,
     })
 
-    // Podman-specific flags injected after 'run':
-    //   seccomp=unconfined  — Podman applies its own seccomp to inner containers;
-    //     unconfined lets the agent call setrlimit/clone/etc without denial.
-    //   cgroups=disabled    — inner cgroup hierarchy is read-only inside Docker;
-    //     disabling avoids a fatal error when Podman tries to write subtree_control.
-    //   ulimit nofile=…     — caps RLIMIT_NOFILE to a value within the outer
-    //     container's hard limit so crun's setrlimit call succeeds.
-    //   network=host        — skip network-namespace creation; Podman can't write
-    //     to /proc/sys/net inside Docker without SYS_ADMIN on the host mount.
-    //     The agent still reaches the internet via the outer container's network.
-    return [
-      run!,
-      '--security-opt=seccomp=unconfined',
-      '--cgroups=disabled',
-      '--ulimit', 'nofile=65536:65536',
-      '--network=host',
-      ...rest,
-    ]
+    return [run!, ...rest]
   }
 
   spawn(config: SpawnConfig): ChildProcess {

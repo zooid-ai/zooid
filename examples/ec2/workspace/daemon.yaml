@@ -1,0 +1,9 @@
+transport: http
+
+runtime: podman
+
+agents:
+  code:
+    adapter: claude
+    docker:
+      image: ghcr.io/zooid-ai/budd-agent-claude-code:latest

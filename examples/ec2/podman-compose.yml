@@ -1,0 +1,27 @@
+# budd on EC2 — native Podman, no Docker required.
+#
+# Host setup (Ubuntu 24.04):
+#   sudo apt install -y podman podman-compose
+#
+# Run:
+#   cp .env.example .env && $EDITOR .env
+#   podman-compose up -d
+#
+# Test:
+#   curl -N http://localhost:8080/agents/code/sessions \
+#     -H "Authorization: Bearer $BUDD_TOKEN" \
+#     -H "Content-Type: application/json" \
+#     -d '{"prompt":"what files are in /workspace?"}'
+
+services:
+  budd:
+    image: ghcr.io/zooid-ai/budd-runtime-podman:latest
+    container_name: budd
+    ports:
+      - "8080:8080"
+    environment:
+      BUDD_TOKEN: ${BUDD_TOKEN:?set BUDD_TOKEN in .env}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
+    volumes:
+      - ./workspace:/workspace
+    restart: unless-stopped
