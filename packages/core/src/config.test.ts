@@ -438,7 +438,7 @@ describe('mergeCliFlags', () => {
 
   it('rejects unknown --runtime values from CLI flags', () => {
     expect(() => mergeCliFlags(baseConfig(), { runtime: 'firecracker' })).toThrow(
-      /runtime must be "local" or "docker"/,
+      /runtime must be "local", "docker", or "podman"/,
     )
   })
 

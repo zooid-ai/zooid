@@ -10,7 +10,7 @@ import {
   type SessionRunnerOptions,
 } from '@zooid/budd-core'
 import { LocalRuntime } from '@zooid/budd-runtime-local'
-import { DockerRuntime } from '@zooid/budd-runtime-docker'
+import { DockerRuntime, PodmanRuntime } from '@zooid/budd-runtime-docker'
 import { claudeAdapter } from '@zooid/budd-adapter-claude'
 import { codexAdapter } from '@zooid/budd-adapter-codex'
 
@@ -81,19 +81,17 @@ export function buildRunnersFromConfig(
     const absWorkdir = resolve(configDir, agent.workdir)
 
     let runtime: Runtime
-    if (config.runtime === 'docker') {
+    if (config.runtime === 'docker' || config.runtime === 'podman') {
       const image = agent.docker?.image ?? config.docker?.image
       if (!image) {
         throw new Error(
-          `agents.${name}: image is required when runtime: docker (set agents.${name}.docker.image or top-level docker.image)`,
+          `agents.${name}: image is required when runtime: ${config.runtime} (set agents.${name}.docker.image or top-level docker.image)`,
         )
       }
-      runtime = new DockerRuntime({
-        image,
-        workdir: absWorkdir,
-        adapter,
-        forwardEnv: agent.docker?.forward_env,
-      })
+      const runtimeOpts = { image, workdir: absWorkdir, adapter, forwardEnv: agent.docker?.forward_env }
+      runtime = config.runtime === 'podman'
+        ? new PodmanRuntime(runtimeOpts)
+        : new DockerRuntime(runtimeOpts)
     } else {
       runtime = sharedLocal!
     }
@@ -123,5 +121,5 @@ export function buildRunnersFromConfig(
   return runners
 }
 
-export { SessionRunner, LocalRuntime, DockerRuntime, claudeAdapter, codexAdapter }
+export { SessionRunner, LocalRuntime, DockerRuntime, PodmanRuntime, claudeAdapter, codexAdapter }
 export type { DockerConfig }

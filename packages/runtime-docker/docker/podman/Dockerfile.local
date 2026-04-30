@@ -1,0 +1,66 @@
+# ghcr.io/zooid-ai/budd-runtime-podman — local-source build for end-to-end testing.
+#
+# budd daemon + Podman. Each session spawns an agent container via
+# `podman run` (no inner daemon, no rootlesskit, no --privileged on host).
+#
+# Build context MUST be the budd repo root:
+#
+#   docker build \
+#     -f packages/runtime-docker/docker/podman/Dockerfile.local \
+#     -t ghcr.io/zooid-ai/budd-runtime-podman:local .
+#
+# Run (no --privileged needed):
+#
+#   docker run --rm -p 8080:8080 \
+#     -e BUDD_TOKEN=$(openssl rand -hex 32) \
+#     -e ANTHROPIC_API_KEY=sk-... \
+#     -v "$PWD/workspace:/workspace" \
+#     ghcr.io/zooid-ai/budd-runtime-podman:local
+
+# ─── Stage 1: build budd from local source ────────────────────────────────
+FROM node:22-slim AS builder
+
+RUN corepack enable && corepack prepare pnpm@10.7.0 --activate
+
+WORKDIR /src
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json tsconfig.base.json ./
+COPY packages/core/package.json              packages/core/
+COPY packages/adapter-claude/package.json    packages/adapter-claude/
+COPY packages/adapter-codex/package.json     packages/adapter-codex/
+COPY packages/runtime-local/package.json     packages/runtime-local/
+COPY packages/runtime-docker/package.json    packages/runtime-docker/
+COPY packages/transport-http/package.json    packages/transport-http/
+COPY packages/cli/package.json               packages/cli/
+
+RUN pnpm install --frozen-lockfile
+
+COPY packages/core              packages/core
+COPY packages/adapter-claude    packages/adapter-claude
+COPY packages/adapter-codex     packages/adapter-codex
+COPY packages/runtime-local     packages/runtime-local
+COPY packages/runtime-docker    packages/runtime-docker
+COPY packages/transport-http    packages/transport-http
+COPY packages/cli               packages/cli
+
+RUN pnpm -r build
+RUN pnpm --filter=@zooid/budd deploy --prod --legacy /out
+
+# ─── Stage 2: runtime with Podman ────────────────────────────────────────────
+FROM node:22-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       podman ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /out /opt/budd
+
+WORKDIR /workspace
+EXPOSE 8080
+
+# budd reads daemon.yaml from /workspace (WORKDIR). Set runtime: podman there.
+ENTRYPOINT ["node", "/opt/budd/dist/bin.js"]
+
+LABEL org.zooid.base="podman" \
+      org.zooid.description="budd daemon + Podman (no inner dockerd, no --privileged)"

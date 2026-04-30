@@ -117,7 +117,7 @@ function parseAgentDocker(name: string, raw: unknown): AgentDockerConfig {
 
 function parseAgents(
   raw: unknown,
-  runtime: 'local' | 'docker',
+  runtime: 'local' | 'docker' | 'podman',
   daemonHooks: { pre_turn?: string; post_turn?: string },
 ): Record<string, AgentConfig> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -190,9 +190,9 @@ function parseAgents(
 
     let dockerBlock: AgentDockerConfig | undefined
     if (entry.docker !== undefined && entry.docker !== null) {
-      if (runtime !== 'docker') {
+      if (runtime !== 'docker' && runtime !== 'podman') {
         throw new Error(
-          `agents.${name}.docker is only valid when runtime: docker (got runtime: ${runtime})`,
+          `agents.${name}.docker is only valid when runtime: docker or runtime: podman (got runtime: ${runtime})`,
         )
       }
       dockerBlock = parseAgentDocker(name, entry.docker)
@@ -227,8 +227,8 @@ export function loadConfig(yamlText: string): BuddConfig {
   // Docker base image is the supported deployment target. Users on the
   // local runtime must opt in explicitly with `runtime: local`.
   const runtime = raw.runtime ?? 'docker'
-  if (runtime !== 'local' && runtime !== 'docker') {
-    throw new Error(`runtime must be "local" or "docker" (got "${runtime}")`)
+  if (runtime !== 'local' && runtime !== 'docker' && runtime !== 'podman') {
+    throw new Error(`runtime must be "local", "docker", or "podman" (got "${runtime}")`)
   }
 
   const port = raw.port ?? 8080
@@ -280,7 +280,7 @@ export function loadConfig(yamlText: string): BuddConfig {
     hooks: daemonHooks,
   }
 
-  if (runtime === 'docker') {
+  if (runtime === 'docker' || runtime === 'podman') {
     const rawDocker = raw.docker && typeof raw.docker === 'object' ? raw.docker : {}
     const image =
       typeof rawDocker.image === 'string' && rawDocker.image.length > 0
@@ -299,13 +299,14 @@ export function mergeCliFlags(base: BuddConfig, flags: CliFlags): BuddConfig {
       `transport must be "http" (got "${flags.transport}"). Slack and Zooid transports are not in the MVP.`,
     )
   }
-  const runtimeFlag = flags.runtime as 'local' | 'docker' | undefined
+  const runtimeFlag = flags.runtime as 'local' | 'docker' | 'podman' | undefined
   if (
     runtimeFlag !== undefined &&
     runtimeFlag !== 'local' &&
-    runtimeFlag !== 'docker'
+    runtimeFlag !== 'docker' &&
+    runtimeFlag !== 'podman'
   ) {
-    throw new Error(`runtime must be "local" or "docker" (got "${flags.runtime}")`)
+    throw new Error(`runtime must be "local", "docker", or "podman" (got "${flags.runtime}")`)
   }
   if (flags.port !== undefined && !Number.isInteger(flags.port)) {
     throw new Error(`port must be an integer (got ${JSON.stringify(flags.port)})`)
@@ -318,7 +319,7 @@ export function mergeCliFlags(base: BuddConfig, flags: CliFlags): BuddConfig {
     agents: base.agents,
     hooks: { ...base.hooks },
   }
-  if (runtime === 'docker') {
+  if (runtime === 'docker' || runtime === 'podman') {
     const baseDocker = base.docker ?? { image: DEFAULT_DOCKER_IMAGE }
     merged.docker = {
       image: flags.image ?? baseDocker.image ?? DEFAULT_DOCKER_IMAGE,

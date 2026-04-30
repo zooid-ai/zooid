@@ -302,7 +302,7 @@ export interface AgentConfig {
 export interface BuddConfig {
   transport: 'http'
   port: number
-  runtime: 'local' | 'docker'
+  runtime: 'local' | 'docker' | 'podman'
   /** Docker-specific config. Populated when `runtime === 'docker'`. */
   docker?: DockerConfig
   /** Required. Must have at least one entry. */
