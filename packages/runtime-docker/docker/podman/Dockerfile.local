@@ -54,6 +54,11 @@ RUN apt-get update \
        podman ca-certificates git \
     && rm -rf /var/lib/apt/lists/*
 
+# Use vfs storage driver — overlay-on-overlay isn't supported inside Docker
+# without fuse. vfs copies layers but works on any filesystem.
+RUN mkdir -p /etc/containers /var/lib/containers/storage /run/containers/storage
+COPY packages/runtime-docker/docker/podman/storage.conf /etc/containers/storage.conf
+
 COPY --from=builder /out /opt/budd
 
 WORKDIR /workspace

@@ -1,7 +1,11 @@
 # budd Podman demo — single EC2 host, no inner Docker daemon.
 #
-# Uses PodmanRuntime: each session spawns an agent container via
-# `podman run` directly. No --privileged, no rootlesskit.
+# Uses PodmanRuntime: each session spawns an agent container via `podman run`
+# directly inside the budd container. No --privileged needed.
+#
+# Required host setup (Ubuntu 24.04):
+#   security_opt seccomp+apparmor:unconfined  — allow clone/mount syscalls
+#   cap_add NET_ADMIN + SYS_ADMIN             — network/mount namespace creation
 #
 # Setup:
 #   1. Copy .env.example → .env and fill in the values.
@@ -17,6 +21,12 @@ services:
     container_name: budd
     ports:
       - "8080:8080"
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
     environment:
       BUDD_TOKEN: ${BUDD_TOKEN:?set BUDD_TOKEN in .env}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}

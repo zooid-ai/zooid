@@ -48,7 +48,7 @@ export class PodmanRuntime implements Runtime {
     for (const [k, v] of synthetic) merged.set(k, v)
     const envPassthrough = [...merged.entries()].sort(([a], [b]) => a.localeCompare(b))
 
-    return buildDockerArgs({
+    const [run, ...rest] = buildDockerArgs({
       image: this.opts.image,
       command: config.command,
       args: config.args,
@@ -62,6 +62,25 @@ export class PodmanRuntime implements Runtime {
       sessionStateDir: config.sessionStateDir,
       extraMounts: config.extraMounts,
     })
+
+    // Podman-specific flags injected after 'run':
+    //   seccomp=unconfined  — Podman applies its own seccomp to inner containers;
+    //     unconfined lets the agent call setrlimit/clone/etc without denial.
+    //   cgroups=disabled    — inner cgroup hierarchy is read-only inside Docker;
+    //     disabling avoids a fatal error when Podman tries to write subtree_control.
+    //   ulimit nofile=…     — caps RLIMIT_NOFILE to a value within the outer
+    //     container's hard limit so crun's setrlimit call succeeds.
+    //   network=host        — skip network-namespace creation; Podman can't write
+    //     to /proc/sys/net inside Docker without SYS_ADMIN on the host mount.
+    //     The agent still reaches the internet via the outer container's network.
+    return [
+      run!,
+      '--security-opt=seccomp=unconfined',
+      '--cgroups=disabled',
+      '--ulimit', 'nofile=65536:65536',
+      '--network=host',
+      ...rest,
+    ]
   }
 
   spawn(config: SpawnConfig): ChildProcess {
