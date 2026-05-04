@@ -4,25 +4,30 @@
 #
 #   1. Put your secrets in .env (gitignored):
 #        ANTHROPIC_API_KEY=sk-ant-...
-#        BUDD_TOKEN=$(openssl rand -hex 32)
+#        ZOOID_TOKEN=$(openssl rand -hex 32)
 #
 #   2. Bring it up:
 #        docker compose up --build
 #
 #   3. From another terminal, hit the daemon:
-#        curl -N http://localhost:8080/sessions \
-#          -H "Authorization: Bearer $BUDD_TOKEN" \
+#        curl -N http://localhost:8080/agents/default/sessions \
+#          -H "Authorization: Bearer $ZOOID_TOKEN" \
 #          -H "Content-Type: application/json" \
 #          -d '{"prompt":"the get started button on the homepage is too small"}'
 #
 #   4. Check ./tickets/ for the result.
 #
-# The build context is the budd repo root (../..) so the Dockerfile.local
+# The build context is the zooid repo root (../..) so the Dockerfile.local
 # multi-stage build can pull in the workspace sources. Then the same repo
 # root is bind-mounted at /workspace, with the container's working directory
 # set to this triage-agent example — that way the agent's CLAUDE.md,
 # .claude/settings.json, and tickets/ are all in cwd, and `../../packages/`
-# resolves to the real budd packages on the host.
+# resolves to the real zooid packages on the host.
+#
+# Note: the image tag below still says `budd-agent-claude-code` — that's
+# the published name pinned by the runtime-docker package. The image
+# itself is current; the rename to `zooid-agent-claude-code` is a
+# coordinated change tracked separately.
 
 services:
   triage-agent:
@@ -30,16 +35,16 @@ services:
       context: ../..
       dockerfile: packages/runtime-docker/docker/claude/Dockerfile.local
     image: ghcr.io/zooid-ai/budd-agent-claude-code:local
-    container_name: budd-triage
+    container_name: zooid-triage
     ports:
       - "8080:8080"
     env_file:
       - .env
     environment:
-      # BUDD_TOKEN must be set in .env. Fail loudly if it isn't.
-      BUDD_TOKEN: ${BUDD_TOKEN:?set BUDD_TOKEN in .env (e.g. openssl rand -hex 32)}
+      # ZOOID_TOKEN must be set in .env. Fail loudly if it isn't.
+      ZOOID_TOKEN: ${ZOOID_TOKEN:?set ZOOID_TOKEN in .env (e.g. openssl rand -hex 32)}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
     volumes:
-      # Mount the entire budd repo so the agent can read ../../packages/.
+      # Mount the entire zooid repo so the agent can read ../../packages/.
       - ../..:/workspace
     working_dir: /workspace/examples/triage-agent

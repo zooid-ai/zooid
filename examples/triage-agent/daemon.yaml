@@ -1,6 +1,6 @@
-# Triage agent — budd configuration.
+# Triage agent — zooid configuration.
 #
-# Single-agent budd setup. The `default` agent name has no special meaning
+# Single-agent zooid setup. The `default` agent name has no special meaning
 # — every agent must be named, and that name appears in the HTTP path
 # (POST /agents/default/sessions).
 
