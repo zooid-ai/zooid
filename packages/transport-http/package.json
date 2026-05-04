@@ -31,6 +31,7 @@
     "hono": "^4.6.0"
   },
   "devDependencies": {
+    "@hono/node-server": "^1.13.0",
     "@types/node": "^22.0.0",
     "@zooid/runtime-local": "workspace:^",
     "tsup": "^8.5.1",

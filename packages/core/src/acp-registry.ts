@@ -9,6 +9,10 @@ import {
 } from '@zooid/acp-client'
 import type { AcpAgentSpec, AcpRuntime } from './acp-types.js'
 import type { AgentConfig } from './types.js'
+import type {
+  ApprovalCorrelator,
+  RegisteredApproval,
+} from './approval-correlator.js'
 
 export type AcpRegistryEventHandler = (
   agentName: string,
@@ -26,6 +30,8 @@ export type AcpRegistryApprovalHandler = (
  */
 export interface AcpRegistry {
   hasAgent(name: string): boolean
+  /** Per-agent approval timeout from daemon.yaml. 0 means no timeout. */
+  getApprovalTimeoutMs(name: string): number
   ensureSession(name: string, threadId: string): Promise<string>
   prompt(name: string, input: PromptInput): Promise<PromptResult>
   stopAll(): Promise<void>
@@ -44,6 +50,16 @@ export interface AcpAgentRegistryOptions {
   onEvent?: AcpRegistryEventHandler
   /** Initial approval handler (the transport may overwrite at app creation). */
   onApprovalRequest?: AcpRegistryApprovalHandler
+  /**
+   * Optional correlator: when set, the registry's default
+   * `onApprovalRequest` registers each request on the correlator (with the
+   * agent's `approval_timeout_ms`) and returns the registered handle's
+   * `decisionPromise`. Transports listen on the correlator's `'registered'`
+   * + `'timeout'` events to drive the SSE wire and accept HTTP decisions.
+   */
+  approvals?: ApprovalCorrelator
+  /** Called whenever the correlator-backed handler registers an approval. */
+  onApprovalRegistered?: (approval: RegisteredApproval) => void
 }
 
 export class AcpAgentRegistry implements AcpRegistry {
@@ -56,12 +72,29 @@ export class AcpAgentRegistry implements AcpRegistry {
   constructor(opts: AcpAgentRegistryOptions) {
     this.opts = opts
     this.onEvent = opts.onEvent ?? (() => {})
-    this.onApprovalRequest =
-      opts.onApprovalRequest ?? (async () => ({ decision: 'cancel' }))
+    if (opts.onApprovalRequest) {
+      this.onApprovalRequest = opts.onApprovalRequest
+    } else if (opts.approvals) {
+      const correlator = opts.approvals
+      this.onApprovalRequest = async (name, req) => {
+        const cfg = this.opts.agents[name]
+        const handle = correlator.register(name, req.sessionId, req, {
+          timeoutMs: cfg?.approval_timeout_ms ?? 0,
+        })
+        this.opts.onApprovalRegistered?.(handle)
+        return handle.decisionPromise
+      }
+    } else {
+      this.onApprovalRequest = async () => ({ decision: 'cancel' })
+    }
   }
 
   hasAgent(name: string): boolean {
     return Object.prototype.hasOwnProperty.call(this.opts.agents, name)
+  }
+
+  getApprovalTimeoutMs(name: string): number {
+    return this.opts.agents[name]?.approval_timeout_ms ?? 0
   }
 
   async ensureSession(name: string, threadId: string): Promise<string> {

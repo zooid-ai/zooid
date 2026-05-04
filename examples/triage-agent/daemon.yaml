@@ -10,6 +10,13 @@ runtime: local
 agents:
   default:
     workdir: .
+    acp:
+      preset: claude
+    # ANTHROPIC_API_KEY is forwarded into the agent process. Under
+    # `runtime: local` this is a no-op (the host already has the var);
+    # under `runtime: docker` it controls what crosses into the container.
+    docker:
+      forward_env: [ANTHROPIC_API_KEY]
 
 # No hooks for the triage agent — it's a read-only workflow that writes a
 # single ticket file. If you want to e.g. open a real GitHub issue from each
@@ -18,5 +25,6 @@ agents:
 # agents:
 #   default:
 #     workdir: .
+#     acp: { preset: claude }
 #     hooks:
 #       post_turn: "scripts/open-github-issue.sh tickets/$(ls -t tickets | head -1)"

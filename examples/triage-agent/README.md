@@ -1,14 +1,13 @@
 # Triage Agent
 
-> ⚠️ **Migration in progress.** As of `feat/acp-migration` Plan-01 the daemon
-> speaks ACP, not legacy adapters. This example's `daemon.yaml` and Docker
-> compose flow are **broken pending Plan-02**, which will rewrite them onto
-> the new `acp:` schema and the `zooid-agent-base` image.
-
 A zooid example that turns vague bug reports into structured engineering
 tickets by exploring the zooid monorepo itself. The agent reads
 `../../packages/` (the real zooid packages, including the marketing
 `homepage` package) and writes a ticket here in `tickets/`.
+
+This is the canonical end-to-end smoke for the ACP-based zooid stack:
+the daemon spawns the Claude Code ACP shim, surfaces tool-permission
+requests over SSE, and resolves them via a HTTP `POST /approvals` round-trip.
 
 ## What it does
 
@@ -21,36 +20,72 @@ The agent:
 1. Reads the workspace under `../../packages/`
 2. Identifies the most likely package (here, `packages/homepage`)
 3. Opens the relevant source files and finds the specific component
-4. Writes a structured ticket to `tickets/TICKET-<timestamp>.md`
+4. Asks for permission to write a new file under `tickets/`
+5. Writes a structured ticket to `tickets/TICKET-<timestamp>.md`
 
 It does **not** edit any code — its only output is a markdown ticket.
 
 ## Running it (native, no Docker)
 
-The fastest path is to run the daemon directly against your local
-`claude` CLI. From this directory:
+The fastest path is to run the daemon against your local Node + the
+Claude Code ACP shim (auto-installed via `npx`). From this directory:
 
-1. Make sure `claude` is on your PATH and `ANTHROPIC_API_KEY` is set
-   (the agent uses your Anthropic billing).
-
-2. Mint a daemon token and start the daemon:
+1. Set up env:
 
    ```bash
    export ANTHROPIC_API_KEY=sk-ant-...
    export ZOOID_TOKEN=$(openssl rand -hex 32)
+   ```
+
+2. Start the daemon:
+
+   ```bash
    zooid --port 8080
    ```
 
-3. From another terminal, POST a report:
+   On first start the `claude` preset resolves to
+   `npx -y @agentclientprotocol/claude-agent-acp`, so expect a one-off
+   download.
+
+3. From another terminal, POST a report — and **leave the connection
+   open**. The response is a long-lived SSE stream that surfaces every
+   ACP event, including the agent's permission requests:
 
    ```bash
    curl -N http://localhost:8080/agents/default/sessions \
      -H "Authorization: Bearer $ZOOID_TOKEN" \
      -H "Content-Type: application/json" \
-     -d '{"prompt":"the get started button on the homepage is too small"}'
+     -d '{"prompt":"the get started button on the homepage is too small"}' \
+     | tee /tmp/triage.sse
    ```
 
-4. A new ticket file shows up in `./tickets/`.
+4. As tool calls happen, the SSE stream emits `approval.request` frames:
+
+   ```
+   data: {"type":"approval.request","approval_id":"<uuid>","session_id":"<sid>",
+          "tool_call_id":"...","options":[{"optionId":"allow-once",...}, ...]}
+   ```
+
+   In a third terminal, allow the request:
+
+   ```bash
+   curl -X POST \
+     "http://localhost:8080/agents/default/sessions/<sid>/approvals/<approval_id>" \
+     -H "Authorization: Bearer $ZOOID_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"decision":"allow","option_id":"allow-once"}'
+   ```
+
+   To deny: `'{"decision":"cancel"}'`. To bail on the whole turn:
+
+   ```bash
+   curl -X POST \
+     "http://localhost:8080/agents/default/sessions/<sid>/cancel" \
+     -H "Authorization: Bearer $ZOOID_TOKEN"
+   ```
+
+5. When the SSE stream emits `{"type":"turn.end","stop_reason":"end_turn"}`,
+   a new ticket file is in `./tickets/`.
 
 The daemon reads `daemon.yaml` from the current directory and uses `.`
 as its working dir, so `CLAUDE.md`, `.claude/settings.json`, and
@@ -59,31 +94,24 @@ zooid packages on disk.
 
 ## Running it (Docker)
 
-If you'd rather containerize, `docker-compose.yml` builds a local image
-from this repo's source and bind-mounts the workspace. From this
-directory:
+`docker-compose.yml` runs the daemon in a container based on the new
+single `zooid-agent-base` image. The `claude-agent-acp` shim is fetched
+on first run via `npx -y` inside the container.
 
-1. Create a `.env` file (gitignored) with two values:
+1. Create a `.env` file (gitignored) with:
 
    ```env
    ANTHROPIC_API_KEY=sk-ant-...
    ZOOID_TOKEN=<output of: openssl rand -hex 32>
    ```
 
-2. Bring it up — this builds the local image
-   `ghcr.io/zooid-ai/budd-agent-claude-code:local` from the workspace
-   via `Dockerfile.local`. (The image name is a historical artefact of
-   the rename and is still the published tag; don't be alarmed by the
-   `budd-` prefix.)
+2. Bring it up:
 
    ```bash
-   docker compose up --build
+   docker compose up
    ```
 
-3. POST the same `curl` as in the native flow above.
-
-The compose file mounts the zooid repo root at `/workspace` and sets
-the container's working directory to `/workspace/examples/triage-agent`.
+3. POST the same `curl` as in the native flow.
 
 ## Files
 
@@ -91,40 +119,29 @@ the container's working directory to `/workspace/examples/triage-agent`.
 |---|---|
 | `daemon.yaml` | zooid configuration (transport, runtime, agents) |
 | `CLAUDE.md` | The triage agent's personality and operating rules |
-| `.claude/settings.json` | Pre-approved tool permissions (read everywhere, write only to `tickets/`) |
-| `docker-compose.yml` | Optional: containerized run that builds the image from source and mounts the repo |
+| `.claude/settings.json` | Belt-and-suspenders pre-approved tool permissions inside the shim |
+| `docker-compose.yml` | Optional: containerized run on `zooid-agent-base` |
 | `tickets/` | Where the agent writes structured tickets |
 | `.env` | (gitignored) Your `ANTHROPIC_API_KEY` and `ZOOID_TOKEN` — only needed for the Docker flow |
 
 ### Why `.claude/settings.json`?
 
-zooid runs Claude Code non-interactively (`claude -p …`) — there's no
-human at a terminal to approve tool prompts. Claude Code only uses
-tools that have been pre-approved for the workspace, so this file
-declares the triage agent's permission profile up front:
+ACP surfaces permissions over the transport — the daemon's
+`approval.request` SSE event is the new authoritative gate. The Claude
+Code shim has its own internal permission machinery that runs *before*
+the ACP request hits the daemon, so `.claude/settings.json` is now a
+defense-in-depth layer rather than the only line of defense:
 
 - **`defaultMode: dontAsk`** — any tool not in the allow list is
-  auto-denied instead of prompting. This is what makes the agent safe
-  to run unattended.
-- **Allowed:** `Read`, `Glob`, `Grep` (so the agent can explore
-  `../../packages/`), and `Edit(/tickets/**)` scoped to the tickets
-  directory. The `Edit` rule covers `Write` too — Claude Code's edit
-  rules apply to all file-editing tools.
+  auto-denied inside the shim, so it never even reaches the daemon's
+  ACP layer. The transport's approval round-trip handles everything else.
+- **Allowed:** `Read`, `Glob`, `Grep` (workspace exploration), and
+  `Edit(/tickets/**)` scoped to the tickets directory.
 - **Denied:** `Bash`, plus `Edit` rules on the workspace's own
-  `CLAUDE.md` / `daemon.yaml` / `README.md` — defense in depth so the
-  agent literally cannot edit its own instructions.
+  `CLAUDE.md` / `daemon.yaml` / `README.md`.
 
-Path rules use gitignore semantics: a leading `/` means "relative to
-the project root" (the workspace directory), so `/tickets/**` matches
-`./tickets/**` from the workspace.
-
-When you adapt this example to your own workspace, copy `.claude/settings.json`
-along with `CLAUDE.md` and `daemon.yaml` and adjust the allow/deny lists to
-match what your agent should be able to do.
-
-The actual codebase being triaged lives at `../../packages/` — the real
-zooid monorepo. The marketing homepage is in `../../packages/homepage/`
-(an Astro landing page).
+If you want every tool call surfaced to the daemon (so you decide via
+HTTP), drop the allow list and let the ACP round-trip mediate everything.
 
 ## Reusing this against your own monorepo
 

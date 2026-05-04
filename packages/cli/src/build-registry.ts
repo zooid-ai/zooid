@@ -3,6 +3,7 @@ import { DockerAcpRuntime } from '@zooid/runtime-docker'
 import {
   AcpAgentRegistry,
   type AcpRuntime,
+  type ApprovalCorrelator,
   type BuddConfig,
 } from '@zooid/core'
 import { resolveForwardEnv } from './forward-env.js'
@@ -10,6 +11,8 @@ import { resolveForwardEnv } from './forward-env.js'
 export interface BuildAcpRegistryOptions {
   /** Override the runtime selection (tests). */
   runtime?: AcpRuntime
+  /** When set, the registry's approval handler routes through this correlator. */
+  approvals?: ApprovalCorrelator
 }
 
 /**
@@ -42,6 +45,7 @@ export function buildAcpRegistry(
     runtime,
     agents: cfg.agents,
     forwardEnv,
+    approvals: opts.approvals,
   })
 }
 

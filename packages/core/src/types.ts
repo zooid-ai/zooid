@@ -72,6 +72,14 @@ export interface AgentConfig {
   }
   /** Required: how to launch this agent's ACP shim. */
   acp: AcpAgentSpec
+  /**
+   * Wall-clock timeout for pending permission requests, in milliseconds.
+   * 0 = no timeout (default). The paused agent's idle cost is negligible,
+   * so opt-in is the right shape — set this only if you're running in a
+   * scale-to-zero / serverless context where unbounded waits would hold
+   * resources.
+   */
+  approval_timeout_ms: number
   /** Docker-only block. Rejected at parse time when runtime !== 'docker'. */
   docker?: AgentDockerConfig
 }

@@ -1,7 +1,12 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { serve } from '@hono/node-server'
-import { loadConfig, mergeCliFlags, type CliFlags } from '@zooid/core'
+import {
+  ApprovalCorrelator,
+  loadConfig,
+  mergeCliFlags,
+  type CliFlags,
+} from '@zooid/core'
 import { createApp } from '@zooid/transport-http'
 import { buildAcpRegistry } from './build-registry.js'
 
@@ -117,8 +122,9 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  const registry = buildAcpRegistry(config)
-  const app = createApp({ agents: registry, token })
+  const approvals = new ApprovalCorrelator()
+  const registry = buildAcpRegistry(config, { approvals })
+  const app = createApp({ agents: registry, approvals, token })
 
   let shuttingDown = false
   const shutdown = async (signal: NodeJS.Signals) => {

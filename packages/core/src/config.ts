@@ -59,6 +59,32 @@ function parseAcpBlock(name: string, raw: unknown): AcpAgentSpec {
   return { command: a.command, args } as AcpAgentSpec
 }
 
+function parseApprovalTimeout(name: string, raw: unknown): number {
+  if (raw === undefined) return 0
+  if (raw === 0 || raw === '0') return 0
+  if (typeof raw !== 'string') {
+    throw new Error(
+      `agents.${name}.approval_timeout: must be a duration like "1h", "15m", "30s", or 0 to disable (got ${JSON.stringify(raw)})`,
+    )
+  }
+  const m = /^(\d+)(s|m|h)$/.exec(raw)
+  if (!m) {
+    throw new Error(
+      `agents.${name}.approval_timeout: "${raw}" is not a valid duration (use "<n>s", "<n>m", or "<n>h")`,
+    )
+  }
+  const n = Number(m[1])
+  switch (m[2]) {
+    case 's':
+      return n * 1000
+    case 'm':
+      return n * 60_000
+    case 'h':
+      return n * 60 * 60_000
+  }
+  throw new Error('unreachable')
+}
+
 function parseAgentDocker(name: string, raw: unknown): AgentDockerConfig {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error(`agents.${name}.docker must be a mapping`)
@@ -137,6 +163,7 @@ function parseAgents(
       )
     }
     const acp = parseAcpBlock(name, entry.acp)
+    const approval_timeout_ms = parseApprovalTimeout(name, entry.approval_timeout)
 
     const agentHooks: AgentConfig['hooks'] = {}
     if (daemonHooks.pre_turn !== undefined) agentHooks.pre_turn = daemonHooks.pre_turn
@@ -171,6 +198,7 @@ function parseAgents(
       workdir: entry.workdir,
       hooks: agentHooks,
       acp,
+      approval_timeout_ms,
     }
     if (dockerBlock) agentCfg.docker = dockerBlock
     result[name] = agentCfg

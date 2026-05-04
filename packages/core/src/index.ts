@@ -3,6 +3,11 @@ export {
   AcpAgentRegistry,
   resolveAcpAgentSpec,
 } from './acp-registry.js'
+export {
+  ApprovalCorrelator,
+  type RegisteredApproval,
+  type RegisterOptions,
+} from './approval-correlator.js'
 export type {
   AcpRegistry,
   AcpAgentRegistryOptions,

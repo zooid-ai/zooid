@@ -9,39 +9,38 @@
 #   2. Bring it up:
 #        docker compose up --build
 #
-#   3. From another terminal, hit the daemon:
+#   3. From another terminal, start a session (long-lived SSE stream):
 #        curl -N http://localhost:8080/agents/default/sessions \
 #          -H "Authorization: Bearer $ZOOID_TOKEN" \
 #          -H "Content-Type: application/json" \
 #          -d '{"prompt":"the get started button on the homepage is too small"}'
 #
-#   4. Check ./tickets/ for the result.
+#   4. As approval.request frames arrive, decide them via HTTP:
+#        curl -X POST \
+#          http://localhost:8080/agents/default/sessions/<sid>/approvals/<approval_id> \
+#          -H "Authorization: Bearer $ZOOID_TOKEN" \
+#          -H "Content-Type: application/json" \
+#          -d '{"decision":"allow","option_id":"allow-once"}'
 #
-# The build context is the zooid repo root (../..) so the Dockerfile.local
-# multi-stage build can pull in the workspace sources. Then the same repo
-# root is bind-mounted at /workspace, with the container's working directory
-# set to this triage-agent example — that way the agent's CLAUDE.md,
-# .claude/settings.json, and tickets/ are all in cwd, and `../../packages/`
-# resolves to the real zooid packages on the host.
+#   5. When turn.end fires, check ./tickets/ for the result.
 #
-# Note: the image tag below still says `budd-agent-claude-code` — that's
-# the published name pinned by the runtime-docker package. The image
-# itself is current; the rename to `zooid-agent-claude-code` is a
-# coordinated change tracked separately.
+# The image is the single zooid-agent-base — no per-CLI Dockerfile baked
+# in. The Claude Code ACP shim is fetched on first run via `npx -y` inside
+# the container. Build context is the runtime-docker package's docker/
+# directory so the build is fast and self-contained.
 
 services:
   triage-agent:
     build:
-      context: ../..
-      dockerfile: packages/runtime-docker/docker/claude/Dockerfile.local
-    image: ghcr.io/zooid-ai/budd-agent-claude-code:local
+      context: ../../packages/runtime-docker/docker/agent-base
+      dockerfile: Dockerfile
+    image: ghcr.io/zooid-ai/zooid-agent-base:local
     container_name: zooid-triage
     ports:
       - "8080:8080"
     env_file:
       - .env
     environment:
-      # ZOOID_TOKEN must be set in .env. Fail loudly if it isn't.
       ZOOID_TOKEN: ${ZOOID_TOKEN:?set ZOOID_TOKEN in .env (e.g. openssl rand -hex 32)}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in .env}
     volumes:

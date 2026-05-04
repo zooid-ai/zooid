@@ -20,6 +20,7 @@ describe('AcpAgentRegistry + LocalAcpRuntime against echo fixture', () => {
           workdir: process.cwd(),
           hooks: {},
           acp: { command: process.execPath, args: ['--import', 'tsx', fixturePath] },
+          approval_timeout_ms: 0,
         },
       },
     })

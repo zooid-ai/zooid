@@ -79,6 +79,49 @@ describe('agents.<name>.acp', () => {
   })
 })
 
+describe('agents.<name>.approval_timeout', () => {
+  it('defaults to 0 (no timeout) when unset', () => {
+    const cfg = loadConfig(`${baseYaml}  triage:
+    workdir: .
+    acp: { preset: claude }
+`)
+    expect(cfg.agents.triage.approval_timeout_ms).toBe(0)
+  })
+
+  it('parses h/m/s suffix duration strings', () => {
+    const mk = (v: string) =>
+      loadConfig(`${baseYaml}  triage:
+    workdir: .
+    acp: { preset: claude }
+    approval_timeout: ${v}
+`).agents.triage.approval_timeout_ms
+
+    expect(mk('30s')).toBe(30_000)
+    expect(mk('15m')).toBe(15 * 60_000)
+    expect(mk('2h')).toBe(2 * 60 * 60_000)
+    expect(mk('24h')).toBe(24 * 60 * 60_000)
+  })
+
+  it('accepts 0 as "no timeout"', () => {
+    const cfg = loadConfig(`${baseYaml}  triage:
+    workdir: .
+    acp: { preset: claude }
+    approval_timeout: 0
+`)
+    expect(cfg.agents.triage.approval_timeout_ms).toBe(0)
+  })
+
+  it('rejects malformed durations with a clear error', () => {
+    expect(() =>
+      loadConfig(`${baseYaml}  triage:
+    workdir: .
+    acp: { preset: claude }
+    approval_timeout: forever
+`),
+    ).toThrow(/agents\.triage\.approval_timeout/i)
+  })
+})
+
 describe('legacy adapter: is rejected', () => {
   it('rejects daemon.yaml that uses adapter:', () => {
     expect(() =>

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import { LocalAcpRuntime } from '@zooid/runtime-local'
-import { AcpAgentRegistry } from '@zooid/core'
+import { AcpAgentRegistry, ApprovalCorrelator } from '@zooid/core'
 import { createApp } from '../../src/server.js'
 
 const fixturePath = fileURLToPath(
@@ -19,10 +19,14 @@ describe('POST /agents/echo/sessions integration with echo ACP fixture', () => {
           workdir: process.cwd(),
           hooks: {},
           acp: { command: process.execPath, args: ['--import', 'tsx', fixturePath] },
+          // Auto-cancel approvals quickly so the prompt completes — this
+          // test predates Plan-02's HTTP decision round-trip and just needs
+          // the SSE shape to land.
+          approval_timeout_ms: 100,
         },
       },
     })
-    const app = createApp({ agents: reg, token: TOKEN })
+    const app = createApp({ agents: reg, approvals: new ApprovalCorrelator(), token: TOKEN })
 
     try {
       const res = await app.request('/agents/echo/sessions', {

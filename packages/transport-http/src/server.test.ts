@@ -4,8 +4,10 @@ import type {
   AcpRegistryEventHandler,
   AcpRegistryApprovalHandler,
 } from '@zooid/core'
+import { ApprovalCorrelator } from '@zooid/core'
 import type {
   AgentEvent,
+  ApprovalRequest,
   PromptInput,
   PromptResult,
 } from '@zooid/acp-client'
@@ -31,6 +33,7 @@ function makeRegistry(opts: FakeRegistryOptions = {}): AcpRegistry {
 
   const reg: AcpRegistry = {
     hasAgent: (n) => known.has(n),
+    getApprovalTimeoutMs: () => 0,
     ensureSession:
       opts.ensureSession ??
       vi.fn(async () => opts.sessionId ?? SID),
@@ -77,17 +80,21 @@ async function postJson(
   return app.request(path, { method: 'POST', headers, body: JSON.stringify(body) })
 }
 
+function newApprovals(): ApprovalCorrelator {
+  return new ApprovalCorrelator()
+}
+
 // ─── auth ────────────────────────────────────────────────────────────────
 
 describe('auth', () => {
   it('401 when Authorization header missing', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const res = await postJson(app, '/agents/triage/sessions', { prompt: 'hi' }, null)
     expect(res.status).toBe(401)
   })
 
   it('401 when token is wrong', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const res = await postJson(
       app,
       '/agents/triage/sessions',
@@ -98,7 +105,7 @@ describe('auth', () => {
   })
 
   it('401 with non-Bearer scheme', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const res = await postJson(
       app,
       '/agents/triage/sessions',
@@ -109,7 +116,7 @@ describe('auth', () => {
   })
 
   it('401 with same-length wrong token (constant-time guard)', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const wrong = 'X'.repeat(TOKEN.length)
     const res = await postJson(
       app,
@@ -125,20 +132,20 @@ describe('auth', () => {
 
 describe('POST /agents/:name/sessions', () => {
   it('404 unknown agent', async () => {
-    const app = createApp({ agents: makeRegistry({ agents: ['triage'] }), token: TOKEN })
+    const app = createApp({ agents: makeRegistry({ agents: ['triage'] }), approvals: newApprovals(), token: TOKEN })
     const res = await postJson(app, '/agents/nobody/sessions', { prompt: 'hi' })
     expect(res.status).toBe(404)
     expect(await res.json()).toMatchObject({ error: expect.stringMatching(/unknown/i) })
   })
 
   it('400 missing prompt', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const res = await postJson(app, '/agents/triage/sessions', {})
     expect(res.status).toBe(400)
   })
 
   it('400 non-JSON body', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const res = await app.request('/agents/triage/sessions', {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
@@ -154,6 +161,7 @@ describe('POST /agents/:name/sessions', () => {
     ]
     const app = createApp({
       agents: makeRegistry({ events, stopReason: 'end_turn' }),
+      approvals: newApprovals(),
       token: TOKEN,
     })
     const res = await postJson(app, '/agents/triage/sessions', { prompt: 'hi' })
@@ -172,6 +180,7 @@ describe('POST /agents/:name/sessions', () => {
     const promptMock = vi.fn(async () => ({ stopReason: 'end_turn' as const }))
     const app = createApp({
       agents: makeRegistry({ prompt: promptMock }),
+      approvals: newApprovals(),
       token: TOKEN,
     })
     const res = await postJson(app, '/agents/triage/sessions', { prompt: 'hello' })
@@ -189,7 +198,7 @@ describe('POST /agents/:name/sessions', () => {
 
 describe('GET /agents/:name/sessions/:id/events', () => {
   it('404 when no turn is currently in flight for that session id', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const res = await app.request(`/agents/triage/sessions/${SID}/events`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     })
@@ -197,7 +206,7 @@ describe('GET /agents/:name/sessions/:id/events', () => {
   })
 
   it('400 on non-UUID id', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const res = await app.request('/agents/triage/sessions/not-a-uuid/events', {
       headers: { authorization: `Bearer ${TOKEN}` },
     })
@@ -205,7 +214,7 @@ describe('GET /agents/:name/sessions/:id/events', () => {
   })
 
   it('404 unknown agent', async () => {
-    const app = createApp({ agents: makeRegistry({ agents: ['triage'] }), token: TOKEN })
+    const app = createApp({ agents: makeRegistry({ agents: ['triage'] }), approvals: newApprovals(), token: TOKEN })
     const res = await app.request(`/agents/ghost/sessions/${SID}/events`, {
       headers: { authorization: `Bearer ${TOKEN}` },
     })
@@ -213,7 +222,7 @@ describe('GET /agents/:name/sessions/:id/events', () => {
   })
 
   it('401 without auth', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const res = await app.request(`/agents/triage/sessions/${SID}/events`)
     expect(res.status).toBe(401)
   })
@@ -223,14 +232,189 @@ describe('GET /agents/:name/sessions/:id/events', () => {
 
 describe('legacy /sessions and /run routes are gone', () => {
   it('POST /run → 404', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const res = await postJson(app, '/run', { prompt: 'hi' })
     expect(res.status).toBe(404)
   })
 
   it('POST /sessions → 404', async () => {
-    const app = createApp({ agents: makeRegistry(), token: TOKEN })
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
     const res = await postJson(app, '/sessions', { prompt: 'hi' })
     expect(res.status).toBe(404)
+  })
+})
+
+// ─── approval round-trip (Plan-02) ───────────────────────────────────────
+
+const APPROVAL_ID_RE = /^[0-9a-f-]{30,}$/
+
+function approvalRequest(toolCallId: string): ApprovalRequest {
+  return {
+    sessionId: SID,
+    toolCallId,
+    options: [
+      { optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' },
+      { optionId: 'reject-once', name: 'Reject once', kind: 'reject_once' },
+    ],
+  }
+}
+
+describe('SSE approval.request emission', () => {
+  it('emits approval.request when the agent requests permission', async () => {
+    const approvals = newApprovals()
+    const reg: AcpRegistry = makeRegistry({
+      prompt: async (name) => {
+        // The transport replaces registry.onApprovalRequest with one that
+        // registers on the correlator + emits approval.request on the SSE.
+        // The AcpClient would call it — we do so directly to simulate.
+        const decisionPromise = reg.onApprovalRequest(name, approvalRequest('tc-1'))
+        // Wait until the approval is registered, then resolve it.
+        await new Promise((r) => setTimeout(r, 30))
+        const pending = approvals.listPending(SID)
+        expect(pending.length).toBeGreaterThan(0)
+        approvals.resolve(SID, pending[0].approvalId, {
+          decision: 'allow',
+          optionId: 'allow-once',
+        })
+        const decision = await decisionPromise
+        return { stopReason: decision.decision === 'allow' ? 'end_turn' : 'refusal' }
+      },
+    })
+
+    const app = createApp({ agents: reg, approvals, token: TOKEN })
+    const res = await postJson(app, '/agents/triage/sessions', { prompt: 'hi' })
+    expect(res.status).toBe(200)
+    const frames = parseFrames(await res.text()) as Array<Record<string, unknown>>
+    const approvalFrame = frames.find((f) => f.type === 'approval.request')
+    expect(approvalFrame).toBeDefined()
+    expect((approvalFrame as { approval_id: string }).approval_id).toMatch(APPROVAL_ID_RE)
+    const last = frames[frames.length - 1]
+    expect(last.type).toBe('turn.end')
+  })
+})
+
+describe('POST /agents/:name/sessions/:sid/approvals/:approval_id', () => {
+  it('401 without bearer token', async () => {
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
+    const res = await postJson(
+      app,
+      `/agents/triage/sessions/${SID}/approvals/abc`,
+      { decision: 'cancel' },
+      null,
+    )
+    expect(res.status).toBe(401)
+  })
+
+  it('404 for unknown agent', async () => {
+    const app = createApp({
+      agents: makeRegistry({ agents: ['triage'] }),
+      approvals: newApprovals(),
+      token: TOKEN,
+    })
+    const res = await postJson(
+      app,
+      `/agents/ghost/sessions/${SID}/approvals/abc`,
+      { decision: 'cancel' },
+    )
+    expect(res.status).toBe(404)
+  })
+
+  it('404 for unknown approval id (correlator returns false)', async () => {
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
+    const res = await postJson(
+      app,
+      `/agents/triage/sessions/${SID}/approvals/nope`,
+      { decision: 'cancel' },
+    )
+    expect(res.status).toBe(404)
+  })
+
+  it('400 for body missing decision', async () => {
+    const approvals = newApprovals()
+    const app = createApp({ agents: makeRegistry(), approvals, token: TOKEN })
+    const res = await postJson(
+      app,
+      `/agents/triage/sessions/${SID}/approvals/anything`,
+      {},
+    )
+    expect(res.status).toBe(400)
+  })
+
+  it('400 when allow lacks option_id', async () => {
+    const approvals = newApprovals()
+    const handle = approvals.register('triage', SID, approvalRequest('tc-1'))
+    const app = createApp({ agents: makeRegistry(), approvals, token: TOKEN })
+    const res = await postJson(
+      app,
+      `/agents/triage/sessions/${SID}/approvals/${handle.approvalId}`,
+      { decision: 'allow' },
+    )
+    expect(res.status).toBe(400)
+    void handle.decisionPromise.catch(() => {})
+  })
+
+  it('200 + resolves the in-flight Promise on valid allow', async () => {
+    const approvals = newApprovals()
+    const handle = approvals.register('triage', SID, approvalRequest('tc-1'))
+    const app = createApp({ agents: makeRegistry(), approvals, token: TOKEN })
+    const res = await postJson(
+      app,
+      `/agents/triage/sessions/${SID}/approvals/${handle.approvalId}`,
+      { decision: 'allow', option_id: 'allow-once' },
+    )
+    expect(res.status).toBe(200)
+    await expect(handle.decisionPromise).resolves.toEqual({
+      decision: 'allow',
+      optionId: 'allow-once',
+    })
+  })
+
+  it('200 + resolves with cancel on { decision: "cancel" }', async () => {
+    const approvals = newApprovals()
+    const handle = approvals.register('triage', SID, approvalRequest('tc-1'))
+    const app = createApp({ agents: makeRegistry(), approvals, token: TOKEN })
+    const res = await postJson(
+      app,
+      `/agents/triage/sessions/${SID}/approvals/${handle.approvalId}`,
+      { decision: 'cancel' },
+    )
+    expect(res.status).toBe(200)
+    await expect(handle.decisionPromise).resolves.toEqual({ decision: 'cancel' })
+  })
+})
+
+describe('POST /agents/:name/sessions/:sid/cancel', () => {
+  it('401 without bearer token', async () => {
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
+    const res = await postJson(app, `/agents/triage/sessions/${SID}/cancel`, {}, null)
+    expect(res.status).toBe(401)
+  })
+
+  it('404 for unknown agent', async () => {
+    const app = createApp({
+      agents: makeRegistry({ agents: ['triage'] }),
+      approvals: newApprovals(),
+      token: TOKEN,
+    })
+    const res = await postJson(app, `/agents/ghost/sessions/${SID}/cancel`, {})
+    expect(res.status).toBe(404)
+  })
+
+  it('204 and cancels every pending approval for the session', async () => {
+    const approvals = newApprovals()
+    const a = approvals.register('triage', SID, approvalRequest('tc-1'))
+    const b = approvals.register('triage', SID, approvalRequest('tc-2'))
+    const app = createApp({ agents: makeRegistry(), approvals, token: TOKEN })
+    const res = await postJson(app, `/agents/triage/sessions/${SID}/cancel`, {})
+    expect(res.status).toBe(204)
+    await expect(a.decisionPromise).resolves.toEqual({ decision: 'cancel' })
+    await expect(b.decisionPromise).resolves.toEqual({ decision: 'cancel' })
+    expect(approvals.size()).toBe(0)
+  })
+
+  it('204 even with no pending approvals (idempotent)', async () => {
+    const app = createApp({ agents: makeRegistry(), approvals: newApprovals(), token: TOKEN })
+    const res = await postJson(app, `/agents/triage/sessions/${SID}/cancel`, {})
+    expect(res.status).toBe(204)
   })
 })
