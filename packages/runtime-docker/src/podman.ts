@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { AgentAdapter, Runtime, SpawnConfig } from '@zooid/budd-core'
+import type { AgentAdapter, Runtime, SpawnConfig } from '@zooid/core'
 import { buildDockerArgs } from './docker.js'
 import { resolveEnvPassthrough } from './env.js'
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { loadConfig, type AgentAdapter } from '@zooid/budd-core'
-import { resolveEnvPassthrough } from '@zooid/budd-runtime-docker'
+import { loadConfig, type AgentAdapter } from '@zooid/core'
+import { resolveEnvPassthrough } from '@zooid/runtime-docker'
 import { buildRunnersFromConfig } from './index.js'
 
 // Stub adapter mirrors the shape the opencode factory will produce: a
@@ -42,7 +42,7 @@ agents:
       ANTHROPIC_API_KEY: 'sk-a',
       JIRA_URL: 'https://j',
       CORP_JIRA_TOKEN: 'tok',
-      BUDD_TOKEN: 'must-not-leak',
+      ZOOID_TOKEN: 'must-not-leak',
     })
 
     expect(resolved).toEqual([
@@ -50,7 +50,7 @@ agents:
       ['JIRA_TOKEN', 'tok'],
       ['JIRA_URL', 'https://j'],
     ])
-    // BUDD_TOKEN deny-list invariant is the most important non-leak guarantee.
+    // ZOOID_TOKEN deny-list invariant is the most important non-leak guarantee.
     expect(resolved.find(([k]) => k.startsWith('BUDD'))).toBeUndefined()
   })
 

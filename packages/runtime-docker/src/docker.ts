@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { AgentAdapter, ExtraMount, Runtime, SpawnConfig } from '@zooid/budd-core'
+import type { AgentAdapter, ExtraMount, Runtime, SpawnConfig } from '@zooid/core'
 import { resolveEnvPassthrough } from './env.js'
 
 export interface DockerRuntimeOptions {
@@ -127,7 +127,7 @@ export function mapDockerExitCode(
  *   - Adapter-declared sessionStateDir under $HOME (RW)
  *   - Per-agent extraMounts from daemon.yaml
  *   - Adapter-declared envPassthrough + per-agent forward_env (deny-listed
- *     for BUDD_*) forwarded via `-e`
+ *     for ZOOID_*) forwarded via `-e`
  *   - `--rm` so the container disappears on exit
  *   - `-i` so stdin is wired up (chunkers in SessionRunner read stdout)
  */
@@ -154,8 +154,8 @@ export class DockerRuntime implements Runtime {
    * buildDockerArgs.
    *
    * Per-call config.env vars are appended verbatim — they're owned by the
-   * runner, not user-controlled, so the BUDD_* deny list doesn't apply
-   * (and SessionRunner never sets BUDD_*).
+   * runner, not user-controlled, so the ZOOID_* deny list doesn't apply
+   * (and SessionRunner never sets ZOOID_*).
    */
   buildArgv(config: SpawnConfig): string[] {
     const processEnv = this.opts.processEnv ?? process.env

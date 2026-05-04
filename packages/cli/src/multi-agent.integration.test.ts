@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { loadConfig } from '@zooid/budd-core'
-import { createApp } from '@zooid/budd-transport-http'
-import { DockerRuntime } from '@zooid/budd-runtime-docker'
+import { loadConfig } from '@zooid/core'
+import { createApp } from '@zooid/transport-http'
+import { DockerRuntime } from '@zooid/runtime-docker'
 import { claudeAdapter } from '@zooid/budd-adapter-claude'
 import { codexAdapter } from '@zooid/budd-adapter-codex'
 import { buildRunnersFromConfig } from './index.js'
@@ -123,10 +123,10 @@ agents:
             target: /workspace/docs
             mode: ro
 `)
-    const runners = buildRunnersFromConfig(config, { configDir: '/etc/budd' })
+    const runners = buildRunnersFromConfig(config, { configDir: '/etc/zooid' })
     const opts = (runners.qa as unknown as { opts: { extraMounts?: { path: string }[] } })
       .opts
-    expect(opts.extraMounts?.[0]?.path).toBe('/etc/budd/shared-docs')
+    expect(opts.extraMounts?.[0]?.path).toBe('/etc/zooid/shared-docs')
   })
 })
 

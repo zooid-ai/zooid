@@ -282,7 +282,7 @@ export class SessionRunner {
       const hookResult = await runHook(this.opts.hooks.post_turn, postEnv, cwd)
       if (hookResult.exit_code !== 0) {
         process.stderr.write(
-          `[budd] post_turn failed (exit ${hookResult.exit_code}): ${hookResult.stderr.trim()}\n`,
+          `[zooid] post_turn failed (exit ${hookResult.exit_code}): ${hookResult.stderr.trim()}\n`,
         )
       }
     }

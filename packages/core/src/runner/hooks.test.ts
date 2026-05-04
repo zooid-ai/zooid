@@ -29,7 +29,7 @@ describe('runHook', () => {
   })
 
   it('runs in the configured workdir', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'budd-hook-'))
+    const dir = mkdtempSync(join(tmpdir(), 'zooid-hook-'))
     try {
       const result = await runHook('pwd', {}, dir)
       // On macOS tmpdir resolves through /private; resolve symlinks for both sides

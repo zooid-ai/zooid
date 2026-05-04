@@ -26,7 +26,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@zooid/budd-core": "workspace:^"
+    "@zooid/core": "workspace:^"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

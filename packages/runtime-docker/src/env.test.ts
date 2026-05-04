@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { resolveEnvPassthrough } from './env.js'
-import type { AgentAdapter } from '@zooid/budd-core'
+import type { AgentAdapter } from '@zooid/core'
 
 // Minimal AgentAdapter stub — only `name` and `envPassthrough` are read by
 // resolveEnvPassthrough. Everything else is unused at this layer.
@@ -65,37 +65,37 @@ describe('resolveEnvPassthrough', () => {
     expect(out).toEqual([])
   })
 
-  it('blocks BUDD_TOKEN even if explicitly listed in forward_env', () => {
+  it('blocks ZOOID_TOKEN even if explicitly listed in forward_env', () => {
     const out = resolveEnvPassthrough(
       adapter(),
-      ['BUDD_TOKEN'],
-      { BUDD_TOKEN: 'super-secret' },
+      ['ZOOID_TOKEN'],
+      { ZOOID_TOKEN: 'super-secret' },
     )
     expect(out).toEqual([])
   })
 
-  it('blocks BUDD_* prefix even if explicitly listed in forward_env', () => {
+  it('blocks ZOOID_* prefix even if explicitly listed in forward_env', () => {
     const out = resolveEnvPassthrough(
       adapter(),
-      ['BUDD_INTERNAL'],
-      { BUDD_INTERNAL: 'x' },
+      ['ZOOID_INTERNAL'],
+      { ZOOID_INTERNAL: 'x' },
     )
     expect(out).toEqual([])
   })
 
-  it('blocks rename when host side is BUDD_*', () => {
+  it('blocks rename when host side is ZOOID_*', () => {
     const out = resolveEnvPassthrough(
       adapter(),
-      ['BUDD_TOKEN:FOO'],
-      { BUDD_TOKEN: 'x' },
+      ['ZOOID_TOKEN:FOO'],
+      { ZOOID_TOKEN: 'x' },
     )
     expect(out).toEqual([])
   })
 
-  it('blocks rename when container side is BUDD_*', () => {
+  it('blocks rename when container side is ZOOID_*', () => {
     const out = resolveEnvPassthrough(
       adapter(),
-      ['FOO:BUDD_X'],
+      ['FOO:ZOOID_X'],
       { FOO: 'x' },
     )
     expect(out).toEqual([])

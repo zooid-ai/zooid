@@ -14,7 +14,7 @@ import {
   tailCodexSessionFile,
   lineToEvent,
 } from './session-file.js'
-import type { SessionEvent } from '@zooid/budd-core'
+import type { SessionEvent } from '@zooid/core'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────
 

@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { open, stat, type FileHandle } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { SessionEvent } from '@zooid/budd-core'
+import type { SessionEvent } from '@zooid/core'
 
 /**
  * Compute the on-disk path Claude Code uses for a given session id under a

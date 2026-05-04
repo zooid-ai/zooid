@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { DockerRuntime } from './docker.js'
-import type { AgentAdapter } from '@zooid/budd-core'
+import type { AgentAdapter } from '@zooid/core'
 
 function adapter(envPassthrough: string[]): AgentAdapter {
   return {
@@ -36,16 +36,16 @@ describe('DockerRuntime — env passthrough integration', () => {
     expect(argv).toContain('JIRA_URL=https://j')
   })
 
-  it('does NOT forward BUDD_TOKEN even if user lists it in forward_env', () => {
+  it('does NOT forward ZOOID_TOKEN even if user lists it in forward_env', () => {
     const rt = new DockerRuntime({
       image: 'stub:latest',
       workdir: '/tmp',
       adapter: adapter([]),
-      forwardEnv: ['BUDD_TOKEN'],
-      processEnv: { BUDD_TOKEN: 'must-not-leak' },
+      forwardEnv: ['ZOOID_TOKEN'],
+      processEnv: { ZOOID_TOKEN: 'must-not-leak' },
     })
     const argv = rt.buildArgv({ command: 'true', args: [] })
-    expect(argv.find((a) => a.startsWith('BUDD_TOKEN='))).toBeUndefined()
+    expect(argv.find((a) => a.startsWith('ZOOID_TOKEN='))).toBeUndefined()
   })
 
   it('forwards synthetic per-session vars (SESSION_ID etc.) via SpawnConfig.env', () => {

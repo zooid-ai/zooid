@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { delimiter, join } from 'node:path'
-import type { AgentAdapter, SpawnConfig } from '@zooid/budd-core'
+import type { AgentAdapter, SpawnConfig } from '@zooid/core'
 import {
   findCodexSessionFile,
   isCodexSessionBusy,

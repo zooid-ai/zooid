@@ -8,9 +8,9 @@ import {
   type ExtraMount,
   type Runtime,
   type SessionRunnerOptions,
-} from '@zooid/budd-core'
-import { LocalRuntime } from '@zooid/budd-runtime-local'
-import { DockerRuntime, PodmanRuntime } from '@zooid/budd-runtime-docker'
+} from '@zooid/core'
+import { LocalRuntime } from '@zooid/runtime-local'
+import { DockerRuntime, PodmanRuntime } from '@zooid/runtime-docker'
 import { claudeAdapter } from '@zooid/budd-adapter-claude'
 import { codexAdapter } from '@zooid/budd-adapter-codex'
 
@@ -77,7 +77,7 @@ export function buildRunnersFromConfig(
     // sources must be absolute (a relative `.` is interpreted as a volume
     // name), and the SessionRunner's cwd is used for hook execution and
     // adapter file lookups — also needs to be absolute for deterministic
-    // behaviour regardless of where budd was launched from.
+    // behaviour regardless of where zooid was launched from.
     const absWorkdir = resolve(configDir, agent.workdir)
 
     let runtime: Runtime

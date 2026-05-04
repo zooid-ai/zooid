@@ -28,10 +28,10 @@ async function waitForHealthy(port: number, attempts = 100): Promise<void> {
     }
     await new Promise((r) => setTimeout(r, 100))
   }
-  throw new Error(`budd on port ${port} did not become healthy`)
+  throw new Error(`zooid on port ${port} did not become healthy`)
 }
 
-async function startBudd(opts: {
+async function startZooid(opts: {
   port: number
   token: string
   workdir: string
@@ -39,7 +39,7 @@ async function startBudd(opts: {
 }): Promise<ChildProcess> {
   if (!existsSync(CLI_BIN)) {
     throw new Error(
-      `budd CLI not built at ${CLI_BIN} — run \`pnpm -C packages/cli build\` first`,
+      `zooid CLI not built at ${CLI_BIN} — run \`pnpm -C packages/cli build\` first`,
     )
   }
   const child = spawn(
@@ -59,7 +59,7 @@ async function startBudd(opts: {
       cwd: opts.workdir,
       env: {
         ...process.env,
-        BUDD_TOKEN: opts.token,
+        ZOOID_TOKEN: opts.token,
         ...opts.extraEnv,
       },
       stdio: ['ignore', 'inherit', 'inherit'],
@@ -101,13 +101,13 @@ afterAll(() => {
   spawnSync('docker', ['rmi', '-f', STUB_IMAGE], { stdio: 'ignore' })
 })
 
-describe('budd --runtime docker (e2e)', () => {
+describe('zooid --runtime docker (e2e)', () => {
   it('runs a session inside the container and streams SSE back', async () => {
-    const workdir = mkdtempSync(join(tmpdir(), 'budd-e2e-'))
+    const workdir = mkdtempSync(join(tmpdir(), 'zooid-e2e-'))
     const port = 8201
     const token = makeToken()
 
-    const budd = await startBudd({ port, token, workdir })
+    const zooid = await startZooid({ port, token, workdir })
     try {
       const body = JSON.stringify({ prompt: 'fix the auth bug' })
       const res = await fetch(`http://localhost:${port}/sessions`, {
@@ -132,17 +132,17 @@ describe('budd --runtime docker (e2e)', () => {
       expect(ended?.exit_code).toBe(0)
       expect(frames.some((f) => f.type === 'stdout')).toBe(true)
     } finally {
-      budd.kill('SIGTERM')
+      zooid.kill('SIGTERM')
       rmSync(workdir, { recursive: true, force: true })
     }
   })
 
   it('non-zero container exit propagates', async () => {
-    const workdir = mkdtempSync(join(tmpdir(), 'budd-e2e-'))
+    const workdir = mkdtempSync(join(tmpdir(), 'zooid-e2e-'))
     const port = 8202
     const token = makeToken()
 
-    const budd = await startBudd({
+    const zooid = await startZooid({
       port,
       token,
       workdir,
@@ -166,17 +166,17 @@ describe('budd --runtime docker (e2e)', () => {
       expect(ended?.type).toBe('turn.end')
       expect(ended?.exit_code).toBe(2)
     } finally {
-      budd.kill('SIGTERM')
+      zooid.kill('SIGTERM')
       rmSync(workdir, { recursive: true, force: true })
     }
   })
 
   it('env leakage: host env vars not in the allowlist are not visible inside the container', async () => {
-    const workdir = mkdtempSync(join(tmpdir(), 'budd-e2e-'))
+    const workdir = mkdtempSync(join(tmpdir(), 'zooid-e2e-'))
     const port = 8203
     const token = makeToken()
 
-    const budd = await startBudd({
+    const zooid = await startZooid({
       port,
       token,
       workdir,
@@ -198,7 +198,7 @@ describe('budd --runtime docker (e2e)', () => {
       const text = await res.text()
       expect(text).not.toContain('should-not-leak')
     } finally {
-      budd.kill('SIGTERM')
+      zooid.kill('SIGTERM')
       rmSync(workdir, { recursive: true, force: true })
     }
   })

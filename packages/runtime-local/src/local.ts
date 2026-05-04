@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { Runtime, SpawnConfig } from '@zooid/budd-core'
+import type { Runtime, SpawnConfig } from '@zooid/core'
 
 /**
  * LocalRuntime spawns processes directly on the host. No isolation; the

@@ -1,7 +1,7 @@
 {
-  "name": "@zooid/budd-transport-http",
+  "name": "@zooid/transport-http",
   "version": "0.0.1",
-  "description": "HTTP transport for budd. POST /sessions to start a session, POST /sessions/:id/turns to resume, GET /sessions/:id/events to tail. Bearer-auth, SSE responses.",
+  "description": "HTTP transport for zooid. POST /sessions to start a session, POST /sessions/:id/turns to resume, GET /sessions/:id/events to tail. Bearer-auth, SSE responses.",
   "type": "module",
   "license": "MIT",
   "main": "./src/index.ts",
@@ -26,13 +26,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@zooid/budd-core": "workspace:^",
+    "@zooid/core": "workspace:^",
     "hono": "^4.6.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@zooid/budd-adapter-claude": "workspace:^",
-    "@zooid/budd-runtime-local": "workspace:^",
+    "@zooid/runtime-local": "workspace:^",
     "tsup": "^8.5.1",
     "typescript": "^5.5.0",
     "vitest": "^3.2.0"

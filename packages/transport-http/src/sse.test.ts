@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { SessionEvent } from '@zooid/budd-core'
+import type { SessionEvent } from '@zooid/core'
 import { serializeEvent, parseEventStream } from './sse.js'
 
 describe('serializeEvent', () => {

@@ -13,7 +13,7 @@ import {
   isClaudeSessionBusy,
   tailClaudeSessionFile,
 } from './session-file.js'
-import type { SessionEvent } from '@zooid/budd-core'
+import type { SessionEvent } from '@zooid/core'
 
 describe('claudeSessionFilePath', () => {
   it('encodes a leading-slash absolute path with leading dash', () => {

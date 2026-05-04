@@ -4,8 +4,8 @@ import {
   type AgentAdapter,
   type SessionEvent,
   type SessionRunnerOptions,
-} from '@zooid/budd-core'
-import { LocalRuntime } from '@zooid/budd-runtime-local'
+} from '@zooid/core'
+import { LocalRuntime } from '@zooid/runtime-local'
 import { claudeAdapter } from '@zooid/budd-adapter-claude'
 import { codexAdapter } from '@zooid/budd-adapter-codex'
 import { fileURLToPath } from 'node:url'
@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 
-// Resolve the stub `claude` fixture that ships with @budd/adapter-claude.
+// Resolve the stub `claude` fixture that ships with @zooid/budd-adapter-claude.
 // We point at the source-side fixture so this works in dev (no build needed).
 const FIXTURES_BIN = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -72,7 +72,7 @@ describe('SessionRunner (integration with stub claude)', () => {
   })
 
   it('resume path passes --resume with the provided session_id', async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'budd-argv-'))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'zooid-argv-'))
     const argvFile = join(tmpDir, 'argv.txt')
     try {
       const runner = makeRunner({ adapterEnv: { STUB_ARGV_FILE: argvFile } })
@@ -314,7 +314,7 @@ describe('SessionRunner — deferred id strategy', () => {
   })
 
   it('pre_turn hook env exposes SESSION_ID="" on a deferred new turn', async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'budd-defenv-'))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'zooid-defenv-'))
     const envFile = join(tmpDir, 'pre.env')
     try {
       const runner = new SessionRunner({
@@ -337,7 +337,7 @@ describe('SessionRunner — deferred id strategy', () => {
   })
 
   it('post_turn hook env exposes the id surfaced mid-stream', async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'budd-defpost-'))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'zooid-defpost-'))
     const envFile = join(tmpDir, 'post.env')
     try {
       const runner = new SessionRunner({
@@ -409,7 +409,7 @@ describe('SessionRunner (integration with stub codex)', () => {
   })
 
   it('resume passes session_id to the adapter', async () => {
-    const tmpDir = mkdtempSync(join(tmpdir(), 'budd-codex-argv-'))
+    const tmpDir = mkdtempSync(join(tmpdir(), 'zooid-codex-argv-'))
     const argvFile = join(tmpDir, 'argv.txt')
     try {
       const runner = makeCodexRunner({ adapterEnv: { STUB_ARGV_FILE: argvFile } })
@@ -447,7 +447,7 @@ describe('SessionRunner (integration with stub codex)', () => {
 // The docker runtime is where these actually become `-v` flags — but we
 // don't need to spin up docker to verify the wiring.
 
-import type { Runtime, SpawnConfig } from '@zooid/budd-core'
+import type { Runtime, SpawnConfig } from '@zooid/core'
 import { EventEmitter } from 'node:events'
 
 function makeFakeContainerizedRuntime(): {

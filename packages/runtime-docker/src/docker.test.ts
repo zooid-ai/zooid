@@ -71,7 +71,7 @@ describe('buildDockerArgs — base shape', () => {
 describe('buildDockerArgs — workspace RO carveouts', () => {
   let host: string
   beforeEach(() => {
-    host = mkdtempSync(join(tmpdir(), 'budd-mount-test-'))
+    host = mkdtempSync(join(tmpdir(), 'zooid-mount-test-'))
     mkdirSync(join(host, '.claude'), { recursive: true })
     writeFileSync(join(host, 'CLAUDE.md'), '# Instructions\n')
   })
@@ -134,7 +134,7 @@ describe('buildDockerArgs — workspace RO carveouts', () => {
 describe('buildDockerArgs — home RO files', () => {
   let hostHome: string
   beforeEach(() => {
-    hostHome = mkdtempSync(join(tmpdir(), 'budd-home-test-'))
+    hostHome = mkdtempSync(join(tmpdir(), 'zooid-home-test-'))
     mkdirSync(join(hostHome, '.claude'), { recursive: true })
     writeFileSync(join(hostHome, '.claude/settings.json'), '{}\n')
   })
@@ -162,7 +162,7 @@ describe('buildDockerArgs — home RO files', () => {
 describe('buildDockerArgs — sessionStateDir', () => {
   let hostHome: string
   beforeEach(() => {
-    hostHome = mkdtempSync(join(tmpdir(), 'budd-sess-test-'))
+    hostHome = mkdtempSync(join(tmpdir(), 'zooid-sess-test-'))
   })
   afterEach(() => rmSync(hostHome, { recursive: true, force: true }))
 
@@ -209,9 +209,9 @@ describe('buildDockerArgs — extra mounts', () => {
 
 describe('buildDockerArgs — argv ordering contract', () => {
   it('orders: run --rm -i, workspace RW, workspace RO, home RO, sessionState RW, extras, env, entrypoint, image, args', () => {
-    const host = mkdtempSync(join(tmpdir(), 'budd-order-'))
+    const host = mkdtempSync(join(tmpdir(), 'zooid-order-'))
     writeFileSync(join(host, 'CLAUDE.md'), 'x')
-    const hostHome = mkdtempSync(join(tmpdir(), 'budd-order-home-'))
+    const hostHome = mkdtempSync(join(tmpdir(), 'zooid-order-home-'))
     mkdirSync(join(hostHome, '.claude'), { recursive: true })
     writeFileSync(join(hostHome, '.claude/settings.json'), '{}')
 

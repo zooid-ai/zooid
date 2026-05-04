@@ -1,4 +1,4 @@
-import type { AgentAdapter } from '@zooid/budd-core'
+import type { AgentAdapter } from '@zooid/core'
 
 interface EnvSpec {
   /** Name to look up in the daemon's process.env. */
@@ -15,7 +15,7 @@ function parseForwardEnvEntry(raw: string): EnvSpec {
 }
 
 const DENY = (name: string): boolean =>
-  name === 'BUDD_TOKEN' || name.startsWith('BUDD_')
+  name === 'ZOOID_TOKEN' || name.startsWith('ZOOID_')
 
 /**
  * Resolve the full set of env vars to forward into a session container.
@@ -29,7 +29,7 @@ const DENY = (name: string): boolean =>
  *                             silently dropped (persona portability).
  *
  * Invariants:
- *   1. BUDD_TOKEN and anything matching BUDD_* is NEVER forwarded, regardless
+ *   1. ZOOID_TOKEN and anything matching ZOOID_* is NEVER forwarded, regardless
  *      of which side of a rename it appears on. Preserves the deploy-dind-multi-agent
  *      §7 contract.
  *   2. Dedup is by container-side name. Last wins (user's forward_env runs after

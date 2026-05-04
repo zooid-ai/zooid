@@ -1,8 +1,8 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { serve } from '@hono/node-server'
-import { loadConfig, mergeCliFlags, type CliFlags } from '@zooid/budd-core'
-import { createApp } from '@zooid/budd-transport-http'
+import { loadConfig, mergeCliFlags, type CliFlags } from '@zooid/core'
+import { createApp } from '@zooid/transport-http'
 import { buildRunnersFromConfig } from './index.js'
 
 interface ParsedFlags extends CliFlags {
@@ -12,10 +12,10 @@ interface ParsedFlags extends CliFlags {
 
 function printHelp(): void {
   process.stdout.write(
-    `budd — daemon that exposes coding-agent CLIs behind an HTTP API.
+    `zooid — daemon that exposes coding-agent CLIs behind an HTTP API.
 
 Usage:
-  budd [flags]
+  zooid [flags]
 
 Flags:
   --transport <http>           Transport to listen on (only "http" is supported).
@@ -27,8 +27,8 @@ Flags:
   --help, -h                   Print this help and exit.
 
 Environment:
-  BUDD_TOKEN                   Required. Bearer token clients send as
-                               "Authorization: Bearer $BUDD_TOKEN".
+  ZOOID_TOKEN                   Required. Bearer token clients send as
+                               "Authorization: Bearer $ZOOID_TOKEN".
 
 Config:
   ./daemon.yaml                Required. Must define agents: with at least one
@@ -47,9 +47,9 @@ HTTP API:
   GET  /agents/:name/sessions/:id/events   Tail a session's event stream.
 
 Example:
-  $ export BUDD_TOKEN=$(budd --print-token)
-  $ budd --port 8080 &
-  $ curl -N -H "Authorization: Bearer $BUDD_TOKEN" \\
+  $ export ZOOID_TOKEN=$(zooid --print-token)
+  $ zooid --port 8080 &
+  $ curl -N -H "Authorization: Bearer $ZOOID_TOKEN" \\
          -H "content-type: application/json" \\
          -d '{"prompt":"fix the auth bug"}' \\
          http://localhost:8080/agents/qa/sessions
@@ -125,9 +125,9 @@ async function main(): Promise<void> {
   const base = loadConfig(readFileSync('daemon.yaml', 'utf8'))
   const config = mergeCliFlags(base, flags)
 
-  const token = process.env.BUDD_TOKEN
+  const token = process.env.ZOOID_TOKEN
   if (!token) {
-    console.error('BUDD_TOKEN is required')
+    console.error('ZOOID_TOKEN is required')
     process.exit(1)
   }
 
@@ -135,7 +135,7 @@ async function main(): Promise<void> {
   const app = createApp({ runners, token })
 
   serve({ fetch: app.fetch, port: config.port }, (info) => {
-    console.log(`budd listening on http://localhost:${info.port}`)
+    console.log(`zooid listening on http://localhost:${info.port}`)
     for (const name of Object.keys(runners)) {
       console.log(`  agent: ${name} (workdir: ${config.agents[name].workdir})`)
     }

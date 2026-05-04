@@ -1,7 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { timingSafeEqual } from 'node:crypto'
-import type { SessionRunner, SessionEvent } from '@zooid/budd-core'
+import type { SessionRunner, SessionEvent } from '@zooid/core'
 
 export interface CreateAppOptions {
   /**
@@ -13,7 +13,7 @@ export interface CreateAppOptions {
   runners: Record<string, SessionRunner>
   /**
    * Bearer token clients must present in the `Authorization: Bearer <token>`
-   * header. Compared in constant time. Generate one with `budd --print-token`.
+   * header. Compared in constant time. Generate one with `zooid --print-token`.
    */
   token: string
 }
@@ -184,7 +184,7 @@ export function createApp({ runners, token }: CreateAppOptions) {
    *
    * Uses the adapter's `openStream` to live-tail whatever persistent state
    * the underlying CLI keeps (Claude Code: the `.jsonl` session file under
-   * `~/.claude/projects/...`; future adapters: whatever they want — budd
+   * `~/.claude/projects/...`; future adapters: whatever they want — zooid
    * doesn't care about the storage shape).
    *
    * Returns 404 when there's no readable stream for the id (adapter doesn't

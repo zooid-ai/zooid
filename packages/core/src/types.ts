@@ -263,7 +263,7 @@ export interface AgentDockerConfig {
    *   - "NAME"               — pass-through same-name from process.env
    *   - "HOST:CONTAINER"     — read process.env[HOST], expose as CONTAINER
    *
-   * BUDD_TOKEN and any BUDD_* var are blocked unconditionally, on either
+   * ZOOID_TOKEN and any ZOOID_* var are blocked unconditionally, on either
    * side of a rename. Missing source vars contribute nothing.
    */
   forward_env?: string[]

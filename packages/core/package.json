@@ -1,7 +1,7 @@
 {
-  "name": "@zooid/budd-core",
+  "name": "@zooid/core",
   "version": "0.0.1",
-  "description": "budd core: SessionRunner, Chunker, hooks, config parsing, and the Runtime/Adapter/Transport interfaces.",
+  "description": "zooid core: SessionRunner, Chunker, hooks, config parsing, and the Runtime/Adapter/Transport interfaces.",
   "type": "module",
   "license": "MIT",
   "main": "./src/index.ts",

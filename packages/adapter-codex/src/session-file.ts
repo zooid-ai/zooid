@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { open, readdir, stat, type FileHandle } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import type { SessionEvent } from '@zooid/budd-core'
+import type { SessionEvent } from '@zooid/core'
 
 /**
  * Find the on-disk JSONL session file for a given Codex session id.

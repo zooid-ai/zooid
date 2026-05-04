@@ -6,8 +6,8 @@ import {
   type AgentAdapter,
   type SessionEvent,
   type SessionRunnerOptions,
-} from '@zooid/budd-core'
-import { LocalRuntime } from '@zooid/budd-runtime-local'
+} from '@zooid/core'
+import { LocalRuntime } from '@zooid/runtime-local'
 import { claudeAdapter } from '@zooid/budd-adapter-claude'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -90,7 +90,7 @@ describe('POST /agents/:name/sessions', () => {
   })
 
   it('passes --session-id (not --resume) to the adapter on a new session', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'budd-argv-'))
+    const dir = mkdtempSync(join(tmpdir(), 'zooid-argv-'))
     const argvFile = join(dir, 'argv.txt')
     try {
       const app = makeApp({ adapterEnv: { STUB_ARGV_FILE: argvFile } })
@@ -210,7 +210,7 @@ describe('POST /agents/:name/sessions', () => {
 
 describe('POST /agents/:name/sessions/:id/turns', () => {
   it('passes --resume <id> to the adapter and omits session.start', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'budd-argv-'))
+    const dir = mkdtempSync(join(tmpdir(), 'zooid-argv-'))
     const argvFile = join(dir, 'argv.txt')
     try {
       const app = makeApp({ adapterEnv: { STUB_ARGV_FILE: argvFile } })

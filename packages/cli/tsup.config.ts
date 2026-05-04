@@ -8,7 +8,7 @@ export default defineConfig({
   sourcemap: true,
   target: 'node20',
   // Self-bundle workspace deps so the published bin is a single file that
-  // doesn't need any @zooid/budd-* packages installed alongside it.
-  noExternal: [/^@zooid\/budd(-|$)/],
+  // doesn't need any @zooid/* packages installed alongside it.
+  noExternal: [/^@zooid\//],
   banner: { js: '#!/usr/bin/env node' },
 })
