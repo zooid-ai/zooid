@@ -40,55 +40,11 @@ importers:
         specifier: ^3.2.0
         version: 3.2.4(@types/node@22.19.17)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
 
-  packages/adapter-claude:
-    dependencies:
-      '@zooid/core':
-        specifier: workspace:^
-        version: link:../core
-    devDependencies:
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.19.17
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(jiti@2.6.1)(postcss@8.5.13)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.4)
-      typescript:
-        specifier: ^5.5.0
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.0
-        version: 3.2.4(@types/node@22.19.17)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
-
-  packages/adapter-codex:
-    dependencies:
-      '@zooid/core':
-        specifier: workspace:^
-        version: link:../core
-    devDependencies:
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.19.17
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(jiti@2.6.1)(postcss@8.5.13)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.4)
-      typescript:
-        specifier: ^5.5.0
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.0
-        version: 3.2.4(@types/node@22.19.17)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
-
   packages/cli:
     dependencies:
       '@hono/node-server':
         specifier: ^1.13.0
         version: 1.19.14(hono@4.12.16)
-      '@zooid/budd-adapter-claude':
-        specifier: workspace:^
-        version: link:../adapter-claude
-      '@zooid/budd-adapter-codex':
-        specifier: workspace:^
-        version: link:../adapter-codex
       '@zooid/core':
         specifier: workspace:^
         version: link:../core
@@ -126,6 +82,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@zooid/acp-client':
+        specifier: workspace:^
+        version: link:../acp-client
       yaml:
         specifier: ^2.5.0
         version: 2.8.4
@@ -133,9 +92,15 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
+      '@zooid/runtime-local':
+        specifier: workspace:^
+        version: link:../runtime-local
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.13)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.4)
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
@@ -183,6 +148,9 @@ importers:
 
   packages/transport-http:
     dependencies:
+      '@zooid/acp-client':
+        specifier: workspace:^
+        version: link:../acp-client
       '@zooid/core':
         specifier: workspace:^
         version: link:../core
@@ -193,15 +161,15 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
-      '@zooid/budd-adapter-claude':
-        specifier: workspace:^
-        version: link:../adapter-claude
       '@zooid/runtime-local':
         specifier: workspace:^
         version: link:../runtime-local
       tsup:
         specifier: ^8.5.1
         version: 8.5.1(jiti@2.6.1)(postcss@8.5.13)(tsx@4.21.0)(typescript@5.9.3)(yaml@2.8.4)
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
       typescript:
         specifier: ^5.5.0
         version: 5.9.3

@@ -1,1 +1,1 @@
-export { LocalRuntime } from './local.js'
+export { LocalAcpRuntime } from './local-acp.js'

@@ -26,11 +26,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@zooid/acp-client": "workspace:^",
     "yaml": "^2.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
+    "@zooid/runtime-local": "workspace:^",
     "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.5.0",
     "vitest": "^3.2.0"
   }

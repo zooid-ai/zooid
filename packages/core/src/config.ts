@@ -1,49 +1,62 @@
 import { parse } from 'yaml'
+import type { AcpAgentSpec } from './acp-types.js'
+import { isPreset } from '@zooid/acp-client'
 import type {
   AgentConfig,
   AgentDockerConfig,
   BuddConfig,
   CliFlags,
   DockerConfig,
-  ExtraMount,
 } from './types.js'
 
-export const DEFAULT_DOCKER_IMAGE = 'ghcr.io/zooid-ai/budd-agent-claude-code:latest'
+export const DEFAULT_DOCKER_IMAGE = 'ghcr.io/zooid-ai/zooid-agent-base:latest'
 
 const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
 
-function parseExtraMounts(agentName: string, raw: unknown): ExtraMount[] | undefined {
-  if (raw === undefined) return undefined
-  if (!Array.isArray(raw)) {
-    throw new Error(`agents.${agentName}.docker.mounts.extra must be an array`)
+function parseAcpBlock(name: string, raw: unknown): AcpAgentSpec {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`agents.${name}.acp: must be a mapping with either preset or command`)
   }
-  const mounts: ExtraMount[] = []
-  for (const entry of raw) {
-    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-      throw new Error(
-        `agents.${agentName}.docker.mounts.extra[] must be a mapping`,
-      )
-    }
-    const e = entry as Record<string, unknown>
-    if (typeof e.path !== 'string' || e.path.length === 0) {
-      throw new Error(
-        `agents.${agentName}.docker.mounts.extra[].path is required`,
-      )
-    }
-    if (typeof e.target !== 'string' || e.target.length === 0) {
-      throw new Error(
-        `agents.${agentName}.docker.mounts.extra[].target is required`,
-      )
-    }
-    const mode = e.mode ?? 'ro'
-    if (mode !== 'ro' && mode !== 'rw') {
-      throw new Error(
-        `agents.${agentName}.docker.mounts.extra[].mode must be "ro" or "rw" (got "${mode}")`,
-      )
-    }
-    mounts.push({ path: e.path, target: e.target, mode })
+  const a = raw as Record<string, unknown>
+  const hasPreset = a.preset !== undefined
+  const hasCommand = a.command !== undefined
+  if (hasPreset && hasCommand) {
+    throw new Error(
+      `agents.${name}.acp: specify either preset or command, not both`,
+    )
   }
-  return mounts
+  if (!hasPreset && !hasCommand) {
+    throw new Error(
+      `agents.${name}.acp: must specify either preset or command`,
+    )
+  }
+  if (hasPreset) {
+    if (typeof a.preset !== 'string' || a.preset.length === 0) {
+      throw new Error(`agents.${name}.acp.preset: must be a non-empty string`)
+    }
+    if (!isPreset(a.preset)) {
+      throw new Error(
+        `agents.${name}.acp.preset: unknown preset "${a.preset}"`,
+      )
+    }
+    return { preset: a.preset } as AcpAgentSpec
+  }
+  if (typeof a.command !== 'string' || a.command.length === 0) {
+    throw new Error(`agents.${name}.acp.command: must be a non-empty string`)
+  }
+  let args: string[] = []
+  if (a.args !== undefined) {
+    if (!Array.isArray(a.args)) {
+      throw new Error(`agents.${name}.acp.args: must be an array of strings`)
+    }
+    for (const v of a.args) {
+      if (typeof v !== 'string') {
+        throw new Error(`agents.${name}.acp.args[]: must be a string`)
+      }
+      args.push(v)
+    }
+  }
+  return { command: a.command, args } as AcpAgentSpec
 }
 
 function parseAgentDocker(name: string, raw: unknown): AgentDockerConfig {
@@ -58,33 +71,6 @@ function parseAgentDocker(name: string, raw: unknown): AgentDockerConfig {
     }
     out.image = d.image
   }
-  if (d.mounts !== undefined) {
-    if (typeof d.mounts !== 'object' || d.mounts === null || Array.isArray(d.mounts)) {
-      throw new Error(`agents.${name}.docker.mounts must be a mapping`)
-    }
-    const m = d.mounts as Record<string, unknown>
-    const mounts: NonNullable<AgentDockerConfig['mounts']> = {}
-    const extra = parseExtraMounts(name, m.extra)
-    if (extra) mounts.extra = extra
-    if (m.workspace_readonly_disable !== undefined) {
-      if (!Array.isArray(m.workspace_readonly_disable)) {
-        throw new Error(
-          `agents.${name}.docker.mounts.workspace_readonly_disable must be an array of strings`,
-        )
-      }
-      const list: string[] = []
-      for (const v of m.workspace_readonly_disable) {
-        if (typeof v !== 'string' || v.length === 0) {
-          throw new Error(
-            `agents.${name}.docker.mounts.workspace_readonly_disable[] must be a non-empty string`,
-          )
-        }
-        list.push(v)
-      }
-      mounts.workspace_readonly_disable = list
-    }
-    if (mounts.extra || mounts.workspace_readonly_disable) out.mounts = mounts
-  }
   if (d.forward_env !== undefined) {
     if (!Array.isArray(d.forward_env)) {
       throw new Error(`agents.${name}.docker.forward_env must be an array of strings`)
@@ -96,7 +82,6 @@ function parseAgentDocker(name: string, raw: unknown): AgentDockerConfig {
           `agents.${name}.docker.forward_env[] must be a non-empty string`,
         )
       }
-      // Validate rename syntax at parse time so the runtime layer can stay simple.
       const parts = v.split(':')
       if (parts.length > 2) {
         throw new Error(
@@ -130,9 +115,7 @@ function parseAgents(
   const result: Record<string, AgentConfig> = {}
   for (const [name, val] of entries) {
     if (!AGENT_NAME_RE.test(name)) {
-      throw new Error(
-        `agents.${name}: name must match /^[a-z][a-z0-9-]{0,31}$/`,
-      )
+      throw new Error(`agents.${name}: name must match /^[a-z][a-z0-9-]{0,31}$/`)
     }
     if (!val || typeof val !== 'object' || Array.isArray(val)) {
       throw new Error(`agents.${name} must be a mapping`)
@@ -141,6 +124,20 @@ function parseAgents(
     if (typeof entry.workdir !== 'string' || entry.workdir.length === 0) {
       throw new Error(`agents.${name}.workdir is required`)
     }
+
+    if (entry.adapter !== undefined) {
+      throw new Error(
+        `agents.${name}: "adapter" is no longer supported; use "acp" — see epics/003-ZOD025-acp-migration/SPEC.md`,
+      )
+    }
+
+    if (entry.acp === undefined) {
+      throw new Error(
+        `agents.${name}: missing required "acp" block`,
+      )
+    }
+    const acp = parseAcpBlock(name, entry.acp)
+
     const agentHooks: AgentConfig['hooks'] = {}
     if (daemonHooks.pre_turn !== undefined) agentHooks.pre_turn = daemonHooks.pre_turn
     if (daemonHooks.post_turn !== undefined) agentHooks.post_turn = daemonHooks.post_turn
@@ -159,35 +156,6 @@ function parseAgents(
       }
     }
 
-    let adapter: AgentConfig['adapter']
-    if (entry.adapter !== undefined) {
-      if (typeof entry.adapter === 'string') {
-        if (entry.adapter.length === 0) {
-          throw new Error(`agents.${name}.adapter must be a non-empty string`)
-        }
-        adapter = { type: entry.adapter }
-      } else if (
-        typeof entry.adapter === 'object' &&
-        entry.adapter !== null &&
-        !Array.isArray(entry.adapter)
-      ) {
-        const a = entry.adapter as Record<string, unknown>
-        if (typeof a.type !== 'string' || a.type.length === 0) {
-          throw new Error(`agents.${name}.adapter.type is required and must be a non-empty string`)
-        }
-        const ref: { type: string; options?: Record<string, unknown> } = { type: a.type }
-        if (a.options !== undefined) {
-          if (typeof a.options !== 'object' || a.options === null || Array.isArray(a.options)) {
-            throw new Error(`agents.${name}.adapter.options must be a mapping`)
-          }
-          ref.options = a.options as Record<string, unknown>
-        }
-        adapter = ref
-      } else {
-        throw new Error(`agents.${name}.adapter must be a string or a mapping`)
-      }
-    }
-
     let dockerBlock: AgentDockerConfig | undefined
     if (entry.docker !== undefined && entry.docker !== null) {
       if (runtime !== 'docker' && runtime !== 'podman') {
@@ -202,8 +170,8 @@ function parseAgents(
       name,
       workdir: entry.workdir,
       hooks: agentHooks,
+      acp,
     }
-    if (adapter) agentCfg.adapter = adapter
     if (dockerBlock) agentCfg.docker = dockerBlock
     result[name] = agentCfg
   }
@@ -219,13 +187,10 @@ export function loadConfig(yamlText: string): BuddConfig {
   const transport = raw.transport ?? 'http'
   if (transport !== 'http') {
     throw new Error(
-      `transport must be "http" (got "${transport}"). Slack and Zooid transports are not in the MVP — see spec 031.`,
+      `transport must be "http" (got "${transport}"). Slack and Zooid transports are not in the MVP.`,
     )
   }
 
-  // Default flips to docker now that the docker runtime is available — the
-  // Docker base image is the supported deployment target. Users on the
-  // local runtime must opt in explicitly with `runtime: local`.
   const runtime = raw.runtime ?? 'docker'
   if (runtime !== 'local' && runtime !== 'docker' && runtime !== 'podman') {
     throw new Error(`runtime must be "local", "docker", or "podman" (got "${runtime}")`)
@@ -236,9 +201,6 @@ export function loadConfig(yamlText: string): BuddConfig {
     throw new Error(`port must be an integer (got ${JSON.stringify(port)})`)
   }
 
-  // Top-level workdir was the flat-form sugar; it's gone. Reject it with a
-  // pointer at the new shape so old configs fail loudly instead of silently
-  // ignoring the field.
   if (raw.workdir !== undefined) {
     throw new Error(
       'top-level workdir is not supported; define agents: { <name>: { workdir: ... } } instead',
@@ -248,19 +210,6 @@ export function loadConfig(yamlText: string): BuddConfig {
   if (raw.agents === undefined) {
     throw new Error(
       'agents: is required — daemon.yaml must define at least one agent',
-    )
-  }
-
-  // Reject daemon-wide docker.home_mounts with a migration pointer. It
-  // didn't generalise across mixed-adapter daemons; replacement is
-  // per-adapter `homeReadOnly`/`sessionStateDir` + per-agent `docker.mounts.extra`.
-  if (
-    raw.docker &&
-    typeof raw.docker === 'object' &&
-    (raw.docker as Record<string, unknown>).home_mounts !== undefined
-  ) {
-    throw new Error(
-      'docker.home_mounts is removed. Use per-agent docker.mounts.extra and adapter-declared homeReadOnly/sessionStateDir instead.',
     )
   }
 
@@ -286,8 +235,7 @@ export function loadConfig(yamlText: string): BuddConfig {
       typeof rawDocker.image === 'string' && rawDocker.image.length > 0
         ? rawDocker.image
         : DEFAULT_DOCKER_IMAGE
-    const docker: DockerConfig = { image }
-    config.docker = docker
+    config.docker = { image }
   }
 
   return config
@@ -296,7 +244,7 @@ export function loadConfig(yamlText: string): BuddConfig {
 export function mergeCliFlags(base: BuddConfig, flags: CliFlags): BuddConfig {
   if (flags.transport !== undefined && flags.transport !== 'http') {
     throw new Error(
-      `transport must be "http" (got "${flags.transport}"). Slack and Zooid transports are not in the MVP.`,
+      `transport must be "http" (got "${flags.transport}").`,
     )
   }
   const runtimeFlag = flags.runtime as 'local' | 'docker' | 'podman' | undefined

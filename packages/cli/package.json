@@ -36,8 +36,6 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
-    "@zooid/budd-adapter-claude": "workspace:^",
-    "@zooid/budd-adapter-codex": "workspace:^",
     "@zooid/core": "workspace:^",
     "@zooid/runtime-docker": "workspace:^",
     "@zooid/runtime-local": "workspace:^",

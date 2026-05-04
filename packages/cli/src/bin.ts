@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { serve } from '@hono/node-server'
 import { loadConfig, mergeCliFlags, type CliFlags } from '@zooid/core'
 import { createApp } from '@zooid/transport-http'
-import { buildRunnersFromConfig } from './index.js'
+import { buildAcpRegistry } from './build-registry.js'
 
 interface ParsedFlags extends CliFlags {
   printToken?: boolean
@@ -12,7 +12,7 @@ interface ParsedFlags extends CliFlags {
 
 function printHelp(): void {
   process.stdout.write(
-    `zooid — daemon that exposes coding-agent CLIs behind an HTTP API.
+    `zooid — daemon that exposes ACP-speaking coding agents behind an HTTP API.
 
 Usage:
   zooid [flags]
@@ -20,39 +20,31 @@ Usage:
 Flags:
   --transport <http>           Transport to listen on (only "http" is supported).
   --port <n>                   Port for the HTTP transport. Default: 8080 (or daemon.yaml).
-  --runtime <local|docker>     Runtime for spawning the agent. Default: docker.
-  --image <ref>                Container image to run when --runtime docker.
-                               Default: ghcr.io/zooid-ai/budd-agent-claude-code:latest (or daemon.yaml docker.image).
+  --runtime <local|docker|podman>
+                               Runtime for spawning each agent's ACP shim. Default: docker.
+  --image <ref>                Container image for runtime: docker. Default: ghcr.io/zooid-ai/zooid-agent-base:latest.
   --print-token                Print a fresh 32-byte hex token and exit.
   --help, -h                   Print this help and exit.
 
 Environment:
-  ZOOID_TOKEN                   Required. Bearer token clients send as
+  ZOOID_TOKEN                  Required. Bearer token clients send as
                                "Authorization: Bearer $ZOOID_TOKEN".
 
 Config:
-  ./daemon.yaml                Required. Must define agents: with at least one
-                               entry. Example:
+  ./daemon.yaml                Required. Each agent must declare an "acp" block:
                                  transport: http
                                  runtime: docker
                                  agents:
                                    qa:
                                      workdir: ./workspaces/qa
-                                   product:
-                                     workdir: ./workspaces/product
+                                     acp: { preset: claude }
+                                   ship:
+                                     workdir: ./workspaces/ship
+                                     acp: { preset: codex }
 
 HTTP API:
-  POST /agents/:name/sessions              Start a session for the named agent.
-  POST /agents/:name/sessions/:id/turns    Resume a session.
-  GET  /agents/:name/sessions/:id/events   Tail a session's event stream.
-
-Example:
-  $ export ZOOID_TOKEN=$(zooid --print-token)
-  $ zooid --port 8080 &
-  $ curl -N -H "Authorization: Bearer $ZOOID_TOKEN" \\
-         -H "content-type: application/json" \\
-         -d '{"prompt":"fix the auth bug"}' \\
-         http://localhost:8080/agents/qa/sessions
+  POST /agents/:name/sessions              Start a new session for the named agent.
+  GET  /agents/:name/sessions/:id/events   Reattach to an in-flight session's SSE stream.
 `,
   )
 }
@@ -114,12 +106,6 @@ async function main(): Promise<void> {
 
   if (!existsSync('daemon.yaml')) {
     console.error('daemon.yaml is required in the current directory')
-    console.error('minimal example:')
-    console.error('  transport: http')
-    console.error('  runtime: docker')
-    console.error('  agents:')
-    console.error('    default:')
-    console.error('      workdir: .')
     process.exit(1)
   }
   const base = loadConfig(readFileSync('daemon.yaml', 'utf8'))
@@ -131,12 +117,27 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  const runners = buildRunnersFromConfig(config)
-  const app = createApp({ runners, token })
+  const registry = buildAcpRegistry(config)
+  const app = createApp({ agents: registry, token })
+
+  let shuttingDown = false
+  const shutdown = async (signal: NodeJS.Signals) => {
+    if (shuttingDown) return
+    shuttingDown = true
+    console.log(`received ${signal}, stopping agents...`)
+    try {
+      await registry.stopAll()
+    } catch (err) {
+      console.error('error during stopAll:', err)
+    }
+    process.exit(0)
+  }
+  process.on('SIGINT', () => void shutdown('SIGINT'))
+  process.on('SIGTERM', () => void shutdown('SIGTERM'))
 
   serve({ fetch: app.fetch, port: config.port }, (info) => {
     console.log(`zooid listening on http://localhost:${info.port}`)
-    for (const name of Object.keys(runners)) {
+    for (const name of Object.keys(config.agents)) {
       console.log(`  agent: ${name} (workdir: ${config.agents[name].workdir})`)
     }
   })

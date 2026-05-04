@@ -1,5 +1,10 @@
 # Triage Agent
 
+> ⚠️ **Migration in progress.** As of `feat/acp-migration` Plan-01 the daemon
+> speaks ACP, not legacy adapters. This example's `daemon.yaml` and Docker
+> compose flow are **broken pending Plan-02**, which will rewrite them onto
+> the new `acp:` schema and the `zooid-agent-base` image.
+
 A zooid example that turns vague bug reports into structured engineering
 tickets by exploring the zooid monorepo itself. The agent reads
 `../../packages/` (the real zooid packages, including the marketing

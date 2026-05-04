@@ -26,14 +26,15 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@zooid/acp-client": "workspace:^",
     "@zooid/core": "workspace:^",
     "hono": "^4.6.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@zooid/budd-adapter-claude": "workspace:^",
     "@zooid/runtime-local": "workspace:^",
     "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
     "typescript": "^5.5.0",
     "vitest": "^3.2.0"
   }

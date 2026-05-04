@@ -1,25 +1,21 @@
-export { SessionRunner } from './runner/session-runner.js'
-export type {
-  SessionRunnerOptions,
-  RunOpts,
-  RunResult,
-} from './runner/session-runner.js'
-export { Chunker } from './runner/chunker.js'
-export type { ChunkerOptions } from './runner/chunker.js'
-export { runHook } from './runner/hooks.js'
-export type { HookResult } from './runner/hooks.js'
-export { detectAdapter } from './adapters/registry.js'
 export { loadConfig, mergeCliFlags } from './config.js'
+export {
+  AcpAgentRegistry,
+  resolveAcpAgentSpec,
+} from './acp-registry.js'
 export type {
-  SessionEvent,
-  ExtraMount,
-  SpawnConfig,
-  Runtime,
-  AgentAdapter,
-  AgentAdapterRef,
-  AgentAdapterFactory,
-  SessionIdPlan,
-  ParsedLine,
+  AcpRegistry,
+  AcpAgentRegistryOptions,
+  AcpRegistryEventHandler,
+  AcpRegistryApprovalHandler,
+} from './acp-registry.js'
+export type {
+  AcpAgentSpec,
+  AcpMount,
+  AcpRuntime,
+  AcpSpawnSpec,
+} from './acp-types.js'
+export type {
   DockerConfig,
   AgentConfig,
   AgentDockerConfig,

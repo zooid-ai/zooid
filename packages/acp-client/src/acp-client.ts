@@ -1,3 +1,4 @@
+import type { ChildProcess } from 'node:child_process'
 import { Readable, Writable } from 'node:stream'
 import {
   ClientSideConnection,
@@ -21,14 +22,35 @@ import type {
   PromptResult,
 } from './types.js'
 
+/**
+ * Minimal interface for an external process spawner. Mirrors `AcpRuntime`
+ * in `@zooid/core` but kept structural here to avoid a back-edge.
+ */
+export interface SpawnRuntime {
+  spawn(spec: {
+    command: string
+    args: string[]
+    env?: Record<string, string>
+    cwd?: string
+  }): ChildProcess
+}
+
 export interface AcpClientOptions {
   agent: AgentConfig
   onEvent: (event: AgentEvent) => void
   onApprovalRequest: (req: ApprovalRequest) => Promise<ApprovalDecision>
+  /**
+   * If set, the runtime is used to spawn the ACP shim process instead of
+   * the built-in `AgentProcess` host-spawn path. Lets the daemon launch
+   * the shim inside a container (DockerAcpRuntime) without changing the
+   * AcpClient surface.
+   */
+  runtime?: SpawnRuntime
 }
 
 export class AcpClient {
   private process: AgentProcess | null = null
+  private runtimeChild: ChildProcess | null = null
   private connection: ClientSideConnection | null = null
   private readonly sessions = new SessionMap()
   private initialized = false
@@ -37,16 +59,35 @@ export class AcpClient {
 
   async start(): Promise<void> {
     const { command, args } = this.resolveSpawn()
-    this.process = new AgentProcess({
-      command,
-      args,
-      env: this.options.agent.env,
-      cwd: this.options.agent.cwd,
-    })
-    this.process.start()
+    let stdout: Readable
+    let stdin: Writable
+    if (this.options.runtime) {
+      const child = this.options.runtime.spawn({
+        command,
+        args,
+        env: this.options.agent.env,
+        cwd: this.options.agent.cwd,
+      })
+      this.runtimeChild = child
+      if (!child.stdout || !child.stdin) {
+        throw new Error('AcpClient: runtime returned a child without piped stdio')
+      }
+      stdout = child.stdout
+      stdin = child.stdin
+    } else {
+      this.process = new AgentProcess({
+        command,
+        args,
+        env: this.options.agent.env,
+        cwd: this.options.agent.cwd,
+      })
+      this.process.start()
+      stdout = this.process.stdout
+      stdin = this.process.stdin
+    }
 
-    const input = Readable.toWeb(this.process.stdout) as ReadableStream<Uint8Array>
-    const output = Writable.toWeb(this.process.stdin) as WritableStream<Uint8Array>
+    const input = Readable.toWeb(stdout) as ReadableStream<Uint8Array>
+    const output = Writable.toWeb(stdin) as WritableStream<Uint8Array>
     const stream = ndJsonStream(output, input)
 
     this.connection = new ClientSideConnection(() => this.buildClient(), stream)
@@ -64,16 +105,18 @@ export class AcpClient {
 
   async stop(): Promise<void> {
     this.process?.kill()
+    this.runtimeChild?.kill('SIGTERM')
     this.process = null
+    this.runtimeChild = null
     this.connection = null
     this.initialized = false
   }
 
-  async prompt(input: PromptInput): Promise<PromptResult> {
+  async ensureSession(threadId: string): Promise<string> {
     if (!this.connection || !this.initialized) {
-      throw new Error('AcpClient.start() must be called before prompt()')
+      throw new Error('AcpClient.start() must be called before ensureSession()')
     }
-    const key = { threadId: input.threadId, agentId: this.options.agent.id }
+    const key = { threadId, agentId: this.options.agent.id }
     let session = this.sessions.get(key)
     if (!session) {
       const { sessionId } = await this.connection.newSession({
@@ -83,9 +126,13 @@ export class AcpClient {
       session = { sessionId, startedAt: Date.now() }
       this.sessions.set(key, session)
     }
+    return session.sessionId
+  }
 
-    const result = await this.connection.prompt({
-      sessionId: session.sessionId,
+  async prompt(input: PromptInput): Promise<PromptResult> {
+    const sessionId = await this.ensureSession(input.threadId)
+    const result = await this.connection!.prompt({
+      sessionId,
       prompt: input.content,
     })
     return { stopReason: result.stopReason }
