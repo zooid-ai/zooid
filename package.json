@@ -1,8 +1,8 @@
 {
-  "name": "budd",
+  "name": "zooid-monorepo",
   "version": "0.0.0",
   "private": true,
-  "description": "budd monorepo — dockerized daemon for running CLI coding agents behind a simple API.",
+  "description": "zooid monorepo — daemon for running coding agents behind Matrix and HTTP transports.",
   "type": "module",
   "license": "MIT",
   "packageManager": "pnpm@10.7.0",
