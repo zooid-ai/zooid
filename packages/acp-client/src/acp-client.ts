@@ -7,6 +7,7 @@ import {
 } from '@agentclientprotocol/sdk'
 import { AgentProcess } from './agent-process.js'
 import { SessionMap } from './session-map.js'
+import { resolvePreset } from './presets.js'
 import {
   acpUpdateToAgentEvent,
   approvalDecisionToPermissionResponse,
@@ -35,9 +36,10 @@ export class AcpClient {
   constructor(private readonly options: AcpClientOptions) {}
 
   async start(): Promise<void> {
+    const { command, args } = this.resolveSpawn()
     this.process = new AgentProcess({
-      command: this.options.agent.command,
-      args: this.options.agent.args,
+      command,
+      args,
       env: this.options.agent.env,
       cwd: this.options.agent.cwd,
     })
@@ -87,6 +89,17 @@ export class AcpClient {
       prompt: input.content,
     })
     return { stopReason: result.stopReason }
+  }
+
+  private resolveSpawn(): { command: string; args: string[] } {
+    const { preset, command, args } = this.options.agent
+    if (command) {
+      return { command, args: args ?? [] }
+    }
+    if (preset) {
+      return resolvePreset(preset)
+    }
+    throw new Error('AcpClient: agent must specify either `preset` or `command`')
   }
 
   private buildClient(): Client {

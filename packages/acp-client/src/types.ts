@@ -6,10 +6,15 @@ import type {
   ToolCallStatus,
   ToolKind,
 } from '@agentclientprotocol/sdk'
+import type { PresetName } from './presets.js'
 
 export interface AgentConfig {
   id: string
-  command: string
+  /** Short-hand for a known ACP harness. Resolves to command/args via the preset registry. */
+  preset?: PresetName
+  /** Explicit command. Overrides whatever the preset would set. */
+  command?: string
+  /** Explicit args. Overrides whatever the preset would set. */
   args?: string[]
   env?: Record<string, string>
   cwd?: string
