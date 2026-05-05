@@ -19,15 +19,17 @@ cli
   })
 
 cli
-  .command('dev', 'Start Tuwunel + bootstrap admin for local development')
+  .command('dev', 'Tuwunel + daemon + UI for local development')
   .option('--data <dir>', 'Persistent data dir', { default: './data/matrix' })
   .option('--engine <docker|podman>', 'Container engine', { default: 'docker' })
+  .option('--ui-port <n>', 'UI HTTP port', { default: 5173 })
   .option('--admin-user <name>', 'Admin username', { default: 'admin' })
   .option('--admin-password <pw>', 'Admin password', { default: 'admin' })
   .action(async (flags) => {
     await runDev({
       dataDir: flags.data,
       engine: flags.engine,
+      uiPort: Number(flags.uiPort),
       adminUser: flags.adminUser,
       adminPassword: flags.adminPassword,
     })
@@ -36,8 +38,12 @@ cli
 cli
   .command('status', 'Print Tuwunel + daemon health')
   .option('--data <dir>', 'Persistent data dir', { default: './data/matrix' })
+  .option('--port <n>', 'Tuwunel host port (defaults to workforce.yaml)')
   .action(async (flags) => {
-    await runStatus({ dataDir: flags.data })
+    await runStatus({
+      dataDir: flags.data,
+      port: flags.port !== undefined ? Number(flags.port) : undefined,
+    })
   })
 
 cli.help()

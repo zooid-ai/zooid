@@ -53,7 +53,7 @@ describe.skipIf(!dockerAvailable())('matrix transport against tuwunel', () => {
   afterAll(() => {
     daemon?.kill('SIGTERM')
     execSync(`docker compose -f ${fixtureDir}/docker-compose.yml down -v`, { stdio: 'inherit' })
-  })
+  }, 30_000)
 
   it('smoke: single agent, single room, trigger=any — message produces a reply', async () => {
     const alice = await registerUser('alice', 'alicepw')

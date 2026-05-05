@@ -366,8 +366,21 @@ function workforceHooks(raw: Record<string, unknown>): { pre_turn?: string; post
   return out
 }
 
+/**
+ * Replace `${VAR}` references with values from process.env. An undefined var
+ * leaves the placeholder untouched so downstream validation produces a clearer
+ * error than a silent empty-string. Used so `zooid dev` can write tokens to
+ * `.env` and have the loaded config see them via `process.env`.
+ */
+function expandEnvVars(text: string): string {
+  return text.replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (m, name) => {
+    const v = process.env[name]
+    return v === undefined ? m : v
+  })
+}
+
 export function loadWorkforceConfig(yamlText: string): WorkforceConfig {
-  const raw = parse(yamlText) ?? {}
+  const raw = parse(expandEnvVars(yamlText)) ?? {}
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error('workforce.yaml must be a YAML object')
   }

@@ -1,7 +1,9 @@
 import chalk from 'chalk'
 import { Listr } from 'listr2'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { serve, type ServerType } from '@hono/node-server'
 import {
   findConfigFile,
   findMatrixTransport,
@@ -12,40 +14,58 @@ import { writeBootstrapConfigs } from '../bootstrap/configs.js'
 import { deriveHomeserverShape } from '../bootstrap/derive.js'
 import { resolvePaths } from '../bootstrap/paths.js'
 import { ensureTokens, type Tokens } from '../bootstrap/tokens.js'
+import { startDaemon, type DaemonHandle } from '../daemon/start-daemon.js'
 import { TuwunelService } from '../services/tuwunel.js'
+import { resolveWebRoot } from '../web/resolve.js'
+import { webStatic } from '../web/static.js'
+import { buildShutdown } from './dev-cascade.js'
+
+const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
 
 export interface DevFlags {
+  cwd?: string
   dataDir: string
+  hostPort?: number
+  uiPort: number
   engine: 'docker' | 'podman'
   adminUser: string
   adminPassword: string
+  installSignalHandlers?: boolean
+  foreground?: boolean
+}
+
+export interface DevHandle {
+  stop: () => Promise<void>
 }
 
 interface DevCtx {
   tokens?: Tokens
   svc?: TuwunelService
+  daemon?: DaemonHandle
+  uiServer?: ServerType
 }
 
-export async function runDev(flags: DevFlags): Promise<void> {
-  const found = findConfigFile(process.cwd())
-  if (!found) {
-    throw new Error('workforce.yaml is required in the current directory')
-  }
-  const config = loadWorkforceConfig(readFileSync(found.path, 'utf8'))
-  const matrix = findMatrixTransport(config)
+export async function runDev(flags: DevFlags): Promise<DevHandle> {
+  const cwd = flags.cwd ?? process.cwd()
+  const found = findConfigFile(cwd)
+  if (!found) throw new Error(`workforce.yaml not found in ${cwd}`)
+  // Use the unparsed text so that env-var expansion happens inside
+  // loadWorkforceConfig once tokens are exported.
+  const rawYaml = readFileSync(found.path, 'utf8')
+  const preview = loadWorkforceConfig(rawYaml)
+  const matrix = findMatrixTransport(preview)
   if (!matrix) {
-    throw new Error(
-      'workforce.yaml: zooid dev requires at least one transport with type: matrix',
-    )
+    throw new Error('workforce.yaml: zooid dev requires at least one matrix transport')
   }
-  const agentUserIds = Object.values(config.agents)
+  const agentUserIds = Object.values(preview.agents)
     .filter((a) => a.transport === matrix.name && a.matrix_user_id)
     .map((a) => a.matrix_user_id!)
   const shape = deriveHomeserverShape(matrix.transport, agentUserIds)
+  const port = flags.hostPort ?? shape.port
+  const homeserver = `http://localhost:${port}`
 
-  const dataDir = resolve(flags.dataDir)
+  const dataDir = resolve(cwd, flags.dataDir)
   const paths = resolvePaths(dataDir)
-  const homeserver = `http://localhost:${shape.port}`
 
   const ctx: DevCtx = {}
 
@@ -76,7 +96,7 @@ export async function runDev(flags: DevFlags): Promise<void> {
         task: async () => {
           ctx.svc = new TuwunelService({
             name: 'zooid-tuwunel',
-            hostPort: shape.port,
+            hostPort: port,
             paths,
             engine: flags.engine,
           })
@@ -103,16 +123,64 @@ export async function runDev(flags: DevFlags): Promise<void> {
             : `Admin already exists: ${r.userId}`
         },
       },
+      {
+        title: 'Start daemon',
+        task: async () => {
+          if (!ctx.tokens) throw new Error('tokens not ready')
+          // Export tokens so loadWorkforceConfig's env interpolation can fill
+          // the ${MATRIX_AS_TOKEN}/${MATRIX_HS_TOKEN} placeholders.
+          process.env.MATRIX_AS_TOKEN = ctx.tokens.asToken
+          process.env.MATRIX_HS_TOKEN = ctx.tokens.hsToken
+          ctx.daemon = await startDaemon({
+            configPath: found.path,
+            cwd,
+            installSignalHandlers: false,
+          })
+        },
+      },
+      {
+        title: `Serve @zoon/web on http://localhost:${flags.uiPort}`,
+        task: () => {
+          const webRoot = resolveWebRoot(CLI_ROOT)
+          const app = webStatic({ webRoot, homeserverUrl: homeserver })
+          ctx.uiServer = serve({ fetch: app.fetch, port: flags.uiPort })
+        },
+      },
     ],
     { concurrent: false, exitOnError: true },
   )
 
   await tasks.run()
 
+  const shutdown = buildShutdown({
+    stopUi: async () => {
+      const s = ctx.uiServer
+      if (!s) return
+      await new Promise<void>((r) => s.close(() => r()))
+    },
+    stopDaemon: async () => {
+      await ctx.daemon?.stop()
+    },
+    stopTuwunel: async () => {
+      await ctx.svc?.stop()
+    },
+  })
+
+  if (flags.installSignalHandlers !== false) {
+    const handler = async (): Promise<void> => {
+      process.stdout.write(chalk.dim('\nStopping…\n'))
+      await shutdown()
+      process.exit(0)
+    }
+    process.on('SIGINT', () => void handler())
+    process.on('SIGTERM', () => void handler())
+  }
+
   process.stdout.write(
     [
       '',
       chalk.bold('Tuwunel is up.') + ` ${homeserver}`,
+      chalk.bold('UI:        ') + ` http://localhost:${flags.uiPort}`,
       `  ${chalk.cyan('admin user:')} ${flags.adminUser} / ${flags.adminPassword}`,
       `  ${chalk.cyan('data dir:')} ${paths.dataDir}`,
       '',
@@ -121,18 +189,9 @@ export async function runDev(flags: DevFlags): Promise<void> {
     ].join('\n'),
   )
 
-  // A pending Promise alone doesn't keep Node's event loop alive — there
-  // must be an I/O or timer reference. setInterval is the cheapest one.
-  // Cycle 2 will replace this with the daemon process which keeps the
-  // loop busy on its own.
-  const keepalive = setInterval(() => {}, 1 << 30)
-
-  const shutdown = async () => {
-    clearInterval(keepalive)
-    process.stdout.write(chalk.dim('\nStopping Tuwunel...\n'))
-    await ctx.svc?.stop().catch(() => {})
-    process.exit(0)
+  if (flags.foreground !== false) {
+    await ctx.daemon!.whenStopped
   }
-  process.on('SIGINT', shutdown)
-  process.on('SIGTERM', shutdown)
+
+  return { stop: shutdown }
 }
