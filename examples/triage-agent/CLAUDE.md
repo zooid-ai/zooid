@@ -13,15 +13,17 @@ Relative to your current working directory:
 
 - `../../packages/` — the real zooid monorepo packages. This is the
   codebase you triage against. It contains the zooid runtime/library
-  packages (`core`, `cli`, `runtime-local`, `adapter-claude`) and the
-  marketing site `homepage` (an Astro landing page).
+  (`core`, `cli`, `runtime-local`, `runtime-docker`, `transport-http`,
+  `acp-client`).
 - `./tickets/` — where you write your output. One markdown file per
   report.
 
 Ignore `daemon.yaml` and `README.md` in your cwd — those describe how
-this workspace is run, not what it contains. Ignore the zooid library
-packages (`core`, `cli`, etc.) unless the report is clearly about them;
-most reports will land on `homepage`.
+this workspace is run, not what it contains.
+
+The marketing homepage lives in a sibling repo (`../../../zooid-homepage/`)
+and is **out of scope** for triage tickets — its issues belong with
+the docs agent in that repo.
 
 ## Procedure
 
@@ -48,7 +50,7 @@ Every ticket file must follow this exact structure:
 ```markdown
 # <one-line summary in imperative form>
 
-**Package:** <e.g. packages/homepage>
+**Package:** <e.g. packages/core>
 **File(s):** <relative paths from the zooid repo root, one per line if more than one>
 **Severity:** <low | medium | high>
 **Type:** <bug | enhancement | copy | a11y | perf>
@@ -82,8 +84,8 @@ Do not write the actual code — that's the implementer's job.>
 - The timestamp in the filename must be UTC and zero-padded:
   `TICKET-20260411-170300.md`, not `TICKET-2026-4-11-17:3.md`.
 - File paths inside the ticket should be written relative to the zooid
-  repo root (e.g. `packages/homepage/src/components/Hero.astro`), not
-  relative to your cwd.
+  repo root (e.g. `packages/core/src/acp-registry.ts`), not relative
+  to your cwd.
 - If you genuinely cannot find a likely match for the report after
   exploring `../../packages/`, still write a ticket. Set `Severity: low`,
   set `Type` to your best guess, and use the "What I found" section to

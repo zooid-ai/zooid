@@ -13,17 +13,21 @@ requests over SSE, and resolves them via a HTTP `POST /approvals` round-trip.
 
 You give it a fuzzy report:
 
-> I think the 'get started' button on the homepage is too small.
+> I think `transport-http` is dropping events when the SSE client reconnects mid-turn.
 
 The agent:
 
 1. Reads the workspace under `../../packages/`
-2. Identifies the most likely package (here, `packages/homepage`)
+2. Identifies the most likely package (here, `packages/transport-http`)
 3. Opens the relevant source files and finds the specific component
 4. Asks for permission to write a new file under `tickets/`
 5. Writes a structured ticket to `tickets/TICKET-<timestamp>.md`
 
 It does **not** edit any code — its only output is a markdown ticket.
+
+> The marketing homepage used to live at `packages/homepage` and was a
+> common target for triage prompts. It now lives in the sibling repo
+> `zooid-homepage/` and is out of scope for this example.
 
 ## Running it (native, no Docker)
 
