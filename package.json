@@ -13,7 +13,11 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "clean": "pnpm -r exec rm -rf dist"
+    "clean": "pnpm -r exec rm -rf dist",
+    "tuwunel:logs": "docker logs -f --tail 200 zooid-tuwunel",
+    "tuwunel:errors": "docker logs zooid-tuwunel 2>&1 | grep -E 'ERROR|WARN' | tail -40",
+    "tuwunel:as": "docker logs zooid-tuwunel 2>&1 | grep -i appservice | tail -40",
+    "tuwunel:shell": "docker exec -it zooid-tuwunel /bin/sh"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

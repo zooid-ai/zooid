@@ -12,6 +12,8 @@ export interface CreateMatrixTransportOptions {
   client: MatrixClient
   bindings: AgentBinding[]
   hsToken: string
+  /** Admin Matrix user ID. When set, BotPool.bootstrap invites this user into rooms it creates. */
+  adminUserId?: string
 }
 
 interface SessionContext {
@@ -33,7 +35,7 @@ interface MatrixEvent {
 }
 
 export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
-  const { agents, approvals, client, bindings, hsToken } = opts
+  const { agents, approvals, client, bindings, hsToken, adminUserId } = opts
   const pool = new BotPool(client, bindings)
   const sessions = new Map<string, SessionContext>()
   const buffers = new Map<string, string>()
@@ -162,7 +164,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
 
   return {
     app,
-    bootstrap: () => pool.bootstrap(),
+    bootstrap: () => pool.bootstrap({ adminUserId }),
     pool,
   }
 }

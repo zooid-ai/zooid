@@ -23,6 +23,8 @@ export interface StartDaemonOpts {
   cwd?: string
   cliFlags?: CliFlags
   installSignalHandlers?: boolean
+  /** Admin Matrix user ID. Forwarded to the matrix transport for room bootstrap. */
+  adminUserId?: string
 }
 
 export interface DaemonHandle {
@@ -96,18 +98,26 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       client,
       bindings,
       hsToken: matrix.transport.hs_token,
+      adminUserId: opts.adminUserId,
     })
-    await transport.bootstrap()
     const requestedPort = matrix.transport.port ?? 8080
-    server = serve({ fetch: transport.app.fetch, port: requestedPort })
+    // Bind 0.0.0.0 explicitly — @hono/node-server defaults to IPv6-only on
+    // macOS, which Docker's NAT bridge can't reach when Tuwunel pushes AS
+    // events back to host.docker.internal:<port>.
+    server = serve({ fetch: transport.app.fetch, port: requestedPort, hostname: '0.0.0.0' })
     port = await listenAsync(server)
+    // Bootstrap *after* the listener is up: registerBot/createRoom/joinRoom
+    // each trigger Tuwunel to push events back to the AS, and Tuwunel only
+    // retries those a few times before dropping. Listening first ensures
+    // those pushes don't hit a connection-refused.
+    await transport.bootstrap()
   } else {
     const http = findHttpTransport(config)
     if (!http) throw new Error('no transport declared in workforce.yaml')
     const token = process.env.ZOOID_TOKEN
     if (!token) throw new Error('ZOOID_TOKEN is required for http transport')
     const app = createApp({ agents: registry, approvals, token })
-    server = serve({ fetch: app.fetch, port: http.transport.port })
+    server = serve({ fetch: app.fetch, port: http.transport.port, hostname: '0.0.0.0' })
     port = await listenAsync(server)
   }
 

@@ -47,6 +47,46 @@ export class MatrixClient {
     throw new Error(`registerBot(${localpart}) failed: ${r.status}`)
   }
 
+  async resolveAlias(alias: string): Promise<string | null> {
+    const r = await this.fetch(
+      `${this.homeserver}/_matrix/client/v3/directory/room/${encodeURIComponent(alias)}`,
+      { headers: { Authorization: `Bearer ${this.asToken}` } },
+    )
+    if (r.status === 404) return null
+    if (!r.ok) throw new Error(`resolveAlias(${alias}) failed: ${r.status}`)
+    const j = (await r.json()) as { room_id: string }
+    return j.room_id
+  }
+
+  async createRoom(opts: {
+    roomAliasName: string
+    invite: string[]
+    senderUserId: string
+    preset?: 'public_chat' | 'private_chat' | 'trusted_private_chat'
+  }): Promise<string> {
+    const r = await this.fetch(
+      `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.senderUserId)}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.asToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          room_alias_name: opts.roomAliasName,
+          invite: opts.invite,
+          preset: opts.preset ?? 'public_chat',
+        }),
+      },
+    )
+    if (!r.ok) {
+      const body = await r.text()
+      throw new Error(`createRoom(${opts.roomAliasName}) failed: ${r.status} ${body}`)
+    }
+    const j = (await r.json()) as { room_id: string }
+    return j.room_id
+  }
+
   async joinRoom(roomIdOrAlias: string, asUserId: string): Promise<void> {
     const url =
       `${this.homeserver}/_matrix/client/v3/join/${encodeURIComponent(roomIdOrAlias)}` +

@@ -1,0 +1,47 @@
+# Local-dev workforce for `zooid dev`. Run from this directory:
+#   pnpm zooid dev
+#
+# This boots Tuwunel + the daemon + the bundled @zoon/web UI in one foreground
+# process, registers an `admin:admin` Matrix user, and joins two agents to
+# the #welcome room:
+#
+#   - @echo:localhost — a tiny ACP shim that just echoes your text. No deps.
+#   - @docs:localhost — opencode-driven docs agent that keeps
+#     agents/docs/code/README.md in sync with the throttle source. Requires
+#     `opencode` on PATH and a Vertex Express API key in the environment.
+#
+# @-mention either bot in #welcome to drive a turn.
+
+runtime: local
+
+transports:
+  matrix:
+    type: matrix
+    homeserver: http://localhost:8448
+    as_token: ${MATRIX_AS_TOKEN}
+    hs_token: ${MATRIX_HS_TOKEN}
+    sender_localpart: zooid
+    user_namespace: '@.*:localhost'
+    port: 9099
+
+agents:
+  echo:
+    transport: matrix
+    matrix_user_id: '@echo:localhost'
+    rooms:
+      - '#welcome:localhost'
+    trigger: mention
+    workdir: .
+    acp:
+      command: node
+      args: ['--import', 'tsx', './agents/echo/echo-agent.ts']
+
+  docs:
+    transport: matrix
+    matrix_user_id: '@docs:localhost'
+    rooms:
+      - '#docs:localhost'
+    trigger: mention
+    workdir: ./agents/docs
+    acp:
+      preset: opencode

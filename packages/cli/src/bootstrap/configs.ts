@@ -52,6 +52,9 @@ export function writeBootstrapConfigs(opts: BootstrapConfigsOpts): void {
     hsToken,
     senderLocalpart,
     userNamespace,
+    // BotPool.bootstrap creates `#alias:<server>` rooms when missing — the
+    // AS needs an aliases namespace to legally claim them.
+    aliasNamespace: `#.*:${serverName}`,
     // zooid dev shares @.*:<server_name> between bots and the predefined
     // admin human, so the AS cannot claim the namespace exclusively.
     exclusive: false,

@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import { Listr } from 'listr2'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serve, type ServerType } from '@hono/node-server'
@@ -20,7 +20,28 @@ import { resolveWebRoot } from '../web/resolve.js'
 import { webStatic } from '../web/static.js'
 import { buildShutdown } from './dev-cascade.js'
 
-const CLI_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..', '..')
+// Walk up from this module until we find the @zooid/cli package.json. This
+// is robust to the source/bundle distinction: src/commands/dev.ts and
+// dist/bin.js end up at different depths, so a fixed `..` count breaks
+// after `tsup`. The package's "name" field disambiguates from any parent.
+const CLI_ROOT = (() => {
+  let dir = dirname(fileURLToPath(import.meta.url))
+  for (let i = 0; i < 8; i++) {
+    const pkgPath = resolve(dir, 'package.json')
+    if (existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { name?: string }
+        if (pkg.name === 'zooid' || pkg.name === '@zooid/cli') return dir
+      } catch {
+        // ignore
+      }
+    }
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  throw new Error('cli root not found (no @zooid/cli package.json above ' + import.meta.url + ')')
+})()
 
 export interface DevFlags {
   cwd?: string
@@ -135,6 +156,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
             configPath: found.path,
             cwd,
             installSignalHandlers: false,
+            adminUserId: `@${flags.adminUser}:${shape.serverName}`,
           })
         },
       },

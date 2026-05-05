@@ -1,0 +1,4 @@
+# Tuwunel database, media, and generated config files (created on first
+# `pnpm zooid dev` run and rebuilt as needed). Delete the directory to
+# reset to a clean state.
+data/

@@ -10,6 +10,11 @@ export interface MatrixTransportConfig {
   /** Regex covering all bot users, e.g. `@.*:example.com` */
   userNamespace: string
   /**
+   * Optional regex covering aliases the AS may claim, e.g. `#.*:example.com`.
+   * Required when the AS calls `createRoom` with a `room_alias_name`.
+   */
+  aliasNamespace?: string
+  /**
    * Whether the AS exclusively owns the user_namespace. Default true.
    * Set false when humans share the namespace (e.g., `zooid dev` registers
    * a predefined admin under the same `@.*:localhost` regex).
@@ -28,7 +33,9 @@ export function renderRegistration(c: MatrixTransportConfig): string {
       rate_limited: false,
       namespaces: {
         users: [{ exclusive: c.exclusive ?? true, regex: c.userNamespace }],
-        aliases: [],
+        aliases: c.aliasNamespace
+          ? [{ exclusive: c.exclusive ?? true, regex: c.aliasNamespace }]
+          : [],
         rooms: [],
       },
     },

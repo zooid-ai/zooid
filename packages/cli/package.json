@@ -48,9 +48,11 @@
     "yaml": "^2.5.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.49.0",
     "@types/node": "^22.0.0",
     "release-it": "^19.2.4",
     "tsup": "^8.5.1",
+    "tsx": "^4.19.0",
     "typescript": "^5.5.0",
     "vitest": "^3.2.0"
   }

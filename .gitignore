@@ -10,3 +10,7 @@ coverage
 
 # Pre-baked Docker image tars (built locally, not committed)
 images/
+
+# Playwright artifacts
+test-results/
+playwright-report/

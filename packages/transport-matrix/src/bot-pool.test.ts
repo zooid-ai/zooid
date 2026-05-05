@@ -6,6 +6,8 @@ function fakeClient() {
   return {
     registerBot: vi.fn(async () => undefined),
     joinRoom: vi.fn(async () => undefined),
+    resolveAlias: vi.fn(async (_a: string) => '!existing:example.com' as string | null),
+    createRoom: vi.fn(async () => '!new:example.com'),
     sendMessage: vi.fn(async () => ({ event_id: '$x' })),
     sendCustomEvent: vi.fn(async () => ({ event_id: '$x' })),
   }
@@ -61,5 +63,97 @@ describe('BotPool.bootstrap', () => {
     const client = fakeClient()
     const pool = new BotPool(client, agents)
     expect(pool.findByName('monitor')?.userId).toBe('@monitor:example.com')
+  })
+})
+
+describe('BotPool.bootstrap — create-if-missing rooms', () => {
+  it('creates a room when a configured #alias does not resolve', async () => {
+    const calls: string[] = []
+    const client = {
+      registerBot: async () => {},
+      resolveAlias: async (a: string) => {
+        calls.push(`resolve:${a}`)
+        return null
+      },
+      createRoom: async (opts: {
+        roomAliasName: string
+        invite: string[]
+        senderUserId: string
+      }) => {
+        calls.push(`create:${opts.roomAliasName}:${opts.invite.join(',')}`)
+        return '!new:localhost'
+      },
+      joinRoom: async (room: string, asUser: string) => {
+        calls.push(`join:${asUser}->${room}`)
+      },
+    }
+    const pool = new BotPool(client as never, [
+      { name: 'echo', userId: '@echo:localhost', rooms: ['#welcome:localhost'], trigger: 'mention' },
+    ])
+    await pool.bootstrap({ adminUserId: '@admin:localhost' })
+
+    expect(calls).toEqual([
+      'resolve:#welcome:localhost',
+      'create:welcome:@admin:localhost',
+      'join:@echo:localhost->!new:localhost',
+    ])
+  })
+
+  it('skips create when the alias already resolves', async () => {
+    const calls: string[] = []
+    const client = {
+      registerBot: async () => {},
+      resolveAlias: async () => '!existing:localhost',
+      createRoom: async () => {
+        throw new Error('should not be called')
+      },
+      joinRoom: async (room: string, asUser: string) => {
+        calls.push(`join:${asUser}->${room}`)
+      },
+    }
+    const pool = new BotPool(client as never, [
+      { name: 'echo', userId: '@echo:localhost', rooms: ['#welcome:localhost'], trigger: 'mention' },
+    ])
+    await pool.bootstrap({ adminUserId: '@admin:localhost' })
+    expect(calls).toEqual(['join:@echo:localhost->!existing:localhost'])
+  })
+
+  it('rewrites the binding\'s rooms array with resolved IDs so the router can match', async () => {
+    const client = {
+      registerBot: async () => {},
+      resolveAlias: async () => '!resolved:localhost',
+      createRoom: async () => '!unused:localhost',
+      joinRoom: async () => {},
+    }
+    const binding: AgentBinding = {
+      name: 'echo',
+      userId: '@echo:localhost',
+      rooms: ['#welcome:localhost'],
+      trigger: 'mention',
+    }
+    const pool = new BotPool(client as never, [binding])
+    await pool.bootstrap({ adminUserId: '@admin:localhost' })
+    expect(binding.rooms).toEqual(['!resolved:localhost'])
+  })
+
+  it('passes through room IDs (starting with !) without resolving or creating', async () => {
+    const calls: string[] = []
+    const client = {
+      registerBot: async () => {},
+      resolveAlias: async () => {
+        throw new Error('should not be called for !roomId')
+      },
+      createRoom: async () => {
+        throw new Error('should not be called for !roomId')
+      },
+      joinRoom: async (room: string, asUser: string) => {
+        calls.push(`join:${asUser}->${room}`)
+      },
+    }
+    const pool = new BotPool(client as never, [
+      { name: 'echo', userId: '@echo:localhost', rooms: ['!abc:localhost'], trigger: 'mention' },
+    ])
+    await pool.bootstrap({ adminUserId: '@admin:localhost' })
+    expect(calls).toEqual(['join:@echo:localhost->!abc:localhost'])
   })
 })

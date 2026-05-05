@@ -1,0 +1,12 @@
+{
+  "name": "@example/echo-agent",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@agentclientprotocol/sdk": "*",
+    "tsx": "^4.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  }
+}

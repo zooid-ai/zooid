@@ -87,6 +87,60 @@ describe('MatrixClient', () => {
     })
   })
 
+  it('resolveAlias returns the room id when the homeserver knows the alias', async () => {
+    const fetch = fakeFetch(async ({ url }) => {
+      expect(url).toBe(
+        'https://hs.example.com/_matrix/client/v3/directory/room/%23welcome%3Alocalhost',
+      )
+      return new Response(JSON.stringify({ room_id: '!abc:localhost' }), { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    expect(await client.resolveAlias('#welcome:localhost')).toBe('!abc:localhost')
+  })
+
+  it('resolveAlias returns null on M_NOT_FOUND', async () => {
+    const fetch = fakeFetch(async () =>
+      new Response(JSON.stringify({ errcode: 'M_NOT_FOUND' }), { status: 404 }),
+    )
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    expect(await client.resolveAlias('#nope:localhost')).toBeNull()
+  })
+
+  it('createRoom POSTs /createRoom impersonating the sender user', async () => {
+    const fetch = fakeFetch(async ({ url, init }) => {
+      expect(url).toMatch(
+        /\/_matrix\/client\/v3\/createRoom\?user_id=%40admin%3Alocalhost$/,
+      )
+      expect(init.method).toBe('POST')
+      const body = JSON.parse(init.body as string)
+      expect(body).toMatchObject({
+        room_alias_name: 'welcome',
+        preset: 'public_chat',
+        invite: ['@admin:localhost'],
+      })
+      return new Response(JSON.stringify({ room_id: '!new:localhost' }), { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    const id = await client.createRoom({
+      roomAliasName: 'welcome',
+      invite: ['@admin:localhost'],
+      senderUserId: '@admin:localhost',
+    })
+    expect(id).toBe('!new:localhost')
+  })
+
   it('sends a custom event type when content type is set', async () => {
     const fetch = fakeFetch(async ({ url, init }) => {
       expect(url).toMatch(/\/send\/eco\.zoon\.approval_request\//)
