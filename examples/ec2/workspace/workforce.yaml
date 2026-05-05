@@ -1,0 +1,15 @@
+runtime: podman
+
+transports:
+  http-local:
+    type: http
+    port: 8080
+
+agents:
+  code:
+    transport: http-local
+    workdir: .
+    acp:
+      preset: claude
+    docker:
+      image: ghcr.io/zooid-ai/budd-agent-claude-code:latest

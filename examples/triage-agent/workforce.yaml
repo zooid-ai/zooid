@@ -4,19 +4,25 @@
 # — every agent must be named, and that name appears in the HTTP path
 # (POST /agents/default/sessions).
 
-transport: http
 runtime: local
+
+transports:
+  http-local:
+    type: http
+    port: 8080
 
 agents:
   default:
+    transport: http-local
     workdir: .
     acp:
       preset: claude
-    # ANTHROPIC_API_KEY is forwarded into the agent process. Under
-    # `runtime: local` this is a no-op (the host already has the var);
-    # under `runtime: docker` it controls what crosses into the container.
-    docker:
-      forward_env: [ANTHROPIC_API_KEY]
+    # Under `runtime: local` the host's env is inherited directly, so no
+    # forwarding is needed. Switch to `runtime: docker` and uncomment the
+    # block below to control what env vars cross into the container:
+    #
+    # docker:
+    #   forward_env: [ANTHROPIC_API_KEY]
 
 # No hooks for the triage agent — it's a read-only workflow that writes a
 # single ticket file. If you want to e.g. open a real GitHub issue from each
@@ -24,6 +30,7 @@ agents:
 #
 # agents:
 #   default:
+#     transport: http-local
 #     workdir: .
 #     acp: { preset: claude }
 #     hooks:

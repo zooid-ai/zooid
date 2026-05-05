@@ -30,16 +30,16 @@ export interface Transport {
 }
 
 /**
- * Docker-specific configuration, nested under `docker:` in daemon.yaml.
+ * Docker-specific configuration, nested under `docker:` in workforce.yaml.
  * Ignored when `runtime: local`.
  */
 export interface DockerConfig {
-  /** Daemon-wide default image. Per-agent `docker.image` takes precedence. */
+  /** Workforce-wide default image. Per-agent `docker.image` takes precedence. */
   image?: string
 }
 
 /**
- * Per-agent docker block inside a multi-agent daemon.yaml. Rejected at
+ * Per-agent docker block inside a multi-agent workforce.yaml. Rejected at
  * parse time when top-level `runtime !== 'docker'`.
  */
 export interface AgentDockerConfig {
@@ -57,15 +57,17 @@ export interface AgentDockerConfig {
 }
 
 /**
- * Per-agent config inside a multi-agent daemon.yaml. Each agent has its own
- * workspace, hooks, and an ACP block describing the shim to spawn.
+ * Per-agent config inside a multi-agent workforce.yaml. Each agent has its
+ * own workspace, hooks, and an ACP block describing the shim to spawn.
  */
 export interface AgentConfig {
   /** Routing name. Must match /^[a-z][a-z0-9-]{0,31}$/ */
   name: string
+  /** Name of an entry in `WorkforceConfig.transports`. */
+  transport: string
   /** Host directory for the agent's workspace. */
   workdir: string
-  /** Per-agent hooks. Daemon-wide hooks are merged in at load time. */
+  /** Per-agent hooks. Workforce-wide hooks are merged in at load time. */
   hooks: {
     pre_turn?: string
     post_turn?: string
@@ -91,32 +93,45 @@ export interface AgentConfig {
 }
 
 /**
- * Top-level matrix block. Required when `transport: matrix`.
+ * Matrix application-service transport. The CLI binds the AS HTTP listener
+ * to `port` (defaults to 8080).
  */
-export interface MatrixDaemonConfig {
+export interface MatrixTransportConfig {
+  type: 'matrix'
   homeserver: string
   as_token: string
   hs_token: string
   sender_localpart: string
   /** Regex covering all bot users, e.g. `@.*:example.com` */
   user_namespace: string
+  /** AS HTTP listener port. Defaults to 8080. */
+  port?: number
 }
 
 /**
- * Parsed daemon.yaml shape. Always multi-agent — `agents:` is required and
- * must have at least one entry.
+ * Plain HTTP API transport.
  */
-export interface ZooidConfig {
-  transport: 'http' | 'matrix'
+export interface HttpTransportConfig {
+  type: 'http'
   port: number
+}
+
+export type TransportConfig = MatrixTransportConfig | HttpTransportConfig
+
+/**
+ * Parsed workforce.yaml shape. Always multi-agent — `agents:` is required and
+ * must have at least one entry. At least one transport must be declared and
+ * each agent must reference one by name.
+ */
+export interface WorkforceConfig {
   runtime: 'local' | 'docker' | 'podman'
   /** Docker-specific config. Populated when `runtime === 'docker' | 'podman'`. */
   docker?: DockerConfig
-  /** Matrix-specific config. Required when `transport === 'matrix'`. */
-  matrix?: MatrixDaemonConfig
+  /** Required. Map of operator-chosen names → transport config. At least one entry. */
+  transports: Record<string, TransportConfig>
   /** Required. Must have at least one entry. */
   agents: Record<string, AgentConfig>
-  /** Daemon-wide hook defaults. Merged into each agent.hooks at load time. */
+  /** Workforce-wide hook defaults. Merged into each agent.hooks at load time. */
   hooks: {
     pre_turn?: string
     post_turn?: string
@@ -124,8 +139,6 @@ export interface ZooidConfig {
 }
 
 export interface CliFlags {
-  transport?: string
-  port?: number
   runtime?: string
   /** Docker image override (shorthand for docker.image). */
   image?: string

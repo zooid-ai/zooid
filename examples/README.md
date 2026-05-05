@@ -9,5 +9,5 @@ workspace you can `cd` into and run `budd` from.
 
 Examples that target the budd monorepo itself reach into `../../packages/`
 via relative paths in their `CLAUDE.md`. To adapt them to your own monorepo,
-copy the example's `CLAUDE.md` and `daemon.yaml` into a directory of your
+copy the example's `CLAUDE.md` and `workforce.yaml` into a directory of your
 choice and edit the workspace path inside `CLAUDE.md`.

@@ -1,25 +1,26 @@
 import { describe, it, expect } from 'vitest'
 import { LocalAcpRuntime } from '@zooid/runtime-local'
 import { DockerAcpRuntime } from '@zooid/runtime-docker'
-import type { ZooidConfig } from '@zooid/core'
+import type { WorkforceConfig } from '@zooid/core'
 import { buildAcpRegistry } from './build-registry.js'
 
-function cfg(overrides: Partial<ZooidConfig> & Pick<ZooidConfig, 'runtime'>): ZooidConfig {
+function cfg(overrides: Partial<WorkforceConfig> & Pick<WorkforceConfig, 'runtime'>): WorkforceConfig {
   return {
-    transport: 'http',
-    port: 8080,
     runtime: overrides.runtime,
+    transports: overrides.transports ?? { 'http-local': { type: 'http', port: 8080 } },
     agents: overrides.agents ?? {
       a: {
         name: 'a',
+        transport: 'http-local',
         workdir: '.',
         hooks: {},
         acp: { preset: 'claude' },
+        approval_timeout_ms: 0,
       },
     },
     hooks: {},
     docker: overrides.docker,
-  } as ZooidConfig
+  } as WorkforceConfig
 }
 
 describe('buildAcpRegistry', () => {
@@ -55,9 +56,11 @@ describe('buildAcpRegistry', () => {
           agents: {
             a: {
               name: 'a',
+              transport: 'http-local',
               workdir: '.',
               hooks: {},
               acp: { preset: 'claude' },
+              approval_timeout_ms: 0,
               docker: {
                 forward_env: ['PASS_THROUGH', 'HOST_API_KEY:ANTHROPIC_API_KEY'],
               },
@@ -87,9 +90,11 @@ describe('buildAcpRegistry', () => {
           agents: {
             a: {
               name: 'a',
+              transport: 'http-local',
               workdir: '.',
               hooks: {},
               acp: { preset: 'claude' },
+              approval_timeout_ms: 0,
               docker: {
                 forward_env: ['ZOOID_TOKEN', 'SOMETHING:ZOOID_TOKEN'],
               },
@@ -106,12 +111,11 @@ describe('buildAcpRegistry', () => {
   })
 
   it('throws if any agent has no acp block (defense in depth)', () => {
-    const c: ZooidConfig = {
-      transport: 'http',
-      port: 8080,
+    const c: WorkforceConfig = {
       runtime: 'local',
+      transports: { 'http-local': { type: 'http', port: 8080 } },
       agents: {
-        a: { name: 'a', workdir: '.', hooks: {} } as never,
+        a: { name: 'a', transport: 'http-local', workdir: '.', hooks: {} } as never,
       },
       hooks: {},
     }

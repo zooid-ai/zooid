@@ -5,7 +5,7 @@ HTTP API. You hand it a prompt; it spawns the agent against a workspace
 directory and streams the agent's stdout back as Server-Sent Events.
 
 Designed to be deployed as a container: `FROM ghcr.io/zooid-ai/budd-agent-claude-code`, layer in
-your `daemon.yaml` and `CLAUDE.md`, push it anywhere that runs containers,
+your `workforce.yaml` and `CLAUDE.md`, push it anywhere that runs containers,
 and you have an addressable agent endpoint.
 
 ## Why
@@ -89,7 +89,7 @@ FROM ghcr.io/zooid-ai/budd-agent-claude-code
 COPY CLAUDE.md /workspace/CLAUDE.md
 
 # Optional: customise the daemon (hooks, port, runtime)
-COPY daemon.yaml /workspace/daemon.yaml
+COPY workforce.yaml /workspace/workforce.yaml
 
 WORKDIR /workspace
 ```
@@ -97,40 +97,36 @@ WORKDIR /workspace
 Push it to your registry, run it on Fly / Railway / Kubernetes / your laptop.
 The endpoint is the same.
 
-## `daemon.yaml`
+## `workforce.yaml`
 
-Optional. Loaded from the current working directory if present. All fields
-have defaults:
+Required. Loaded from the current working directory. Each agent must declare
+an `acp` block and reference a transport by name.
 
 ```yaml
-transport: http              # only http in MVP
-port: 8080
-runtime: docker              # docker (default) or local
+runtime: docker              # local | docker | podman (default: docker)
+
+transports:
+  http-local:
+    type: http               # http transports listen on `port`
+    port: 8080
 
 docker:                      # ignored when runtime: local
-  image: ghcr.io/zooid-ai/budd-agent-claude-code:latest   # daemon-wide default image
+  image: ghcr.io/zooid-ai/budd-agent-claude-code:latest   # workforce-wide default image
 
 agents:
   qa:
+    transport: http-local
     workdir: ./workspaces/qa
-    # adapter: claude       # optional, defaults to "claude"
+    acp: { preset: claude }
     # docker:
-    #   image: ghcr.io/zooid-ai/budd-agent-codex:latest         # per-agent image override
-    #   mounts:
-    #     extra:                          # additional bind mounts
-    #       - path: ./shared-docs
-    #         target: /workspace/docs
-    #         mode: ro
-    #     workspace_readonly_disable:     # subtract adapter RO carveouts
-    #       - CLAUDE.md
+    #   image: ghcr.io/zooid-ai/budd-agent-codex:latest   # per-agent image override
 
 hooks:
   pre_turn: "git pull --rebase"
   post_turn: "git push"
 ```
 
-CLI flags (`--port`, `--runtime`, `--image`, `--workdir`, `--pre-turn`,
-`--post-turn`) override the YAML.
+CLI flags (`--runtime`, `--image`) override the YAML.
 
 ## Runtimes
 
@@ -189,7 +185,7 @@ at runtime.
 examples/triage-agent/
 ├── CLAUDE.md                    # Agent personality & instructions
 ├── .claude/settings.json        # Tool permissions
-├── daemon.yaml                  # Optional: hooks, port
+├── workforce.yaml               # Required: runtime, transports, agents
 └── Dockerfile                   # Agent image definition
 ```
 

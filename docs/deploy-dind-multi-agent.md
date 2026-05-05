@@ -65,7 +65,7 @@ No Dockerfiles.
 
 ```
 deploy/
-├── daemon.yaml
+├── workforce.yaml
 ├── docker-compose.yml     # for EC2
 ├── fly.toml               # for Fly.io
 ├── Caddyfile              # EC2 only — Fly terminates HTTPS at the edge
@@ -80,7 +80,7 @@ deploy/
             └── config.toml         # Codex config
 ```
 
-**`deploy/daemon.yaml`:**
+**`deploy/workforce.yaml`:**
 
 ```yaml
 transport: http
@@ -238,7 +238,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       CODEX_API_KEY: ${CODEX_API_KEY}
     volumes:
-      - ./:/workspace                                          # daemon.yaml + agents/ live here
+      - ./:/workspace                                          # workforce.yaml + agents/ live here
       - budd-sessions:/home/rootless/.claude                   # Claude session state
       - budd-sessions-codex:/home/rootless/.codex              # Codex session state
       - budd-inner-docker:/home/rootless/.local/share/docker   # cache pulled adapter images
@@ -354,8 +354,8 @@ primary_region = "iad"
 
 # Agent personas as [[files]]. flyctl re-uploads these on every deploy.
 [[files]]
-  guest_path = "/workspace/daemon.yaml"
-  local_path = "./daemon.yaml"
+  guest_path = "/workspace/workforce.yaml"
+  local_path = "./workforce.yaml"
 
 [[files]]
   guest_path = "/workspace/agents/qa/CLAUDE.md"
@@ -433,7 +433,7 @@ budd forwards env vars into each agent container in two layers:
    `CODEX_API_KEY`). These are forwarded automatically if present in the
    daemon's environment.
 
-2. **User-declared** — add one-off vars per agent in `daemon.yaml`:
+2. **User-declared** — add one-off vars per agent in `workforce.yaml`:
 
    ```yaml
    agents:
@@ -497,10 +497,10 @@ and simpler deploys for bursty or bounded-duration workloads.
 
 **`docker run -v CLAUDE.md:... source is not directory`**
 
-`workdir` in daemon.yaml was relative and couldn't be resolved. Use an
-absolute `workdir`, or make sure budd sees the daemon.yaml's parent
+`workdir` in workforce.yaml was relative and couldn't be resolved. Use an
+absolute `workdir`, or make sure budd sees the workforce.yaml's parent
 directory as its `configDir` (the CLI handles this automatically when
-it loads `./daemon.yaml` from the cwd).
+it loads `./workforce.yaml` from the cwd).
 
 **Inner dockerd fails with `iptables not available` or `unshare: EPERM`**
 

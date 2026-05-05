@@ -1,18 +1,22 @@
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { parse } from 'yaml'
 import type { AcpAgentSpec } from './acp-types.js'
 import { isPreset } from '@zooid/acp-client'
 import type {
   AgentConfig,
   AgentDockerConfig,
-  MatrixDaemonConfig,
-  ZooidConfig,
   CliFlags,
-  DockerConfig,
+  HttpTransportConfig,
+  MatrixTransportConfig,
+  TransportConfig,
+  WorkforceConfig,
 } from './types.js'
 
 export const DEFAULT_DOCKER_IMAGE = 'ghcr.io/zooid-ai/zooid-agent-base:latest'
 
 const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
+const MATRIX_USER_ID_RE = /^@[A-Za-z0-9._\-=/+]+:[A-Za-z0-9.\-]+$/
 
 function parseAcpBlock(name: string, raw: unknown): AcpAgentSpec {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -45,7 +49,7 @@ function parseAcpBlock(name: string, raw: unknown): AcpAgentSpec {
   if (typeof a.command !== 'string' || a.command.length === 0) {
     throw new Error(`agents.${name}.acp.command: must be a non-empty string`)
   }
-  let args: string[] = []
+  const args: string[] = []
   if (a.args !== undefined) {
     if (!Array.isArray(a.args)) {
       throw new Error(`agents.${name}.acp.args: must be an array of strings`)
@@ -127,35 +131,75 @@ function parseAgentDocker(name: string, raw: unknown): AgentDockerConfig {
   return out
 }
 
-const MATRIX_USER_ID_RE = /^@[A-Za-z0-9._\-=/+]+:[A-Za-z0-9.\-]+$/
-
-function parseMatrixBlock(raw: unknown): MatrixDaemonConfig {
+function parseTransports(raw: unknown): Record<string, TransportConfig> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    throw new Error('matrix: must be a mapping')
+    throw new Error('transports: must be a mapping with at least one entry')
   }
-  const m = raw as Record<string, unknown>
-  const fields: Array<keyof MatrixDaemonConfig> = [
-    'homeserver',
-    'as_token',
-    'hs_token',
-    'sender_localpart',
-    'user_namespace',
-  ]
-  const out: Record<string, string> = {}
-  for (const f of fields) {
-    const v = m[f]
-    if (typeof v !== 'string' || v.length === 0) {
-      throw new Error(`matrix.${f} must be a non-empty string`)
+  const r = raw as Record<string, unknown>
+  const names = Object.keys(r)
+  if (names.length === 0) {
+    throw new Error('transports: at least one transport must be declared')
+  }
+  const out: Record<string, TransportConfig> = {}
+  for (const name of names) {
+    out[name] = parseTransport(name, r[name])
+  }
+  return out
+}
+
+function parseTransport(name: string, raw: unknown): TransportConfig {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`transports.${name}: must be a mapping`)
+  }
+  const r = raw as Record<string, unknown>
+  if (r.type !== 'matrix' && r.type !== 'http') {
+    throw new Error(
+      `transports.${name}.type must be "matrix" or "http" (got ${JSON.stringify(r.type)})`,
+    )
+  }
+  if (r.type === 'matrix') {
+    const fields = [
+      'homeserver',
+      'as_token',
+      'hs_token',
+      'sender_localpart',
+      'user_namespace',
+    ] as const
+    for (const f of fields) {
+      if (typeof r[f] !== 'string' || (r[f] as string).length === 0) {
+        throw new Error(`transports.${name}.${f} must be a non-empty string`)
+      }
     }
-    out[f] = v
+    const out: MatrixTransportConfig = {
+      type: 'matrix',
+      homeserver: r.homeserver as string,
+      as_token: r.as_token as string,
+      hs_token: r.hs_token as string,
+      sender_localpart: r.sender_localpart as string,
+      user_namespace: r.user_namespace as string,
+    }
+    if (r.port !== undefined) {
+      if (!Number.isInteger(r.port)) {
+        throw new Error(
+          `transports.${name}.port must be an integer (got ${JSON.stringify(r.port)})`,
+        )
+      }
+      out.port = r.port as number
+    }
+    return out
   }
-  return out as unknown as MatrixDaemonConfig
+  // type: 'http'
+  const port = (r.port ?? 8080) as number
+  if (!Number.isInteger(port)) {
+    throw new Error(`transports.${name}.port must be an integer (got ${JSON.stringify(port)})`)
+  }
+  return { type: 'http', port }
 }
 
 function parseAgents(
   raw: unknown,
   runtime: 'local' | 'docker' | 'podman',
-  transport: 'http' | 'matrix',
+  transports: Record<string, TransportConfig>,
   daemonHooks: { pre_turn?: string; post_turn?: string },
 ): Record<string, AgentConfig> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -185,12 +229,22 @@ function parseAgents(
     }
 
     if (entry.acp === undefined) {
-      throw new Error(
-        `agents.${name}: missing required "acp" block`,
-      )
+      throw new Error(`agents.${name}: missing required "acp" block`)
     }
     const acp = parseAcpBlock(name, entry.acp)
     const approval_timeout_ms = parseApprovalTimeout(name, entry.approval_timeout)
+
+    if (typeof entry.transport !== 'string' || entry.transport.length === 0) {
+      throw new Error(`agents.${name}.transport is required (name of a transports entry)`)
+    }
+    const transportName = entry.transport
+    const t = transports[transportName]
+    if (!t) {
+      throw new Error(
+        `agents.${name}.transport "${transportName}" is not declared in transports`,
+      )
+    }
+    const isMatrix = t.type === 'matrix'
 
     const agentHooks: AgentConfig['hooks'] = {}
     if (daemonHooks.pre_turn !== undefined) agentHooks.pre_turn = daemonHooks.pre_turn
@@ -221,11 +275,11 @@ function parseAgents(
     }
 
     const matrixOnly = ['matrix_user_id', 'rooms', 'trigger'] as const
-    if (transport !== 'matrix') {
+    if (!isMatrix) {
       for (const k of matrixOnly) {
         if (entry[k] !== undefined) {
           throw new Error(
-            `agents.${name}.${k} is only valid when transport: matrix (got transport: ${transport})`,
+            `agents.${name}.${k} is only valid when transport is type: matrix (got type: ${t.type})`,
           )
         }
       }
@@ -233,11 +287,16 @@ function parseAgents(
     let matrixUserId: string | undefined
     let rooms: string[] | undefined
     let trigger: 'mention' | 'any' | undefined
-    if (transport === 'matrix') {
+    if (isMatrix) {
       if (entry.matrix_user_id === undefined) {
-        throw new Error(`agents.${name}.matrix_user_id is required when transport: matrix`)
+        throw new Error(
+          `agents.${name}.matrix_user_id is required when referencing a matrix transport`,
+        )
       }
-      if (typeof entry.matrix_user_id !== 'string' || !MATRIX_USER_ID_RE.test(entry.matrix_user_id)) {
+      if (
+        typeof entry.matrix_user_id !== 'string' ||
+        !MATRIX_USER_ID_RE.test(entry.matrix_user_id)
+      ) {
         throw new Error(
           `agents.${name}.matrix_user_id must look like @localpart:server (got ${JSON.stringify(entry.matrix_user_id)})`,
         )
@@ -245,7 +304,7 @@ function parseAgents(
       matrixUserId = entry.matrix_user_id
       if (entry.rooms === undefined || !Array.isArray(entry.rooms) || entry.rooms.length === 0) {
         throw new Error(
-          `agents.${name}.rooms is required and must be a non-empty array when transport: matrix`,
+          `agents.${name}.rooms is required and must be a non-empty array when referencing a matrix transport`,
         )
       }
       const ws: string[] = []
@@ -267,6 +326,7 @@ function parseAgents(
 
     const agentCfg: AgentConfig = {
       name,
+      transport: transportName,
       workdir: entry.workdir,
       hooks: agentHooks,
       acp,
@@ -281,88 +341,128 @@ function parseAgents(
   return result
 }
 
-export function loadConfig(yamlText: string): ZooidConfig {
-  const raw = parse(yamlText) ?? {}
-  if (typeof raw !== 'object' || raw === null) {
-    throw new Error('daemon.yaml must be a YAML object')
-  }
-
-  const transport = raw.transport ?? 'http'
-  if (transport !== 'http' && transport !== 'matrix') {
-    throw new Error(
-      `transport must be "http" or "matrix" (got "${transport}").`,
-    )
-  }
-
-  const runtime = raw.runtime ?? 'docker'
+function parseRuntime(raw: unknown): 'local' | 'docker' | 'podman' {
+  const runtime = raw ?? 'docker'
   if (runtime !== 'local' && runtime !== 'docker' && runtime !== 'podman') {
     throw new Error(`runtime must be "local", "docker", or "podman" (got "${runtime}")`)
   }
+  return runtime
+}
 
-  const port = raw.port ?? 8080
-  if (!Number.isInteger(port)) {
-    throw new Error(`port must be an integer (got ${JSON.stringify(port)})`)
+function parseDocker(raw: unknown): { image: string } {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const image =
+    typeof r.image === 'string' && r.image.length > 0 ? r.image : DEFAULT_DOCKER_IMAGE
+  return { image }
+}
+
+function workforceHooks(raw: Record<string, unknown>): { pre_turn?: string; post_turn?: string } {
+  const out: { pre_turn?: string; post_turn?: string } = {}
+  if (raw.hooks && typeof raw.hooks === 'object') {
+    const h = raw.hooks as Record<string, unknown>
+    if (typeof h.pre_turn === 'string') out.pre_turn = h.pre_turn
+    if (typeof h.post_turn === 'string') out.post_turn = h.post_turn
   }
+  return out
+}
 
-  if (raw.workdir !== undefined) {
+export function loadWorkforceConfig(yamlText: string): WorkforceConfig {
+  const raw = parse(yamlText) ?? {}
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('workforce.yaml must be a YAML object')
+  }
+  const r = raw as Record<string, unknown>
+
+  if (r.transport !== undefined) {
+    throw new Error(
+      'workforce.yaml: top-level "transport:" is no longer supported; declare entries under "transports:" instead',
+    )
+  }
+  if (r.matrix !== undefined) {
+    throw new Error(
+      'workforce.yaml: top-level "matrix:" is no longer supported; move it under "transports.<name>: { type: matrix, ... }"',
+    )
+  }
+  if (r.workdir !== undefined) {
     throw new Error(
       'top-level workdir is not supported; define agents: { <name>: { workdir: ... } } instead',
     )
   }
-
-  if (raw.agents === undefined) {
-    throw new Error(
-      'agents: is required — daemon.yaml must define at least one agent',
-    )
+  if (r.agents === undefined) {
+    throw new Error('agents: is required — workforce.yaml must define at least one agent')
   }
 
-  const daemonHooks: ZooidConfig['hooks'] = {}
-  if (raw.hooks && typeof raw.hooks === 'object') {
-    if (typeof raw.hooks.pre_turn === 'string') daemonHooks.pre_turn = raw.hooks.pre_turn
-    if (typeof raw.hooks.post_turn === 'string') daemonHooks.post_turn = raw.hooks.post_turn
-  }
+  const runtime = parseRuntime(r.runtime)
+  const transports = parseTransports(r.transports)
+  const hooks = workforceHooks(r)
+  const agents = parseAgents(r.agents, runtime, transports, hooks)
 
-  const agents = parseAgents(raw.agents, runtime, transport, daemonHooks)
-
-  const config: ZooidConfig = {
-    transport,
-    port,
+  const cfg: WorkforceConfig = {
     runtime,
+    transports,
     agents,
-    hooks: daemonHooks,
+    hooks,
   }
-
   if (runtime === 'docker' || runtime === 'podman') {
-    const rawDocker = raw.docker && typeof raw.docker === 'object' ? raw.docker : {}
-    const image =
-      typeof rawDocker.image === 'string' && rawDocker.image.length > 0
-        ? rawDocker.image
-        : DEFAULT_DOCKER_IMAGE
-    config.docker = { image }
+    cfg.docker = parseDocker(r.docker)
   }
-
-  if (transport === 'matrix') {
-    if (raw.matrix === undefined) {
-      throw new Error('matrix: block is required when transport: matrix')
-    }
-    config.matrix = parseMatrixBlock(raw.matrix)
-  } else if (raw.matrix !== undefined) {
-    throw new Error(
-      `matrix: block is only valid when transport: matrix (got transport: ${transport})`,
-    )
-  }
-
-  return config
+  return cfg
 }
 
-export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
-  if (
-    flags.transport !== undefined &&
-    flags.transport !== 'http' &&
-    flags.transport !== 'matrix'
-  ) {
-    throw new Error(`transport must be "http" or "matrix" (got "${flags.transport}").`)
+export function findTransport(
+  cfg: WorkforceConfig,
+  name: string,
+): TransportConfig | undefined {
+  return cfg.transports[name]
+}
+
+export function findMatrixTransport(
+  cfg: WorkforceConfig,
+): { name: string; transport: MatrixTransportConfig } | null {
+  const matrices = Object.entries(cfg.transports).filter(
+    (e): e is [string, MatrixTransportConfig] => e[1].type === 'matrix',
+  )
+  if (matrices.length === 0) return null
+  if (matrices.length > 1) {
+    throw new Error(
+      `findMatrixTransport: multiple matrix transports declared (${matrices
+        .map((m) => m[0])
+        .join(', ')}). Per-agent matrix routing is not supported yet.`,
+    )
   }
+  const [name, transport] = matrices[0]!
+  return { name, transport }
+}
+
+export function findHttpTransport(
+  cfg: WorkforceConfig,
+): { name: string; transport: HttpTransportConfig } | null {
+  const https = Object.entries(cfg.transports).filter(
+    (e): e is [string, HttpTransportConfig] => e[1].type === 'http',
+  )
+  if (https.length === 0) return null
+  if (https.length > 1) {
+    throw new Error(
+      `findHttpTransport: multiple http transports declared (${https
+        .map((h) => h[0])
+        .join(', ')}). Per-agent http routing is not supported yet.`,
+    )
+  }
+  const [name, transport] = https[0]!
+  return { name, transport }
+}
+
+export interface FoundConfigFile {
+  path: string
+}
+
+export function findConfigFile(cwd: string): FoundConfigFile | null {
+  const w = join(cwd, 'workforce.yaml')
+  if (existsSync(w)) return { path: w }
+  return null
+}
+
+export function mergeCliFlags(base: WorkforceConfig, flags: CliFlags): WorkforceConfig {
   const runtimeFlag = flags.runtime as 'local' | 'docker' | 'podman' | undefined
   if (
     runtimeFlag !== undefined &&
@@ -372,14 +472,10 @@ export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
   ) {
     throw new Error(`runtime must be "local", "docker", or "podman" (got "${flags.runtime}")`)
   }
-  if (flags.port !== undefined && !Number.isInteger(flags.port)) {
-    throw new Error(`port must be an integer (got ${JSON.stringify(flags.port)})`)
-  }
   const runtime = runtimeFlag ?? base.runtime
-  const merged: ZooidConfig = {
-    transport: base.transport,
-    port: flags.port ?? base.port,
+  const merged: WorkforceConfig = {
     runtime,
+    transports: base.transports,
     agents: base.agents,
     hooks: { ...base.hooks },
   }
@@ -389,6 +485,5 @@ export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
       image: flags.image ?? baseDocker.image ?? DEFAULT_DOCKER_IMAGE,
     }
   }
-  if (base.matrix) merged.matrix = base.matrix
   return merged
 }

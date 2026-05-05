@@ -44,7 +44,7 @@ COPY CLAUDE.md .
 COPY .claude/ .claude/
 
 # Optional: hooks, port override
-# COPY daemon.yaml .
+# COPY workforce.yaml .
 
 EXPOSE 8080
 ENTRYPOINT ["budd", "--runtime", "local"]

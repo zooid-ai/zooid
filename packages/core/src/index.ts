@@ -1,4 +1,12 @@
-export { loadConfig, mergeCliFlags } from './config.js'
+export {
+  loadWorkforceConfig,
+  mergeCliFlags,
+  findTransport,
+  findMatrixTransport,
+  findHttpTransport,
+  findConfigFile,
+  DEFAULT_DOCKER_IMAGE,
+} from './config.js'
 export {
   AcpAgentRegistry,
   resolveAcpAgentSpec,
@@ -24,8 +32,10 @@ export type {
   DockerConfig,
   AgentConfig,
   AgentDockerConfig,
-  MatrixDaemonConfig,
-  ZooidConfig,
+  WorkforceConfig,
+  TransportConfig,
+  MatrixTransportConfig,
+  HttpTransportConfig,
   CliFlags,
   Transport,
   InboundMessage,

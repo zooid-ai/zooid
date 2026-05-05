@@ -91,7 +91,7 @@ Claude Code ACP shim (auto-installed via `npx`). From this directory:
 5. When the SSE stream emits `{"type":"turn.end","stop_reason":"end_turn"}`,
    a new ticket file is in `./tickets/`.
 
-The daemon reads `daemon.yaml` from the current directory and uses `.`
+The daemon reads `workforce.yaml` from the current directory and uses `.`
 as its working dir, so `CLAUDE.md`, `.claude/settings.json`, and
 `tickets/` are all in cwd and `../../packages/` resolves to the real
 zooid packages on disk.
@@ -121,7 +121,7 @@ on first run via `npx -y` inside the container.
 
 | Path | Purpose |
 |---|---|
-| `daemon.yaml` | zooid configuration (transport, runtime, agents) |
+| `workforce.yaml` | zooid configuration (transport, runtime, agents) |
 | `CLAUDE.md` | The triage agent's personality and operating rules |
 | `.claude/settings.json` | Belt-and-suspenders pre-approved tool permissions inside the shim |
 | `docker-compose.yml` | Optional: containerized run on `zooid-agent-base` |
@@ -142,7 +142,7 @@ defense-in-depth layer rather than the only line of defense:
 - **Allowed:** `Read`, `Glob`, `Grep` (workspace exploration), and
   `Edit(/tickets/**)` scoped to the tickets directory.
 - **Denied:** `Bash`, plus `Edit` rules on the workspace's own
-  `CLAUDE.md` / `daemon.yaml` / `README.md`.
+  `CLAUDE.md` / `workforce.yaml` / `README.md`.
 
 If you want every tool call surfaced to the daemon (so you decide via
 HTTP), drop the allow list and let the ACP round-trip mediate everything.
@@ -151,7 +151,7 @@ HTTP), drop the allow list and let the ACP round-trip mediate everything.
 
 To turn any monorepo into a triage workspace:
 
-1. Copy `CLAUDE.md`, `daemon.yaml`, and `.claude/settings.json` into a
+1. Copy `CLAUDE.md`, `workforce.yaml`, and `.claude/settings.json` into a
    directory of your choice
 2. Edit `CLAUDE.md` so the workspace path matches where your `packages/`
    actually live, relative to that directory

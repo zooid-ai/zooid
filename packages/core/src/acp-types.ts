@@ -1,7 +1,7 @@
 import type { ChildProcess } from 'node:child_process'
 
 /**
- * Per-agent ACP block in daemon.yaml. XOR: either a known preset or an
+ * Per-agent ACP block in workforce.yaml. XOR: either a known preset or an
  * explicit command. The schema parser rejects both/neither.
  */
 export type AcpAgentSpec =

@@ -30,7 +30,7 @@ export type AcpRegistryApprovalHandler = (
  */
 export interface AcpRegistry {
   hasAgent(name: string): boolean
-  /** Per-agent approval timeout from daemon.yaml. 0 means no timeout. */
+  /** Per-agent approval timeout from workforce.yaml. 0 means no timeout. */
   getApprovalTimeoutMs(name: string): number
   ensureSession(name: string, threadId: string): Promise<string>
   prompt(name: string, input: PromptInput): Promise<PromptResult>

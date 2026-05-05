@@ -18,7 +18,7 @@ Relative to your current working directory:
 - `./tickets/` — where you write your output. One markdown file per
   report.
 
-Ignore `daemon.yaml` and `README.md` in your cwd — those describe how
+Ignore `workforce.yaml` and `README.md` in your cwd — those describe how
 this workspace is run, not what it contains.
 
 The marketing homepage lives in a sibling repo (`../../../zooid-homepage/`)

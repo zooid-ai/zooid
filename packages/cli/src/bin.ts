@@ -1,9 +1,12 @@
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { serve } from '@hono/node-server'
 import {
   ApprovalCorrelator,
-  loadConfig,
+  findConfigFile,
+  findHttpTransport,
+  findMatrixTransport,
+  loadWorkforceConfig,
   mergeCliFlags,
   type CliFlags,
 } from '@zooid/core'
@@ -28,8 +31,6 @@ Usage:
   zooid [flags]
 
 Flags:
-  --transport <http>           Transport to listen on (only "http" is supported).
-  --port <n>                   Port for the HTTP transport. Default: 8080 (or daemon.yaml).
   --runtime <local|docker|podman>
                                Runtime for spawning each agent's ACP shim. Default: docker.
   --image <ref>                Container image for runtime: docker. Default: ghcr.io/zooid-ai/zooid-agent-base:latest.
@@ -37,18 +38,24 @@ Flags:
   --help, -h                   Print this help and exit.
 
 Environment:
-  ZOOID_TOKEN                  Required. Bearer token clients send as
-                               "Authorization: Bearer $ZOOID_TOKEN".
+  ZOOID_TOKEN                  Required for http transport. Bearer token clients
+                               send as "Authorization: Bearer $ZOOID_TOKEN".
 
 Config:
-  ./daemon.yaml                Required. Each agent must declare an "acp" block:
-                                 transport: http
+  ./workforce.yaml             Required. Each agent must declare an "acp" block
+                               and reference a transport by name:
                                  runtime: docker
+                                 transports:
+                                   http-local:
+                                     type: http
+                                     port: 8080
                                  agents:
                                    qa:
+                                     transport: http-local
                                      workdir: ./workspaces/qa
                                      acp: { preset: claude }
                                    ship:
+                                     transport: http-local
                                      workdir: ./workspaces/ship
                                      acp: { preset: codex }
 
@@ -62,7 +69,7 @@ HTTP API:
 function parseArgv(argv: string[]): ParsedFlags {
   const flags: ParsedFlags = {}
   for (let i = 2; i < argv.length; i++) {
-    const a = argv[i]
+    const a = argv[i]!
     const next = (): string => {
       const v = argv[++i]
       if (v === undefined) {
@@ -72,12 +79,6 @@ function parseArgv(argv: string[]): ParsedFlags {
       return v
     }
     switch (a) {
-      case '--transport':
-        flags.transport = next()
-        break
-      case '--port':
-        flags.port = Number.parseInt(next(), 10)
-        break
       case '--runtime':
         flags.runtime = next()
         break
@@ -114,11 +115,12 @@ async function main(): Promise<void> {
     return
   }
 
-  if (!existsSync('daemon.yaml')) {
-    console.error('daemon.yaml is required in the current directory')
+  const found = findConfigFile(process.cwd())
+  if (!found) {
+    console.error('workforce.yaml is required in the current directory')
     process.exit(1)
   }
-  const base = loadConfig(readFileSync('daemon.yaml', 'utf8'))
+  const base = loadWorkforceConfig(readFileSync(found.path, 'utf8'))
   const config = mergeCliFlags(base, flags)
 
   const approvals = new ApprovalCorrelator()
@@ -139,17 +141,15 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown('SIGINT'))
   process.on('SIGTERM', () => void shutdown('SIGTERM'))
 
-  if (config.transport === 'matrix') {
-    if (!config.matrix) {
-      console.error('matrix: block is required when transport: matrix')
-      process.exit(1)
-    }
+  const matrix = findMatrixTransport(config)
+  if (matrix) {
     const client = new MatrixClient({
-      homeserver: config.matrix.homeserver,
-      asToken: config.matrix.as_token,
+      homeserver: matrix.transport.homeserver,
+      asToken: matrix.transport.as_token,
     })
     const bindings: AgentBinding[] = []
     for (const a of Object.values(config.agents)) {
+      if (a.transport !== matrix.name) continue
       if (!a.matrix_user_id || !a.rooms || !a.trigger) {
         console.error(`agent ${a.name}: matrix_user_id, rooms, and trigger are required`)
         process.exit(1)
@@ -166,10 +166,11 @@ async function main(): Promise<void> {
       approvals,
       client,
       bindings,
-      hsToken: config.matrix.hs_token,
+      hsToken: matrix.transport.hs_token,
     })
     await transport.bootstrap()
-    serve({ fetch: transport.app.fetch, port: config.port }, (info) => {
+    const port = matrix.transport.port ?? 8080
+    serve({ fetch: transport.app.fetch, port }, (info) => {
       console.log(`zooid (matrix AS) listening on http://localhost:${info.port}`)
       for (const b of bindings) {
         console.log(`  agent: ${b.name} (${b.userId}, trigger: ${b.trigger})`)
@@ -178,16 +179,22 @@ async function main(): Promise<void> {
     return
   }
 
+  const http = findHttpTransport(config)
+  if (!http) {
+    console.error('no transport declared in workforce.yaml')
+    process.exit(1)
+  }
+
   const token = process.env.ZOOID_TOKEN
   if (!token) {
     console.error('ZOOID_TOKEN is required')
     process.exit(1)
   }
   const app = createApp({ agents: registry, approvals, token })
-  serve({ fetch: app.fetch, port: config.port }, (info) => {
+  serve({ fetch: app.fetch, port: http.transport.port }, (info) => {
     console.log(`zooid listening on http://localhost:${info.port}`)
     for (const name of Object.keys(config.agents)) {
-      console.log(`  agent: ${name} (workdir: ${config.agents[name].workdir})`)
+      console.log(`  agent: ${name} (workdir: ${config.agents[name]!.workdir})`)
     }
   })
 }

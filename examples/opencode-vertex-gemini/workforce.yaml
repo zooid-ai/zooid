@@ -5,11 +5,16 @@
 # (GOOGLE_VERTEX_API_KEY from .env). zooid spawns the shim via the
 # `opencode` preset under runtime: local; the host's env is inherited.
 
-transport: http
 runtime: local
+
+transports:
+  http-local:
+    type: http
+    port: 8080
 
 agents:
   reviewer:
+    transport: http-local
     workdir: .
     acp:
       preset: opencode

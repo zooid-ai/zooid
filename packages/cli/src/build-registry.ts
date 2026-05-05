@@ -4,7 +4,7 @@ import {
   AcpAgentRegistry,
   type AcpRuntime,
   type ApprovalCorrelator,
-  type ZooidConfig,
+  type WorkforceConfig,
 } from '@zooid/core'
 import { resolveForwardEnv } from './forward-env.js'
 
@@ -16,7 +16,7 @@ export interface BuildAcpRegistryOptions {
 }
 
 /**
- * Build an `AcpAgentRegistry` from a parsed daemon config.
+ * Build an `AcpAgentRegistry` from a parsed workforce config.
  *
  *   - `runtime: local`   → `LocalAcpRuntime`
  *   - `runtime: docker`  → `DockerAcpRuntime` (engine: docker)
@@ -27,7 +27,7 @@ export interface BuildAcpRegistryOptions {
  * right vars in its spawn spec.
  */
 export function buildAcpRegistry(
-  cfg: ZooidConfig,
+  cfg: WorkforceConfig,
   opts: BuildAcpRegistryOptions = {},
 ): AcpAgentRegistry {
   for (const [name, agent] of Object.entries(cfg.agents)) {
@@ -49,7 +49,7 @@ export function buildAcpRegistry(
   })
 }
 
-function defaultRuntimeFor(cfg: ZooidConfig): AcpRuntime {
+function defaultRuntimeFor(cfg: WorkforceConfig): AcpRuntime {
   if (cfg.runtime === 'local') return new LocalAcpRuntime()
   if (cfg.runtime === 'docker') {
     return new DockerAcpRuntime({ defaultImage: cfg.docker?.image, engine: 'docker' })
