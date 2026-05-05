@@ -1,0 +1,40 @@
+import type { MatrixTransportConfig } from '@zooid/core'
+
+export interface HomeserverShape {
+  host: string
+  port: number
+  serverName: string
+}
+
+const NAMESPACE_RE = /^@\.\*:([A-Za-z0-9.-]+)$/
+
+export function deriveHomeserverShape(
+  matrix: MatrixTransportConfig,
+  agentUserIds: readonly string[],
+): HomeserverShape {
+  const url = new URL(matrix.homeserver)
+  const host = url.hostname
+  const port = url.port
+    ? Number(url.port)
+    : url.protocol === 'https:'
+      ? 443
+      : 80
+
+  const m = NAMESPACE_RE.exec(matrix.user_namespace)
+  if (!m) {
+    throw new Error(
+      `user_namespace ${matrix.user_namespace!}: expected the simple form '@.*:<server_name>'`,
+    )
+  }
+  const serverName = m[1]!
+
+  for (const userId of agentUserIds) {
+    if (!userId.endsWith(`:${serverName}`)) {
+      throw new Error(
+        `server_name mismatch: agent ${userId} does not end with :${serverName}`,
+      )
+    }
+  }
+
+  return { host, port, serverName }
+}

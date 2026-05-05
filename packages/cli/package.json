@@ -41,7 +41,10 @@
     "@zooid/runtime-local": "workspace:^",
     "@zooid/transport-http": "workspace:^",
     "@zooid/transport-matrix": "workspace:^",
+    "cac": "^6.7.14",
+    "chalk": "^5.4.1",
     "hono": "^4.6.0",
+    "listr2": "^8.2.5",
     "yaml": "^2.5.0"
   },
   "devDependencies": {

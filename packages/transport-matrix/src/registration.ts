@@ -9,6 +9,12 @@ export interface MatrixTransportConfig {
   senderLocalpart: string
   /** Regex covering all bot users, e.g. `@.*:example.com` */
   userNamespace: string
+  /**
+   * Whether the AS exclusively owns the user_namespace. Default true.
+   * Set false when humans share the namespace (e.g., `zooid dev` registers
+   * a predefined admin under the same `@.*:localhost` regex).
+   */
+  exclusive?: boolean
 }
 
 export function renderRegistration(c: MatrixTransportConfig): string {
@@ -21,7 +27,7 @@ export function renderRegistration(c: MatrixTransportConfig): string {
       sender_localpart: c.senderLocalpart,
       rate_limited: false,
       namespaces: {
-        users: [{ exclusive: true, regex: c.userNamespace }],
+        users: [{ exclusive: c.exclusive ?? true, regex: c.userNamespace }],
         aliases: [],
         rooms: [],
       },
