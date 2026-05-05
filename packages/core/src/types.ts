@@ -82,18 +82,38 @@ export interface AgentConfig {
   approval_timeout_ms: number
   /** Docker-only block. Rejected at parse time when runtime !== 'docker'. */
   docker?: AgentDockerConfig
+  /** Matrix-only: full Matrix user ID for this agent's bot, e.g. `@architect:example.com`. */
+  matrix_user_id?: string
+  /** Matrix-only: list of room IDs this agent watches. */
+  rooms?: string[]
+  /** Matrix-only: routing rule. `mention` requires the bot to be tagged; `any` triggers on every message. */
+  trigger?: 'mention' | 'any'
+}
+
+/**
+ * Top-level matrix block. Required when `transport: matrix`.
+ */
+export interface MatrixDaemonConfig {
+  homeserver: string
+  as_token: string
+  hs_token: string
+  sender_localpart: string
+  /** Regex covering all bot users, e.g. `@.*:example.com` */
+  user_namespace: string
 }
 
 /**
  * Parsed daemon.yaml shape. Always multi-agent — `agents:` is required and
  * must have at least one entry.
  */
-export interface BuddConfig {
-  transport: 'http'
+export interface ZooidConfig {
+  transport: 'http' | 'matrix'
   port: number
   runtime: 'local' | 'docker' | 'podman'
   /** Docker-specific config. Populated when `runtime === 'docker' | 'podman'`. */
   docker?: DockerConfig
+  /** Matrix-specific config. Required when `transport === 'matrix'`. */
+  matrix?: MatrixDaemonConfig
   /** Required. Must have at least one entry. */
   agents: Record<string, AgentConfig>
   /** Daemon-wide hook defaults. Merged into each agent.hooks at load time. */

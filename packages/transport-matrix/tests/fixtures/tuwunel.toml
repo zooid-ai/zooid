@@ -1,0 +1,8 @@
+[global]
+server_name = "localhost"
+database_path = "/var/lib/tuwunel/db"
+appservice_dir = "/var/lib/tuwunel/registrations"
+allow_registration = true
+yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = true
+address = ["0.0.0.0"]
+port = [8448]

@@ -8,6 +8,11 @@ import {
   type CliFlags,
 } from '@zooid/core'
 import { createApp } from '@zooid/transport-http'
+import {
+  MatrixClient,
+  createMatrixTransport,
+  type AgentBinding,
+} from '@zooid/transport-matrix'
 import { buildAcpRegistry } from './build-registry.js'
 
 interface ParsedFlags extends CliFlags {
@@ -116,15 +121,8 @@ async function main(): Promise<void> {
   const base = loadConfig(readFileSync('daemon.yaml', 'utf8'))
   const config = mergeCliFlags(base, flags)
 
-  const token = process.env.ZOOID_TOKEN
-  if (!token) {
-    console.error('ZOOID_TOKEN is required')
-    process.exit(1)
-  }
-
   const approvals = new ApprovalCorrelator()
   const registry = buildAcpRegistry(config, { approvals })
-  const app = createApp({ agents: registry, approvals, token })
 
   let shuttingDown = false
   const shutdown = async (signal: NodeJS.Signals) => {
@@ -141,6 +139,51 @@ async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown('SIGINT'))
   process.on('SIGTERM', () => void shutdown('SIGTERM'))
 
+  if (config.transport === 'matrix') {
+    if (!config.matrix) {
+      console.error('matrix: block is required when transport: matrix')
+      process.exit(1)
+    }
+    const client = new MatrixClient({
+      homeserver: config.matrix.homeserver,
+      asToken: config.matrix.as_token,
+    })
+    const bindings: AgentBinding[] = []
+    for (const a of Object.values(config.agents)) {
+      if (!a.matrix_user_id || !a.rooms || !a.trigger) {
+        console.error(`agent ${a.name}: matrix_user_id, rooms, and trigger are required`)
+        process.exit(1)
+      }
+      bindings.push({
+        name: a.name,
+        userId: a.matrix_user_id,
+        rooms: a.rooms,
+        trigger: a.trigger,
+      })
+    }
+    const transport = createMatrixTransport({
+      agents: registry,
+      approvals,
+      client,
+      bindings,
+      hsToken: config.matrix.hs_token,
+    })
+    await transport.bootstrap()
+    serve({ fetch: transport.app.fetch, port: config.port }, (info) => {
+      console.log(`zooid (matrix AS) listening on http://localhost:${info.port}`)
+      for (const b of bindings) {
+        console.log(`  agent: ${b.name} (${b.userId}, trigger: ${b.trigger})`)
+      }
+    })
+    return
+  }
+
+  const token = process.env.ZOOID_TOKEN
+  if (!token) {
+    console.error('ZOOID_TOKEN is required')
+    process.exit(1)
+  }
+  const app = createApp({ agents: registry, approvals, token })
   serve({ fetch: app.fetch, port: config.port }, (info) => {
     console.log(`zooid listening on http://localhost:${info.port}`)
     for (const name of Object.keys(config.agents)) {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { loadConfig, mergeCliFlags } from './config.js'
-import type { BuddConfig } from './types.js'
+import type { ZooidConfig } from './types.js'
 
 const QA_AGENTS = `
 agents:
@@ -325,7 +325,7 @@ agents:
 })
 
 describe('mergeCliFlags', () => {
-  function baseConfig(overrides: Partial<BuddConfig> = {}): BuddConfig {
+  function baseConfig(overrides: Partial<ZooidConfig> = {}): ZooidConfig {
     return {
       transport: 'http',
       port: 8080,
@@ -381,7 +381,139 @@ describe('mergeCliFlags', () => {
 
   it('rejects --transport slack from CLI flags', () => {
     expect(() => mergeCliFlags(baseConfig(), { transport: 'slack' })).toThrow(
-      /transport must be "http"/,
+      /transport must be "http" or "matrix"/,
     )
   })
 })
+
+const MATRIX_BLOCK = `
+matrix:
+  homeserver: http://localhost:8448
+  as_token: as-secret
+  hs_token: hs-secret
+  sender_localpart: zooid
+  user_namespace: '@.*:localhost'
+`
+
+describe('loadConfig (matrix transport)', () => {
+  it('parses transport: matrix with the matrix block and per-agent matrix fields', () => {
+    const config = loadConfig(`
+transport: matrix
+runtime: local
+${MATRIX_BLOCK.trimStart()}
+agents:
+  architect:
+    workdir: ./architect
+    matrix_user_id: '@architect:localhost'
+    rooms:
+      - '!r1:localhost'
+    trigger: mention
+    acp:
+      preset: claude
+`)
+    expect(config.transport).toBe('matrix')
+    expect(config.matrix?.homeserver).toBe('http://localhost:8448')
+    expect(config.matrix?.user_namespace).toBe('@.*:localhost')
+    expect(config.agents.architect.matrix_user_id).toBe('@architect:localhost')
+    expect(config.agents.architect.rooms).toEqual(['!r1:localhost'])
+    expect(config.agents.architect.trigger).toBe('mention')
+  })
+
+  it('defaults trigger to "mention" when omitted', () => {
+    const config = loadConfig(`
+transport: matrix
+runtime: local
+${MATRIX_BLOCK.trimStart()}
+agents:
+  architect:
+    workdir: ./architect
+    matrix_user_id: '@architect:localhost'
+    rooms:
+      - '!r1:localhost'
+    acp:
+      preset: claude
+`)
+    expect(config.agents.architect.trigger).toBe('mention')
+  })
+
+  it('rejects matrix block when transport is http', () => {
+    expect(() =>
+      loadConfig(`
+transport: http
+runtime: local
+${MATRIX_BLOCK.trimStart()}
+agents:
+  qa:
+    workdir: ./qa
+    acp:
+      preset: claude
+`),
+    ).toThrow(/matrix: block is only valid when transport: matrix/)
+  })
+
+  it('rejects per-agent matrix_user_id when transport is http', () => {
+    expect(() =>
+      loadConfig(`
+transport: http
+runtime: local
+agents:
+  qa:
+    workdir: ./qa
+    matrix_user_id: '@qa:localhost'
+    acp:
+      preset: claude
+`),
+    ).toThrow(/matrix_user_id is only valid when transport: matrix/)
+  })
+
+  it('requires the matrix block when transport: matrix', () => {
+    expect(() =>
+      loadConfig(`
+transport: matrix
+runtime: local
+agents:
+  architect:
+    workdir: ./architect
+    matrix_user_id: '@architect:localhost'
+    rooms:
+      - '!r1:localhost'
+    acp:
+      preset: claude
+`),
+    ).toThrow(/matrix: block is required when transport: matrix/)
+  })
+
+  it('requires per-agent matrix_user_id and rooms when transport: matrix', () => {
+    expect(() =>
+      loadConfig(`
+transport: matrix
+runtime: local
+${MATRIX_BLOCK.trimStart()}
+agents:
+  architect:
+    workdir: ./architect
+    acp:
+      preset: claude
+`),
+    ).toThrow(/matrix_user_id is required/)
+  })
+
+  it('rejects bad matrix_user_id format', () => {
+    expect(() =>
+      loadConfig(`
+transport: matrix
+runtime: local
+${MATRIX_BLOCK.trimStart()}
+agents:
+  architect:
+    workdir: ./architect
+    matrix_user_id: 'not-a-matrix-id'
+    rooms:
+      - '!r1:localhost'
+    acp:
+      preset: claude
+`),
+    ).toThrow(/matrix_user_id must look like @localpart:server/)
+  })
+})
+

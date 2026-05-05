@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { LocalAcpRuntime } from '@zooid/runtime-local'
 import { DockerAcpRuntime } from '@zooid/runtime-docker'
-import type { BuddConfig } from '@zooid/core'
+import type { ZooidConfig } from '@zooid/core'
 import { buildAcpRegistry } from './build-registry.js'
 
-function cfg(overrides: Partial<BuddConfig> & Pick<BuddConfig, 'runtime'>): BuddConfig {
+function cfg(overrides: Partial<ZooidConfig> & Pick<ZooidConfig, 'runtime'>): ZooidConfig {
   return {
     transport: 'http',
     port: 8080,
@@ -19,7 +19,7 @@ function cfg(overrides: Partial<BuddConfig> & Pick<BuddConfig, 'runtime'>): Budd
     },
     hooks: {},
     docker: overrides.docker,
-  } as BuddConfig
+  } as ZooidConfig
 }
 
 describe('buildAcpRegistry', () => {
@@ -106,7 +106,7 @@ describe('buildAcpRegistry', () => {
   })
 
   it('throws if any agent has no acp block (defense in depth)', () => {
-    const c: BuddConfig = {
+    const c: ZooidConfig = {
       transport: 'http',
       port: 8080,
       runtime: 'local',

@@ -4,7 +4,8 @@ import { isPreset } from '@zooid/acp-client'
 import type {
   AgentConfig,
   AgentDockerConfig,
-  BuddConfig,
+  MatrixDaemonConfig,
+  ZooidConfig,
   CliFlags,
   DockerConfig,
 } from './types.js'
@@ -126,9 +127,35 @@ function parseAgentDocker(name: string, raw: unknown): AgentDockerConfig {
   return out
 }
 
+const MATRIX_USER_ID_RE = /^@[A-Za-z0-9._\-=/+]+:[A-Za-z0-9.\-]+$/
+
+function parseMatrixBlock(raw: unknown): MatrixDaemonConfig {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('matrix: must be a mapping')
+  }
+  const m = raw as Record<string, unknown>
+  const fields: Array<keyof MatrixDaemonConfig> = [
+    'homeserver',
+    'as_token',
+    'hs_token',
+    'sender_localpart',
+    'user_namespace',
+  ]
+  const out: Record<string, string> = {}
+  for (const f of fields) {
+    const v = m[f]
+    if (typeof v !== 'string' || v.length === 0) {
+      throw new Error(`matrix.${f} must be a non-empty string`)
+    }
+    out[f] = v
+  }
+  return out as unknown as MatrixDaemonConfig
+}
+
 function parseAgents(
   raw: unknown,
   runtime: 'local' | 'docker' | 'podman',
+  transport: 'http' | 'matrix',
   daemonHooks: { pre_turn?: string; post_turn?: string },
 ): Record<string, AgentConfig> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -193,6 +220,51 @@ function parseAgents(
       dockerBlock = parseAgentDocker(name, entry.docker)
     }
 
+    const matrixOnly = ['matrix_user_id', 'rooms', 'trigger'] as const
+    if (transport !== 'matrix') {
+      for (const k of matrixOnly) {
+        if (entry[k] !== undefined) {
+          throw new Error(
+            `agents.${name}.${k} is only valid when transport: matrix (got transport: ${transport})`,
+          )
+        }
+      }
+    }
+    let matrixUserId: string | undefined
+    let rooms: string[] | undefined
+    let trigger: 'mention' | 'any' | undefined
+    if (transport === 'matrix') {
+      if (entry.matrix_user_id === undefined) {
+        throw new Error(`agents.${name}.matrix_user_id is required when transport: matrix`)
+      }
+      if (typeof entry.matrix_user_id !== 'string' || !MATRIX_USER_ID_RE.test(entry.matrix_user_id)) {
+        throw new Error(
+          `agents.${name}.matrix_user_id must look like @localpart:server (got ${JSON.stringify(entry.matrix_user_id)})`,
+        )
+      }
+      matrixUserId = entry.matrix_user_id
+      if (entry.rooms === undefined || !Array.isArray(entry.rooms) || entry.rooms.length === 0) {
+        throw new Error(
+          `agents.${name}.rooms is required and must be a non-empty array when transport: matrix`,
+        )
+      }
+      const ws: string[] = []
+      for (const r of entry.rooms) {
+        if (typeof r !== 'string' || r.length === 0) {
+          throw new Error(`agents.${name}.rooms[] must be a non-empty string`)
+        }
+        ws.push(r)
+      }
+      rooms = ws
+      const tr = entry.trigger ?? 'mention'
+      if (tr !== 'mention' && tr !== 'any') {
+        throw new Error(
+          `agents.${name}.trigger must be "mention" or "any" (got ${JSON.stringify(tr)})`,
+        )
+      }
+      trigger = tr as 'mention' | 'any'
+    }
+
     const agentCfg: AgentConfig = {
       name,
       workdir: entry.workdir,
@@ -201,21 +273,24 @@ function parseAgents(
       approval_timeout_ms,
     }
     if (dockerBlock) agentCfg.docker = dockerBlock
+    if (matrixUserId) agentCfg.matrix_user_id = matrixUserId
+    if (rooms) agentCfg.rooms = rooms
+    if (trigger) agentCfg.trigger = trigger
     result[name] = agentCfg
   }
   return result
 }
 
-export function loadConfig(yamlText: string): BuddConfig {
+export function loadConfig(yamlText: string): ZooidConfig {
   const raw = parse(yamlText) ?? {}
   if (typeof raw !== 'object' || raw === null) {
     throw new Error('daemon.yaml must be a YAML object')
   }
 
   const transport = raw.transport ?? 'http'
-  if (transport !== 'http') {
+  if (transport !== 'http' && transport !== 'matrix') {
     throw new Error(
-      `transport must be "http" (got "${transport}"). Slack and Zooid transports are not in the MVP.`,
+      `transport must be "http" or "matrix" (got "${transport}").`,
     )
   }
 
@@ -241,15 +316,15 @@ export function loadConfig(yamlText: string): BuddConfig {
     )
   }
 
-  const daemonHooks: BuddConfig['hooks'] = {}
+  const daemonHooks: ZooidConfig['hooks'] = {}
   if (raw.hooks && typeof raw.hooks === 'object') {
     if (typeof raw.hooks.pre_turn === 'string') daemonHooks.pre_turn = raw.hooks.pre_turn
     if (typeof raw.hooks.post_turn === 'string') daemonHooks.post_turn = raw.hooks.post_turn
   }
 
-  const agents = parseAgents(raw.agents, runtime, daemonHooks)
+  const agents = parseAgents(raw.agents, runtime, transport, daemonHooks)
 
-  const config: BuddConfig = {
+  const config: ZooidConfig = {
     transport,
     port,
     runtime,
@@ -266,14 +341,27 @@ export function loadConfig(yamlText: string): BuddConfig {
     config.docker = { image }
   }
 
+  if (transport === 'matrix') {
+    if (raw.matrix === undefined) {
+      throw new Error('matrix: block is required when transport: matrix')
+    }
+    config.matrix = parseMatrixBlock(raw.matrix)
+  } else if (raw.matrix !== undefined) {
+    throw new Error(
+      `matrix: block is only valid when transport: matrix (got transport: ${transport})`,
+    )
+  }
+
   return config
 }
 
-export function mergeCliFlags(base: BuddConfig, flags: CliFlags): BuddConfig {
-  if (flags.transport !== undefined && flags.transport !== 'http') {
-    throw new Error(
-      `transport must be "http" (got "${flags.transport}").`,
-    )
+export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
+  if (
+    flags.transport !== undefined &&
+    flags.transport !== 'http' &&
+    flags.transport !== 'matrix'
+  ) {
+    throw new Error(`transport must be "http" or "matrix" (got "${flags.transport}").`)
   }
   const runtimeFlag = flags.runtime as 'local' | 'docker' | 'podman' | undefined
   if (
@@ -288,8 +376,8 @@ export function mergeCliFlags(base: BuddConfig, flags: CliFlags): BuddConfig {
     throw new Error(`port must be an integer (got ${JSON.stringify(flags.port)})`)
   }
   const runtime = runtimeFlag ?? base.runtime
-  const merged: BuddConfig = {
-    transport: 'http',
+  const merged: ZooidConfig = {
+    transport: base.transport,
     port: flags.port ?? base.port,
     runtime,
     agents: base.agents,
@@ -301,5 +389,6 @@ export function mergeCliFlags(base: BuddConfig, flags: CliFlags): BuddConfig {
       image: flags.image ?? baseDocker.image ?? DEFAULT_DOCKER_IMAGE,
     }
   }
+  if (base.matrix) merged.matrix = base.matrix
   return merged
 }
