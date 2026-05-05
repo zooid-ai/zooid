@@ -1,0 +1,15 @@
+# opencode + Vertex Gemini 3.1 Pro example.
+#
+# The opencode shim reads opencode.json from cwd, which pins
+# google-vertex/gemini-3.1-pro-preview and uses Vertex Express auth
+# (GOOGLE_VERTEX_API_KEY from .env). zooid spawns the shim via the
+# `opencode` preset under runtime: local; the host's env is inherited.
+
+transport: http
+runtime: local
+
+agents:
+  reviewer:
+    workdir: .
+    acp:
+      preset: opencode
