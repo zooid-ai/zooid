@@ -68,6 +68,12 @@ export interface PlanEvent {
 export interface ApprovalRequest {
   sessionId: string
   toolCallId: string
+  /** ACP tool kind (e.g. "edit", "fetch", "execute"). */
+  toolKind?: string
+  /** Short human-readable title from the agent (e.g. "webfetch"). */
+  toolTitle?: string
+  /** Raw structured tool input, shape varies by kind. */
+  toolInput?: unknown
   options: Array<{ optionId: string; name: string; kind: string }>
 }
 

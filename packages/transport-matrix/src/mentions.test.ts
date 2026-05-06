@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractMentions } from './mentions.js'
+import { extractMentions, stripMention } from './mentions.js'
 
 describe('extractMentions', () => {
   it('reads m.mentions.user_ids when present', () => {
@@ -54,5 +54,37 @@ describe('extractMentions', () => {
       },
     }
     expect(extractMentions(event)).toEqual(['@qa:example.com'])
+  })
+})
+
+describe('stripMention', () => {
+  it('removes the bot user ID and trims surrounding whitespace', () => {
+    expect(stripMention('@docs:localhost just say hi', '@docs:localhost')).toBe('just say hi')
+  })
+
+  it('removes a trailing mention', () => {
+    expect(stripMention('hey @docs:localhost', '@docs:localhost')).toBe('hey')
+  })
+
+  it('removes a mid-sentence mention without doubling spaces', () => {
+    expect(stripMention('hey @docs:localhost can you help', '@docs:localhost')).toBe(
+      'hey can you help',
+    )
+  })
+
+  it('leaves other users’ mentions untouched', () => {
+    expect(stripMention('@docs:localhost cc @qa:example.com', '@docs:localhost')).toBe(
+      'cc @qa:example.com',
+    )
+  })
+
+  it('removes every occurrence of the bot mention', () => {
+    expect(stripMention('@docs:localhost ping @docs:localhost again', '@docs:localhost')).toBe(
+      'ping again',
+    )
+  })
+
+  it('returns empty string when the body is just the mention', () => {
+    expect(stripMention('@docs:localhost', '@docs:localhost')).toBe('')
   })
 })

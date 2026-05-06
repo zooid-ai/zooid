@@ -23,3 +23,16 @@ export function extractMentions(event: MaybeMessage): string[] {
   }
   return [...out]
 }
+
+/**
+ * Remove a single user-id mention from a message body. Strips the raw
+ * `@local:server` form and collapses any whitespace that the strip leaves
+ * behind. Other users' mentions are preserved verbatim so the agent can
+ * reason about them.
+ */
+export function stripMention(body: string, userId: string): string {
+  const escaped = userId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  // Match optional surrounding whitespace so we don't leave double spaces.
+  const re = new RegExp(`\\s*${escaped}\\s*`, 'g')
+  return body.replace(re, ' ').replace(/\s+/g, ' ').trim()
+}

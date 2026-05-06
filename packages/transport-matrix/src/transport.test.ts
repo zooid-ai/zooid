@@ -6,6 +6,7 @@ function fakeRegistry() {
   return {
     hasAgent: vi.fn(() => true),
     ensureSession: vi.fn(async (_name: string, threadId: string) => `sess-${threadId}`),
+    endSession: vi.fn(),
     prompt: vi.fn(async () => ({ stopReason: 'end_turn' as const })),
     stopAll: vi.fn(async () => {}),
     getApprovalTimeoutMs: vi.fn(() => 0),
@@ -56,16 +57,25 @@ function makeTransport() {
   return { transport, agents, approvals, client }
 }
 
+let txnCounter = 0
 async function postTxn(
   app: ReturnType<typeof makeTransport>['transport']['app'],
   body: unknown,
   auth = 'Bearer hs-secret',
 ) {
-  return app.request('/_matrix/app/v1/transactions/txn1', {
+  // Each call uses a fresh txnId so the in-memory event-id dedup never
+  // misfires across tests that share a transport.
+  return app.request(`/_matrix/app/v1/transactions/txn${++txnCounter}`, {
     method: 'PUT',
     headers: { Authorization: auth, 'content-type': 'application/json' },
     body: JSON.stringify(body),
   })
+}
+
+// runTurn is fire-and-forget; let any pending microtasks drain before
+// asserting on side-effects driven by the agent prompt.
+async function settleTurn(): Promise<void> {
+  for (let i = 0; i < 4; i++) await new Promise((r) => setImmediate(r))
 }
 
 describe('matrix transport /transactions', () => {
@@ -109,12 +119,15 @@ describe('matrix transport /transactions', () => {
 
     const res = await postTxn(transport.app, { events })
     expect(res.status).toBe(200)
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    await settleTurn()
+    // Non-threaded messages now use the room as the session key; the reply
+    // also goes to the room (not in-thread).
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '!r:example.com')
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         roomId: '!r:example.com',
         asUserId: '@architect:example.com',
-        threadRoot: '$root',
+        threadRoot: undefined,
         content: expect.objectContaining({ msgtype: 'm.text', body: 'hello back' }),
       }),
     )
@@ -137,6 +150,7 @@ describe('matrix transport /transactions', () => {
       },
     ]
     await postTxn(transport.app, { events })
+    await settleTurn()
     expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
   })
 
@@ -158,9 +172,11 @@ describe('matrix transport /transactions', () => {
         },
       ],
     })
+    await settleTurn()
     approvals.emit('registered', {
       approvalId: 'a1',
-      sessionId: 'sess-$root',
+      // Session key is the room for non-threaded messages.
+      sessionId: 'sess-!r:example.com',
       toolCallId: 't1',
       options: [{ optionId: 'allow_once', name: 'Allow', kind: 'allow_once' }],
     })

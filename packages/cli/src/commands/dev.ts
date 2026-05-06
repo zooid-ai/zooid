@@ -16,8 +16,9 @@ import { resolvePaths } from '../bootstrap/paths.js'
 import { ensureTokens, type Tokens } from '../bootstrap/tokens.js'
 import { startDaemon, type DaemonHandle } from '../daemon/start-daemon.js'
 import { TuwunelService } from '../services/tuwunel.js'
-import { resolveWebRoot } from '../web/resolve.js'
+import { resolveWebRoot, webSourcePackage } from '../web/resolve.js'
 import { webStatic } from '../web/static.js'
+import { startWebWatch, type WebWatchHandle } from '../web/watch.js'
 import { buildShutdown } from './dev-cascade.js'
 
 // Walk up from this module until we find the @zooid/cli package.json. This
@@ -53,6 +54,9 @@ export interface DevFlags {
   adminPassword: string
   installSignalHandlers?: boolean
   foreground?: boolean
+  // When true, run `vite build --watch` against the in-tree @zoon/web package
+  // and serve its dist directly. Requires running from the monorepo source.
+  watchWeb?: boolean
 }
 
 export interface DevHandle {
@@ -64,12 +68,18 @@ interface DevCtx {
   svc?: TuwunelService
   daemon?: DaemonHandle
   uiServer?: ServerType
+  webWatch?: WebWatchHandle
 }
 
 export async function runDev(flags: DevFlags): Promise<DevHandle> {
   const cwd = flags.cwd ?? process.cwd()
   const found = findConfigFile(cwd)
   if (!found) throw new Error(`workforce.yaml not found in ${cwd}`)
+  // Load .env files from the workforce dir before anything reads process.env.
+  // Order matches the convention used by Vite/Next: .env.local overrides .env,
+  // and real shell vars override both (loadEnvFile never overwrites existing
+  // process.env entries). Spawned agents inherit these via runtime-local.
+  loadEnvFiles(cwd)
   // Use the unparsed text so that env-var expansion happens inside
   // loadWorkforceConfig once tokens are exported.
   const rawYaml = readFileSync(found.path, 'utf8')
@@ -160,10 +170,26 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
           })
         },
       },
+      ...(flags.watchWeb
+        ? [
+            {
+              title: 'Start @zoon/web watcher (vite build --watch)',
+              task: async (): Promise<void> => {
+                const pkgDir = webSourcePackage(CLI_ROOT)
+                if (!pkgDir) {
+                  throw new Error(
+                    '--watch-web requires running from the monorepo source (no zoon/packages/web found).',
+                  )
+                }
+                ctx.webWatch = await startWebWatch({ webPackageDir: pkgDir })
+              },
+            },
+          ]
+        : []),
       {
         title: `Serve @zoon/web on http://localhost:${flags.uiPort}`,
         task: () => {
-          const webRoot = resolveWebRoot(CLI_ROOT)
+          const webRoot = ctx.webWatch?.distPath ?? resolveWebRoot(CLI_ROOT)
           const app = webStatic({ webRoot, homeserverUrl: homeserver })
           ctx.uiServer = serve({ fetch: app.fetch, port: flags.uiPort })
         },
@@ -173,6 +199,10 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
   )
 
   await tasks.run()
+
+  // Listr's interactive renderer is done — start streaming the watcher's
+  // output to our terminal so vite rebuild logs are visible.
+  ctx.webWatch?.attachStdio()
 
   const shutdown = buildShutdown({
     stopUi: async () => {
@@ -185,6 +215,9 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
     },
     stopTuwunel: async () => {
       await ctx.svc?.stop()
+    },
+    stopWebWatch: async () => {
+      await ctx.webWatch?.stop()
     },
   })
 
@@ -205,6 +238,9 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
       chalk.bold('UI:        ') + ` http://localhost:${flags.uiPort}`,
       `  ${chalk.cyan('admin user:')} ${flags.adminUser} / ${flags.adminPassword}`,
       `  ${chalk.cyan('data dir:')} ${paths.dataDir}`,
+      ...(ctx.webWatch
+        ? [`  ${chalk.cyan('web watcher:')} live (vite build --watch on @zoon/web)`]
+        : []),
       '',
       chalk.dim('Press Ctrl-C to stop.'),
       '',
@@ -216,4 +252,18 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
   }
 
   return { stop: shutdown }
+}
+
+function loadEnvFiles(cwd: string): void {
+  // .env.local takes precedence over .env, but neither overrides shell-exported
+  // vars — process.loadEnvFile() refuses to overwrite already-set keys.
+  for (const name of ['.env.local', '.env']) {
+    const path = resolve(cwd, name)
+    if (!existsSync(path)) continue
+    try {
+      process.loadEnvFile(path)
+    } catch (err) {
+      console.warn(`[zooid dev] failed to load ${name}: ${(err as Error).message}`)
+    }
+  }
 }

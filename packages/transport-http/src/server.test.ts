@@ -37,6 +37,7 @@ function makeRegistry(opts: FakeRegistryOptions = {}): AcpRegistry {
     ensureSession:
       opts.ensureSession ??
       vi.fn(async () => opts.sessionId ?? SID),
+    endSession: vi.fn(),
     prompt:
       opts.prompt ??
       vi.fn(async (name) => {

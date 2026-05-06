@@ -61,6 +61,7 @@ export class AcpClient {
     const { command, args } = this.resolveSpawn()
     let stdout: Readable
     let stdin: Writable
+    let stderr: Readable | null = null
     if (this.options.runtime) {
       const child = this.options.runtime.spawn({
         command,
@@ -74,6 +75,7 @@ export class AcpClient {
       }
       stdout = child.stdout
       stdin = child.stdin
+      stderr = child.stderr
     } else {
       this.process = new AgentProcess({
         command,
@@ -84,7 +86,10 @@ export class AcpClient {
       this.process.start()
       stdout = this.process.stdout
       stdin = this.process.stdin
+      stderr = this.process.stderr
     }
+
+    if (stderr) forwardStderr(stderr, this.options.agent.id)
 
     const input = Readable.toWeb(stdout) as ReadableStream<Uint8Array>
     const output = Writable.toWeb(stdin) as WritableStream<Uint8Array>
@@ -129,12 +134,22 @@ export class AcpClient {
     return session.sessionId
   }
 
+  /**
+   * Drop the session for the given thread so the next prompt starts fresh.
+   * No ACP-side cancellation — callers should ensure no prompt is in flight.
+   */
+  endSession(threadId: string): void {
+    this.sessions.delete({ threadId, agentId: this.options.agent.id })
+  }
+
   async prompt(input: PromptInput): Promise<PromptResult> {
     const sessionId = await this.ensureSession(input.threadId)
+    debugLog(this.options.agent.id, 'prompt →', { sessionId, content: input.content })
     const result = await this.connection!.prompt({
       sessionId,
       prompt: input.content,
     })
+    debugLog(this.options.agent.id, 'prompt ←', { sessionId, stopReason: result.stopReason })
     return { stopReason: result.stopReason }
   }
 
@@ -150,23 +165,70 @@ export class AcpClient {
   }
 
   private buildClient(): Client {
+    const agentId = this.options.agent.id
     return {
       sessionUpdate: async (params) => {
+        debugLog(agentId, 'sessionUpdate', params)
         const event = acpUpdateToAgentEvent(params)
         if (event) this.options.onEvent(event)
+        else debugLog(agentId, 'sessionUpdate dropped (unmapped)', params)
       },
       requestPermission: async (params) => {
+        debugLog(agentId, 'requestPermission', params)
+        const tc = params.toolCall as {
+          toolCallId: string
+          kind?: string
+          title?: string
+          rawInput?: unknown
+        }
         const decision = await this.options.onApprovalRequest({
           sessionId: params.sessionId,
-          toolCallId: params.toolCall.toolCallId,
+          toolCallId: tc.toolCallId,
+          toolKind: tc.kind,
+          toolTitle: tc.title,
+          toolInput: tc.rawInput,
           options: params.options.map((o) => ({
             optionId: o.optionId,
             name: o.name,
             kind: o.kind,
           })),
         })
+        debugLog(agentId, 'requestPermission ←', decision)
         return approvalDecisionToPermissionResponse(decision)
       },
     }
   }
+}
+
+function debugLog(agentId: string, label: string, payload?: unknown): void {
+  if (payload === undefined) {
+    process.stderr.write(`[${agentId}] ${label}\n`)
+    return
+  }
+  let s: string
+  try {
+    s = JSON.stringify(payload)
+  } catch {
+    s = String(payload)
+  }
+  if (s.length > 2000) s = s.slice(0, 2000) + '…'
+  process.stderr.write(`[${agentId}] ${label} ${s}\n`)
+}
+
+function forwardStderr(stream: Readable, agentId: string): void {
+  let buf = ''
+  const prefix = `[${agentId}] `
+  stream.setEncoding('utf8')
+  stream.on('data', (chunk: string) => {
+    buf += chunk
+    let nl: number
+    while ((nl = buf.indexOf('\n')) !== -1) {
+      const line = buf.slice(0, nl)
+      buf = buf.slice(nl + 1)
+      process.stderr.write(prefix + line + '\n')
+    }
+  })
+  stream.on('end', () => {
+    if (buf.length > 0) process.stderr.write(prefix + buf + '\n')
+  })
 }

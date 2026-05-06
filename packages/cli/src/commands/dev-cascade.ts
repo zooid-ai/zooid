@@ -2,6 +2,7 @@ export interface ShutdownLayers {
   stopUi: () => Promise<void>
   stopDaemon: () => Promise<void>
   stopTuwunel: () => Promise<void>
+  stopWebWatch?: () => Promise<void>
 }
 
 export function buildShutdown(layers: ShutdownLayers): () => Promise<void> {
@@ -9,9 +10,9 @@ export function buildShutdown(layers: ShutdownLayers): () => Promise<void> {
   return () => {
     if (started) return started
     started = (async () => {
-      for (const step of ['stopUi', 'stopDaemon', 'stopTuwunel'] as const) {
+      for (const step of ['stopUi', 'stopWebWatch', 'stopDaemon', 'stopTuwunel'] as const) {
         try {
-          await layers[step]()
+          await layers[step]?.()
         } catch (err) {
           console.error(`${step}:`, err)
         }

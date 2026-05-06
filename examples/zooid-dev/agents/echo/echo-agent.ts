@@ -27,11 +27,25 @@ const conn = new AgentSideConnection(
     },
     async prompt({ sessionId, prompt }) {
       const text = prompt.find((p) => p.type === 'text')?.text ?? ''
+      const envCount = Object.keys(process.env).length
+      const watchKeys = [
+        'GOOGLE_VERTEX_API_KEY',
+        'GOOGLE_GENERATIVE_AI_API_KEY',
+        'VERTEX_AI_API_KEY',
+        'OPENAI_API_KEY',
+        'ANTHROPIC_API_KEY',
+      ]
+      const seen = watchKeys.filter((k) => process.env[k])
+      const keysLine =
+        seen.length > 0 ? `sees keys: ${seen.join(', ')}` : 'no known API keys in env'
       await client.sessionUpdate({
         sessionId,
         update: {
           sessionUpdate: 'agent_message_chunk',
-          content: { type: 'text', text: `echo: ${text}` },
+          content: {
+            type: 'text',
+            text: `echo: ${text}\n— ${envCount} env vars in process.env, ${keysLine}`,
+          },
         },
       })
       return { stopReason: 'end_turn' }

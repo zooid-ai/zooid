@@ -10,6 +10,9 @@ export interface RegisteredApproval {
   agentName: string
   sessionId: string
   toolCallId: string
+  toolKind?: string
+  toolTitle?: string
+  toolInput?: unknown
   options: ApprovalRequest['options']
   decisionPromise: Promise<ApprovalDecision>
 }
@@ -53,6 +56,9 @@ export class ApprovalCorrelator extends EventEmitter {
       agentName,
       sessionId,
       toolCallId: req.toolCallId,
+      toolKind: req.toolKind,
+      toolTitle: req.toolTitle,
+      toolInput: req.toolInput,
       options: req.options,
       decisionPromise,
       resolve,
@@ -127,6 +133,9 @@ export class ApprovalCorrelator extends EventEmitter {
       agentName: entry.agentName,
       sessionId: entry.sessionId,
       toolCallId: entry.toolCallId,
+      toolKind: entry.toolKind,
+      toolTitle: entry.toolTitle,
+      toolInput: entry.toolInput,
       options: entry.options,
       decisionPromise: entry.decisionPromise,
     }

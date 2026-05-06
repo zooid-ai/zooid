@@ -33,6 +33,8 @@ export interface AcpRegistry {
   /** Per-agent approval timeout from workforce.yaml. 0 means no timeout. */
   getApprovalTimeoutMs(name: string): number
   ensureSession(name: string, threadId: string): Promise<string>
+  /** Drop the in-memory session for (agent, threadId). Next prompt re-creates one. */
+  endSession(name: string, threadId: string): void
   prompt(name: string, input: PromptInput): Promise<PromptResult>
   stopAll(): Promise<void>
   /** Set by the transport. Receives every ACP event from any agent. */
@@ -101,6 +103,12 @@ export class AcpAgentRegistry implements AcpRegistry {
     if (!this.hasAgent(name)) throw new Error(`unknown agent: ${name}`)
     const client = await this.ensureClient(name)
     return client.ensureSession(threadId)
+  }
+
+  endSession(name: string, threadId: string): void {
+    if (!this.hasAgent(name)) return
+    const client = this.clients.get(name)
+    client?.endSession(threadId)
   }
 
   async prompt(name: string, input: PromptInput): Promise<PromptResult> {
