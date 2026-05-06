@@ -146,6 +146,11 @@ export class AcpClient {
     return session.sessionId
   }
 
+  async cancel(sessionId: string): Promise<void> {
+    if (!this.connection || !this.initialized) return
+    await this.connection.cancel({ sessionId })
+  }
+
   /**
    * Drop the session for the given thread so the next prompt starts fresh.
    * No ACP-side cancellation — callers should ensure no prompt is in flight.

@@ -11,6 +11,7 @@ function fakeRegistry() {
     hasAgent: vi.fn(() => true),
     ensureSession: vi.fn(async (_name: string, threadId: string) => `sess-${threadId}`),
     endSession: vi.fn(),
+    cancelSession: vi.fn(async () => {}),
     prompt: vi.fn(async () => {
       await promptPending
       return { stopReason: 'end_turn' as const }
@@ -582,5 +583,144 @@ describe('tool-call and plan event bridging', () => {
         content: expect.objectContaining({ body: 'hello world' }),
       }),
     )
+  })
+})
+
+describe('eco.zoon.interrupt handling', () => {
+  it('dispatches cancelSession(agent.name, sessionId) for an interrupt that targets a tracked session', async () => {
+    const { transport, agents, finishPrompt } = makeTransport()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$start',
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: { msgtype: 'm.text', body: 'hi', 'm.mentions': { user_ids: ['@architect:example.com'] } },
+        },
+      ],
+    })
+    await settleTurn()
+
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'eco.zoon.interrupt',
+          event_id: '$int',
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: { session_id: 'sess-!r:example.com', reason: 'user_initiated' },
+        },
+      ],
+    })
+    expect(agents.cancelSession).toHaveBeenCalledWith('architect', 'sess-!r:example.com')
+    finishPrompt()
+    await settleTurn()
+  })
+
+  it('drops interrupts with no session_id', async () => {
+    const { transport, agents, finishPrompt } = makeTransport()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$s2',
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: { msgtype: 'm.text', body: 'hi', 'm.mentions': { user_ids: ['@architect:example.com'] } },
+        },
+      ],
+    })
+    await settleTurn()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'eco.zoon.interrupt',
+          event_id: '$int2',
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: {},
+        },
+      ],
+    })
+    expect(agents.cancelSession).not.toHaveBeenCalled()
+    finishPrompt()
+    await settleTurn()
+  })
+
+  it('drops interrupts whose session_id is not tracked', async () => {
+    const { transport, agents } = makeTransport()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'eco.zoon.interrupt',
+          event_id: '$int3',
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: { session_id: 'sess-unknown' },
+        },
+      ],
+    })
+    expect(agents.cancelSession).not.toHaveBeenCalled()
+  })
+
+  it('is idempotent — a second interrupt for the same session re-invokes cancelSession', async () => {
+    const { transport, agents, finishPrompt } = makeTransport()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$s4',
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: { msgtype: 'm.text', body: 'hi', 'm.mentions': { user_ids: ['@architect:example.com'] } },
+        },
+      ],
+    })
+    await settleTurn()
+    const interrupt = (id: string) => ({
+      events: [
+        {
+          type: 'eco.zoon.interrupt',
+          event_id: id,
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: { session_id: 'sess-!r:example.com' },
+        },
+      ],
+    })
+    await postTxn(transport.app, interrupt('$intA'))
+    await postTxn(transport.app, interrupt('$intB'))
+    expect(agents.cancelSession).toHaveBeenCalledTimes(2)
+    finishPrompt()
+    await settleTurn()
+  })
+
+  it('rejects interrupts on the AS endpoint without a valid hsToken', async () => {
+    const { transport } = makeTransport()
+    const r = await postTxn(
+      transport.app,
+      {
+        events: [
+          {
+            type: 'eco.zoon.interrupt',
+            event_id: '$bad',
+            origin_server_ts: Date.now(),
+            room_id: '!r:example.com',
+            sender: '@user:example.com',
+            content: { session_id: 'sess-x' },
+          },
+        ],
+      },
+      'Bearer wrong-secret',
+    )
+    expect(r.status).toBe(403)
   })
 })

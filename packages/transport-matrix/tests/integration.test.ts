@@ -149,7 +149,7 @@ async function sendText(token: string, roomId: string, body: string) {
 async function waitForReply(
   token: string,
   roomId: string,
-  rootEventId: string,
+  _rootEventId: string,
   timeoutMs: number,
 ) {
   const deadline = Date.now() + timeoutMs
@@ -159,10 +159,11 @@ async function waitForReply(
       { headers: { Authorization: `Bearer ${token}` } },
     )
     const j = (await r.json()) as {
-      chunk: Array<{ sender: string; content: { body?: string; 'm.relates_to'?: { event_id?: string } }; event_id: string }>
+      chunk: Array<{ sender: string; type: string; content: { msgtype?: string; body?: string }; event_id: string }>
     }
+    // Non-threaded replies have no m.relates_to; match any room message from the agent.
     const reply = j.chunk.find(
-      (e) => e.sender === '@dev:localhost' && e.content?.['m.relates_to']?.event_id === rootEventId,
+      (e) => e.sender === '@dev:localhost' && e.type === 'm.room.message',
     )
     if (reply) return reply
     await new Promise((r) => setTimeout(r, 500))

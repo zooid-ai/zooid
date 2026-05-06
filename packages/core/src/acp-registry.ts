@@ -37,6 +37,12 @@ export interface AcpRegistry {
   /** Drop the in-memory session for (agent, threadId). Next prompt re-creates one. */
   endSession(name: string, threadId: string): void
   prompt(name: string, input: PromptInput): Promise<PromptResult>
+  /**
+   * Cancel an in-flight prompt for (agent, sessionId). Sends `session/cancel`
+   * via the underlying AcpClient and resolves any pending approvals with
+   * `decision: 'cancel'`. Idempotent.
+   */
+  cancelSession(name: string, sessionId: string): Promise<void>
   stopAll(): Promise<void>
   /** Set by the transport. Receives every ACP event from any agent. */
   onEvent: AcpRegistryEventHandler
@@ -116,6 +122,22 @@ export class AcpAgentRegistry implements AcpRegistry {
     if (!this.hasAgent(name)) return
     const client = this.clients.get(name)
     client?.endSession(threadId)
+  }
+
+  async cancelSession(name: string, sessionId: string): Promise<void> {
+    if (!this.hasAgent(name)) return
+    const client = this.clients.get(name)
+    // Always nudge the correlator first so any pending approvals resolve with
+    // 'cancel' regardless of whether the client is alive or already stopped.
+    this.opts.approvals?.cancelSession(sessionId)
+    if (!client) return
+    try {
+      await client.cancel(sessionId)
+    } catch (err) {
+      // ACP cancel is a notification; failures here are typically transport
+      // errors after the agent has already exited.
+      console.warn(`[acp:${name}] cancel(${sessionId}) failed:`, err)
+    }
   }
 
   async prompt(name: string, input: PromptInput): Promise<PromptResult> {

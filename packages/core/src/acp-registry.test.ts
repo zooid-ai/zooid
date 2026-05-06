@@ -147,3 +147,71 @@ describe('AcpAgentRegistry', () => {
     expect(inst.stop).toHaveBeenCalled()
   })
 })
+
+describe('AcpAgentRegistry.cancelSession', () => {
+  it('calls cancel on the underlying AcpClient and ApprovalCorrelator.cancelSession', async () => {
+    const correlator = {
+      register: vi.fn(),
+      resolve: vi.fn(),
+      cancelSession: vi.fn(),
+      listPending: vi.fn(() => []),
+      on: vi.fn(),
+      emit: vi.fn(),
+    } as unknown as import('./approval-correlator.js').ApprovalCorrelator
+    const registry = new AcpAgentRegistry({
+      runtime: { spawn: vi.fn() } as never,
+      agents: { architect: { acp: { command: 'noop' } } as never },
+      approvals: correlator,
+    })
+    const fakeClient = { cancel: vi.fn(async () => {}), stop: vi.fn(async () => {}) }
+    ;(registry as unknown as { clients: Map<string, typeof fakeClient> }).clients.set(
+      'architect',
+      fakeClient,
+    )
+    await registry.cancelSession('architect', 'sess-xyz')
+    expect(fakeClient.cancel).toHaveBeenCalledWith('sess-xyz')
+    expect((correlator as unknown as { cancelSession: ReturnType<typeof vi.fn> }).cancelSession).toHaveBeenCalledWith(
+      'sess-xyz',
+    )
+  })
+
+  it('is a no-op for an unknown agent', async () => {
+    const correlator = {
+      register: vi.fn(),
+      resolve: vi.fn(),
+      cancelSession: vi.fn(),
+      listPending: vi.fn(() => []),
+      on: vi.fn(),
+      emit: vi.fn(),
+    } as unknown as import('./approval-correlator.js').ApprovalCorrelator
+    const registry = new AcpAgentRegistry({
+      runtime: { spawn: vi.fn() } as never,
+      agents: {},
+      approvals: correlator,
+    })
+    await expect(registry.cancelSession('ghost', 'sess-xyz')).resolves.toBeUndefined()
+    expect(
+      (correlator as unknown as { cancelSession: ReturnType<typeof vi.fn> }).cancelSession,
+    ).not.toHaveBeenCalled()
+  })
+
+  it('cancels pending approvals even when no client has been spawned yet', async () => {
+    const correlator = {
+      register: vi.fn(),
+      resolve: vi.fn(),
+      cancelSession: vi.fn(),
+      listPending: vi.fn(() => []),
+      on: vi.fn(),
+      emit: vi.fn(),
+    } as unknown as import('./approval-correlator.js').ApprovalCorrelator
+    const registry = new AcpAgentRegistry({
+      runtime: { spawn: vi.fn() } as never,
+      agents: { architect: { acp: { command: 'noop' } } as never },
+      approvals: correlator,
+    })
+    await registry.cancelSession('architect', 'sess-xyz')
+    expect(
+      (correlator as unknown as { cancelSession: ReturnType<typeof vi.fn> }).cancelSession,
+    ).toHaveBeenCalledWith('sess-xyz')
+  })
+})

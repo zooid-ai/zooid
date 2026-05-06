@@ -193,6 +193,25 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         }
         continue
       }
+      if (evt.type === 'eco.zoon.interrupt') {
+        const content = (evt.content ?? {}) as { session_id?: string; reason?: string }
+        if (!content.session_id) {
+          console.warn(`[matrix] eco.zoon.interrupt missing session_id (event_id=${evt.event_id})`)
+          continue
+        }
+        const ctx = sessions.get(content.session_id)
+        if (!ctx) {
+          continue
+        }
+        console.log(
+          `[matrix] interrupt session=${content.session_id} agent=${ctx.agent.name}` +
+            (content.reason ? ` reason=${content.reason}` : ''),
+        )
+        await agents.cancelSession(ctx.agent.name, content.session_id).catch((err) => {
+          console.error(`[matrix] cancelSession(${ctx.agent.name}, ${content.session_id}) failed:`, err)
+        })
+        continue
+      }
       if (evt.type === 'eco.zoon.approval_response') {
         const content = (evt.content ?? {}) as {
           approval_id?: string
