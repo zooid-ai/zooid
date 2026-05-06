@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import type { Paths } from '../bootstrap/paths.js'
 
 export interface TuwunelOpts {
@@ -16,7 +16,6 @@ export function buildRunArgs(opts: TuwunelOpts): string[] {
   return [
     'run',
     '--rm',
-    '-d',
     '--name',
     opts.name,
     '-p',
@@ -36,14 +35,29 @@ export function buildRunArgs(opts: TuwunelOpts): string[] {
 }
 
 export class TuwunelService {
+  private child: ChildProcess | null = null
   constructor(private readonly opts: TuwunelOpts) {}
 
-  async start(): Promise<void> {
-    await this.exec(buildRunArgs(this.opts))
+  start(): ChildProcess {
+    this.child = spawn(this.opts.engine, buildRunArgs(this.opts), {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    return this.child
   }
 
   async stop(): Promise<void> {
-    await this.exec(['stop', this.opts.name]).catch(() => {})
+    // Foregrounded container: kill the engine process; --rm cleans up after.
+    if (this.child && this.child.exitCode === null) {
+      this.child.kill('SIGTERM')
+      await new Promise<void>((resolve) => {
+        this.child!.on('exit', () => resolve())
+      })
+    }
+    this.child = null
+    // Defensive: the parent may have died while the container was running, in
+    // which case --rm doesn't fire. `<engine> stop` is a no-op if it's already
+    // gone (errors are swallowed).
+    await execEngine(this.opts.engine, ['stop', this.opts.name]).catch(() => {})
   }
 
   async waitHealthy(opts: { url: string; timeoutMs: number }): Promise<void> {
@@ -61,22 +75,17 @@ export class TuwunelService {
       `Tuwunel did not become healthy at ${opts.url} in ${opts.timeoutMs}ms`,
     )
   }
+}
 
-  private exec(args: string[]): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(this.opts.engine, args, { stdio: 'pipe' })
-      let stderr = ''
-      child.stderr.on('data', (b) => (stderr += String(b)))
-      child.on('exit', (code) => {
-        if (code === 0) resolve()
-        else
-          reject(
-            new Error(
-              `${this.opts.engine} ${args.join(' ')} failed: ${stderr.trim()}`,
-            ),
-          )
-      })
-      child.on('error', reject)
+function execEngine(engine: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(engine, args, { stdio: 'pipe' })
+    let stderr = ''
+    child.stderr.on('data', (b) => (stderr += String(b)))
+    child.on('exit', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`${engine} ${args.join(' ')} failed: ${stderr.trim()}`))
     })
-  }
+    child.on('error', reject)
+  })
 }

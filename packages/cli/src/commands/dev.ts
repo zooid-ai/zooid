@@ -19,6 +19,17 @@ import { TuwunelService } from '../services/tuwunel.js'
 import { resolveWebRoot, webSourcePackage } from '../web/resolve.js'
 import { webStatic } from '../web/static.js'
 import { startWebWatch, type WebWatchHandle } from '../web/watch.js'
+import {
+  ensureDayFolder,
+  pruneOldDays,
+  resolveLogPaths,
+  type LogPaths,
+} from '../observability/paths.js'
+import {
+  wireAgentCapture,
+  type AgentCapture,
+} from '../observability/capture-agent.js'
+import { captureChildToFile } from '../observability/capture-tuwunel.js'
 import { buildShutdown } from './dev-cascade.js'
 
 // Walk up from this module until we find the @zooid/cli package.json. This
@@ -69,6 +80,9 @@ interface DevCtx {
   daemon?: DaemonHandle
   uiServer?: ServerType
   webWatch?: WebWatchHandle
+  logPaths?: LogPaths
+  captures?: Record<string, AgentCapture>
+  tuwunelCaptureDone?: Promise<void>
 }
 
 export async function runDev(flags: DevFlags): Promise<DevHandle> {
@@ -97,8 +111,11 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
 
   const dataDir = resolve(cwd, flags.dataDir)
   const paths = resolvePaths(dataDir)
+  const logPaths = resolveLogPaths({ dataDir })
+  await ensureDayFolder(logPaths)
+  await pruneOldDays({ dataDir, retainDays: 14 })
 
-  const ctx: DevCtx = {}
+  const ctx: DevCtx = { logPaths }
 
   const tasks = new Listr<DevCtx>(
     [
@@ -124,14 +141,15 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
       },
       {
         title: `Start Tuwunel container (${flags.engine})`,
-        task: async () => {
+        task: () => {
           ctx.svc = new TuwunelService({
             name: 'zooid-tuwunel',
             hostPort: port,
             paths,
             engine: flags.engine,
           })
-          await ctx.svc.start()
+          const child = ctx.svc.start()
+          ctx.tuwunelCaptureDone = captureChildToFile(child, logPaths.tuwunelLog)
         },
       },
       {
@@ -162,11 +180,24 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
           // the ${MATRIX_AS_TOKEN}/${MATRIX_HS_TOKEN} placeholders.
           process.env.MATRIX_AS_TOKEN = ctx.tokens.asToken
           process.env.MATRIX_HS_TOKEN = ctx.tokens.hsToken
+          const captures: Record<string, AgentCapture> = {}
+          for (const name of Object.keys(preview.agents)) {
+            captures[name] = wireAgentCapture({
+              agent: name,
+              paths: logPaths,
+              verbosity: 'default',
+              // Matrix cross-link is a follow-up — wire to transport-matrix's
+              // most-recent (room_id, event_id) per session in a later cycle.
+              matrixContext: () => null,
+            })
+          }
+          ctx.captures = captures
           ctx.daemon = await startDaemon({
             configPath: found.path,
             cwd,
             installSignalHandlers: false,
             adminUserId: `@${flags.adminUser}:${shape.serverName}`,
+            onTap: (agentName, event) => captures[agentName]?.onTap(event),
           })
         },
       },
@@ -218,6 +249,13 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
     },
     stopWebWatch: async () => {
       await ctx.webWatch?.stop()
+    },
+    stopCaptures: async () => {
+      if (!ctx.captures) return
+      await Promise.all(Object.values(ctx.captures).map((c) => c.close()))
+    },
+    finalizeTuwunelCapture: async () => {
+      if (ctx.tuwunelCaptureDone) await ctx.tuwunelCaptureDone
     },
   })
 

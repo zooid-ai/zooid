@@ -3,6 +3,10 @@ export interface ShutdownLayers {
   stopDaemon: () => Promise<void>
   stopTuwunel: () => Promise<void>
   stopWebWatch?: () => Promise<void>
+  /** Flush per-agent ACP taps before stopping the daemon. */
+  stopCaptures?: () => Promise<void>
+  /** Resolves once Tuwunel's captured stdio file is flushed. */
+  finalizeTuwunelCapture?: () => Promise<void>
 }
 
 export function buildShutdown(layers: ShutdownLayers): () => Promise<void> {
@@ -10,7 +14,15 @@ export function buildShutdown(layers: ShutdownLayers): () => Promise<void> {
   return () => {
     if (started) return started
     started = (async () => {
-      for (const step of ['stopUi', 'stopWebWatch', 'stopDaemon', 'stopTuwunel'] as const) {
+      const order = [
+        'stopUi',
+        'stopWebWatch',
+        'stopCaptures',
+        'stopDaemon',
+        'stopTuwunel',
+        'finalizeTuwunelCapture',
+      ] as const
+      for (const step of order) {
         try {
           await layers[step]?.()
         } catch (err) {

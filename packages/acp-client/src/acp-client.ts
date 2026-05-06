@@ -13,6 +13,7 @@ import {
   acpUpdateToAgentEvent,
   approvalDecisionToPermissionResponse,
 } from './event-mapping.js'
+import { TurnTracker, type TapEvent } from './turn-tracker.js'
 import type {
   AgentConfig,
   AgentEvent,
@@ -46,6 +47,12 @@ export interface AcpClientOptions {
    * AcpClient surface.
    */
   runtime?: SpawnRuntime
+  /**
+   * Observability tap. Receives the unfiltered ACP protocol stream plus
+   * synthetic turn-boundary events (turn_started / turn_completed). Optional;
+   * when omitted the client behaves as before.
+   */
+  onTap?: (e: TapEvent) => void
 }
 
 export class AcpClient {
@@ -54,8 +61,13 @@ export class AcpClient {
   private connection: ClientSideConnection | null = null
   private readonly sessions = new SessionMap()
   private initialized = false
+  private readonly turns: TurnTracker | null
 
-  constructor(private readonly options: AcpClientOptions) {}
+  constructor(private readonly options: AcpClientOptions) {
+    this.turns = options.onTap
+      ? new TurnTracker({ agentId: options.agent.id, onTap: options.onTap })
+      : null
+  }
 
   async start(): Promise<void> {
     const { command, args } = this.resolveSpawn()
@@ -144,13 +156,21 @@ export class AcpClient {
 
   async prompt(input: PromptInput): Promise<PromptResult> {
     const sessionId = await this.ensureSession(input.threadId)
+    const promptText = stringifyPromptForLog(input.content)
+    this.turns?.startTurn({ sessionId, promptText })
     debugLog(this.options.agent.id, 'prompt →', { sessionId, content: input.content })
-    const result = await this.connection!.prompt({
-      sessionId,
-      prompt: input.content,
-    })
-    debugLog(this.options.agent.id, 'prompt ←', { sessionId, stopReason: result.stopReason })
-    return { stopReason: result.stopReason }
+    try {
+      const result = await this.connection!.prompt({
+        sessionId,
+        prompt: input.content,
+      })
+      this.turns?.endTurn({ sessionId, stopReason: result.stopReason })
+      debugLog(this.options.agent.id, 'prompt ←', { sessionId, stopReason: result.stopReason })
+      return { stopReason: result.stopReason }
+    } catch (err) {
+      this.turns?.endTurn({ sessionId, stopReason: 'error' })
+      throw err
+    }
   }
 
   private resolveSpawn(): { command: string; args: string[] } {
@@ -168,6 +188,7 @@ export class AcpClient {
     const agentId = this.options.agent.id
     return {
       sessionUpdate: async (params) => {
+        this.turns?.observeUpdate(params.sessionId, params.update)
         debugLog(agentId, 'sessionUpdate', params)
         const event = acpUpdateToAgentEvent(params)
         if (event) this.options.onEvent(event)
@@ -197,6 +218,14 @@ export class AcpClient {
         return approvalDecisionToPermissionResponse(decision)
       },
     }
+  }
+}
+
+function stringifyPromptForLog(content: PromptInput['content']): string {
+  try {
+    return JSON.stringify(content).slice(0, 4096)
+  } catch {
+    return '<unstringifiable>'
   }
 }
 

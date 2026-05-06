@@ -9,6 +9,7 @@ import {
   loadWorkforceConfig,
   mergeCliFlags,
   type CliFlags,
+  type TapEvent,
 } from '@zooid/core'
 import { createApp } from '@zooid/transport-http'
 import {
@@ -25,6 +26,8 @@ export interface StartDaemonOpts {
   installSignalHandlers?: boolean
   /** Admin Matrix user ID. Forwarded to the matrix transport for room bootstrap. */
   adminUserId?: string
+  /** Observability tap forwarded to each AcpClient. */
+  onTap?: (agentName: string, event: TapEvent) => void
 }
 
 export interface DaemonHandle {
@@ -59,7 +62,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   const config = mergeCliFlags(base, opts.cliFlags ?? {})
 
   const approvals = new ApprovalCorrelator()
-  const registry = buildAcpRegistry(config, { approvals })
+  const registry = buildAcpRegistry(config, { approvals, onTap: opts.onTap })
   const agentNames = Object.keys(config.agents)
 
   let server: ServerType | null = null

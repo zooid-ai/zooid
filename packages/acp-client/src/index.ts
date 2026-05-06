@@ -21,3 +21,5 @@ export type {
 } from './types.js'
 export type { SessionKey, SessionRecord } from './session-map.js'
 export type { AcpClientOptions } from './acp-client.js'
+export { TurnTracker } from './turn-tracker.js'
+export type { TapEvent, SessionUpdate, TurnTrackerOpts } from './turn-tracker.js'

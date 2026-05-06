@@ -4,6 +4,7 @@ import {
   AcpAgentRegistry,
   type AcpRuntime,
   type ApprovalCorrelator,
+  type TapEvent,
   type WorkforceConfig,
 } from '@zooid/core'
 import { resolveForwardEnv } from './forward-env.js'
@@ -13,6 +14,8 @@ export interface BuildAcpRegistryOptions {
   runtime?: AcpRuntime
   /** When set, the registry's approval handler routes through this correlator. */
   approvals?: ApprovalCorrelator
+  /** Observability tap forwarded to each AcpClient. */
+  onTap?: (agentName: string, event: TapEvent) => void
 }
 
 /**
@@ -46,6 +49,7 @@ export function buildAcpRegistry(
     agents: cfg.agents,
     forwardEnv,
     approvals: opts.approvals,
+    onTap: opts.onTap,
   })
 }
 

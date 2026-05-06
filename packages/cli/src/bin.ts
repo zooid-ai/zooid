@@ -1,5 +1,7 @@
+import { resolve } from 'node:path'
 import { cac } from 'cac'
 import { runDev } from './commands/dev.js'
+import { runLogs } from './commands/logs.js'
 import { runStart } from './commands/start.js'
 import { runStatus } from './commands/status.js'
 
@@ -34,6 +36,34 @@ cli
       adminUser: flags.adminUser,
       adminPassword: flags.adminPassword,
       watchWeb: Boolean(flags.watchWeb),
+    })
+  })
+
+cli
+  .command(
+    'logs [source]',
+    'Read captured logs. source=tuwunel|daemon|dev|agent-<name>[.acp], or "prune" to delete old days',
+  )
+  .option('--data <dir>', 'Persistent data dir', { default: './data/matrix' })
+  .option('--day <YYYY-MM-DD>', 'Day partition (defaults to today)')
+  .option('--turn <id>', 'Filter ACP taps to a single turn id')
+  .option('-f, --follow', 'Tail the file (not yet implemented)')
+  .option('--keep <n>', 'For `logs prune`: days to retain', { default: 14 })
+  .action(async (source, flags) => {
+    if (source === 'prune') {
+      await runLogs({
+        dataDir: resolve(process.cwd(), flags.data),
+        subcommand: 'prune',
+        keep: Number(flags.keep),
+      })
+      return
+    }
+    await runLogs({
+      dataDir: resolve(process.cwd(), flags.data),
+      source,
+      day: flags.day,
+      turn: flags.turn,
+      follow: Boolean(flags.follow),
     })
   })
 

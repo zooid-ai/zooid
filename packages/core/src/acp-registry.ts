@@ -6,6 +6,7 @@ import {
   type ApprovalRequest,
   type PromptInput,
   type PromptResult,
+  type TapEvent,
 } from '@zooid/acp-client'
 import type { AcpAgentSpec, AcpRuntime } from './acp-types.js'
 import type { AgentConfig } from './types.js'
@@ -62,6 +63,12 @@ export interface AcpAgentRegistryOptions {
   approvals?: ApprovalCorrelator
   /** Called whenever the correlator-backed handler registers an approval. */
   onApprovalRegistered?: (approval: RegisteredApproval) => void
+  /**
+   * Optional observability tap. Forwarded to each AcpClient so the
+   * unfiltered ACP protocol stream + turn-boundary events are visible to
+   * the host (e.g. the dev CLI capturing them to disk).
+   */
+  onTap?: (agentName: string, event: TapEvent) => void
 }
 
 export class AcpAgentRegistry implements AcpRegistry {
@@ -141,6 +148,7 @@ export class AcpAgentRegistry implements AcpRegistry {
       runtime: this.opts.runtime,
       onEvent: (e) => this.onEvent(name, e),
       onApprovalRequest: (req) => this.onApprovalRequest(name, req),
+      onTap: this.opts.onTap ? (e) => this.opts.onTap!(name, e) : undefined,
     })
     await client.start()
     this.clients.set(name, client)

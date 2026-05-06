@@ -22,6 +22,8 @@ describe('buildRunArgs', () => {
     const args = buildRunArgs({ ...base, engine: 'docker' })
     expect(args[0]).toBe('run')
     expect(args).toContain('--rm')
+    // Foregrounded so the parent process owns Tuwunel's stdio (logs).
+    expect(args).not.toContain('-d')
     expect(args).toContain('--name')
     expect(args).toContain('zooid-tuwunel')
     expect(args).toContain('-p')

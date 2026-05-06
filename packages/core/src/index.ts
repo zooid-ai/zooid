@@ -22,6 +22,7 @@ export type {
   AcpRegistryEventHandler,
   AcpRegistryApprovalHandler,
 } from './acp-registry.js'
+export type { TapEvent } from '@zooid/acp-client'
 export type {
   AcpAgentSpec,
   AcpMount,
