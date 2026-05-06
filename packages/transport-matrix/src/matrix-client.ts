@@ -20,6 +20,20 @@ export interface SendCustomEventInput {
   content: Record<string, unknown>
 }
 
+export interface SetTypingInput {
+  roomId: string
+  asUserId: string
+  typing: boolean
+  /** ms — homeserver expects re-PUTs before this expires. Ignored when typing=false. */
+  timeoutMs?: number
+}
+
+export interface SetPresenceInput {
+  asUserId: string
+  presence: 'online' | 'unavailable' | 'offline'
+  statusMsg?: string
+}
+
 export class MatrixClient {
   private readonly homeserver: string
   private readonly asToken: string
@@ -109,6 +123,35 @@ export class MatrixClient {
 
   async sendCustomEvent(input: SendCustomEventInput): Promise<{ event_id: string }> {
     return this.sendEvent(input.roomId, input.asUserId, input.eventType, input.content)
+  }
+
+  async setTyping(input: SetTypingInput): Promise<void> {
+    const url =
+      `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(input.roomId)}` +
+      `/typing/${encodeURIComponent(input.asUserId)}` +
+      `?user_id=${encodeURIComponent(input.asUserId)}`
+    const body: Record<string, unknown> = { typing: input.typing }
+    if (input.typing && input.timeoutMs !== undefined) body.timeout = input.timeoutMs
+    const r = await this.fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${this.asToken}` },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok) throw new Error(`setTyping(${input.roomId}, ${input.asUserId}) failed: ${r.status}`)
+  }
+
+  async setPresence(input: SetPresenceInput): Promise<void> {
+    const url =
+      `${this.homeserver}/_matrix/client/v3/presence/${encodeURIComponent(input.asUserId)}/status` +
+      `?user_id=${encodeURIComponent(input.asUserId)}`
+    const body: Record<string, unknown> = { presence: input.presence }
+    if (input.statusMsg !== undefined) body.status_msg = input.statusMsg
+    const r = await this.fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${this.asToken}` },
+      body: JSON.stringify(body),
+    })
+    if (!r.ok) throw new Error(`setPresence(${input.asUserId}) failed: ${r.status}`)
   }
 
   private async sendEvent(

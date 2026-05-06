@@ -6,6 +6,7 @@ import { MatrixClient } from './matrix-client.js'
 import { BotPool } from './bot-pool.js'
 import { route, type AgentBinding } from './router.js'
 import { stripMention } from './mentions.js'
+import { toToolCallBody, toUpdateBody, toPlanBody } from './event-encoders.js'
 
 export interface CreateMatrixTransportOptions {
   agents: AcpRegistry
@@ -45,6 +46,9 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const pool = new BotPool(client, bindings)
   const sessions = new Map<string, SessionContext>()
   const buffers = new Map<string, string>()
+  // Per-session promise tail so out-of-band events (tool_call, plan, etc.)
+  // serialize on the wire even though the ACP producer doesn't await us.
+  const sendQueue = new Map<string, Promise<void>>()
   // Drop events older than this — Tuwunel may replay a backlog after the
   // daemon was offline, and we don't want yesterday's "@docs hi" to fire now.
   const cutoffTs = Date.now() - STARTUP_GRACE_MS
@@ -52,22 +56,52 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   // the same event_id can arrive twice. Skip ones we've already taken.
   const seenEventIds = new Set<string>()
 
-  agents.onEvent = (name, event: AgentEvent) => {
-    if (event.type !== 'message_chunk') {
-      console.warn(`[matrix:${name}] dropped non-chunk event`, event.type)
-      return
-    }
+  agents.onEvent = async (name, event: AgentEvent) => {
     const ctx = sessions.get(event.sessionId)
     if (!ctx) {
       console.warn(`[matrix:${name}] no session ctx for ${event.sessionId}`)
       return
     }
-    const block = event.content as { type?: string; text?: string }
-    if (block.type === 'text' && typeof block.text === 'string') {
-      buffers.set(event.sessionId, (buffers.get(event.sessionId) ?? '') + block.text)
-    } else {
-      console.warn(`[matrix:${name}] dropped chunk block type=${block.type}`, block)
+
+    if (event.type === 'message_chunk') {
+      const block = event.content as { type?: string; text?: string }
+      if (block.type === 'text' && typeof block.text === 'string') {
+        buffers.set(event.sessionId, (buffers.get(event.sessionId) ?? '') + block.text)
+      } else {
+        console.warn(`[matrix:${name}] dropped chunk block type=${block.type}`, block)
+      }
+      return
     }
+
+    const eventType =
+      event.type === 'tool_call'
+        ? 'eco.zoon.tool_call'
+        : event.type === 'tool_call_update'
+          ? 'eco.zoon.tool_call_update'
+          : 'eco.zoon.plan'
+    const body =
+      event.type === 'tool_call'
+        ? toToolCallBody(event)
+        : event.type === 'tool_call_update'
+          ? toUpdateBody(event)
+          : toPlanBody(event)
+    if (ctx.threadRoot) {
+      body['m.relates_to'] = { rel_type: 'm.thread', event_id: ctx.threadRoot }
+    }
+    const tail = (sendQueue.get(event.sessionId) ?? Promise.resolve()).then(async () => {
+      try {
+        await client.sendCustomEvent({
+          roomId: ctx.roomId,
+          asUserId: ctx.agent.userId,
+          eventType,
+          content: body,
+        })
+      } catch (err) {
+        console.warn(`[matrix:${name}] sendCustomEvent(${eventType}) failed:`, err)
+      }
+    })
+    sendQueue.set(event.sessionId, tail)
+    await tail
   }
 
   agents.onApprovalRequest = async (name, req) => {
@@ -237,6 +271,27 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     const sessionId = await agents.ensureSession(agent.name, sessionKey)
     sessions.set(sessionId, { agent, roomId: evt.room_id, threadRoot: replyThreadRoot })
     buffers.set(sessionId, '')
+
+    const roomId = evt.room_id
+    const TYPING_TTL_MS = 30_000
+    const TYPING_REFRESH_MS = 25_000
+    const safeTyping = (typing: boolean) =>
+      client
+        .setTyping({ roomId, asUserId: agent.userId, typing, timeoutMs: TYPING_TTL_MS })
+        .catch((err) => console.warn(`[matrix:${agent.name}] setTyping(${typing}) failed:`, err))
+    const safePresence = (presence: 'online' | 'unavailable' | 'offline') =>
+      client
+        .setPresence({ asUserId: agent.userId, presence })
+        .catch((err) =>
+          console.warn(`[matrix:${agent.name}] setPresence(${presence}) failed:`, err),
+        )
+
+    await safeTyping(true)
+    await safePresence('unavailable')
+    const refresh = setInterval(() => {
+      void safeTyping(true)
+    }, TYPING_REFRESH_MS)
+
     try {
       const rawBody = evt.content?.body ?? ''
       const promptText = stripMention(rawBody, agent.userId)
@@ -258,13 +313,25 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         )
       }
     } finally {
+      clearInterval(refresh)
+      await safeTyping(false)
+      await safePresence('online')
       buffers.delete(sessionId)
     }
   }
 
   return {
     app,
-    bootstrap: () => pool.bootstrap({ adminUserId }),
+    bootstrap: async () => {
+      await pool.bootstrap({ adminUserId })
+      await Promise.allSettled(
+        bindings.map((b) =>
+          client.setPresence({ asUserId: b.userId, presence: 'online' }).catch((err) => {
+            console.warn(`[matrix:${b.name}] initial setPresence(online) failed:`, err)
+          }),
+        ),
+      )
+    },
     pool,
   }
 }

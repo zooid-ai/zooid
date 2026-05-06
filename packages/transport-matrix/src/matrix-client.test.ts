@@ -141,6 +141,113 @@ describe('MatrixClient', () => {
     expect(id).toBe('!new:localhost')
   })
 
+  describe('MatrixClient.setTyping', () => {
+    it('PUTs typing=true with timeout to the typing endpoint, impersonating the asUserId', async () => {
+      const fetch = fakeFetch(async ({ url, init }) => {
+        expect(url).toBe(
+          'https://hs.example.com/_matrix/client/v3/rooms/!r%3Aexample.com/typing/%40architect%3Aexample.com' +
+            '?user_id=%40architect%3Aexample.com',
+        )
+        expect(init.method).toBe('PUT')
+        expect((init.headers as Record<string, string>).Authorization).toBe('Bearer as-secret')
+        expect(JSON.parse(init.body as string)).toEqual({ typing: true, timeout: 30000 })
+        return new Response('{}', { status: 200 })
+      })
+      const client = new MatrixClient({
+        homeserver: 'https://hs.example.com',
+        asToken: 'as-secret',
+        fetch: fetch as unknown as typeof globalThis.fetch,
+      })
+      await client.setTyping({
+        roomId: '!r:example.com',
+        asUserId: '@architect:example.com',
+        typing: true,
+        timeoutMs: 30_000,
+      })
+    })
+
+    it('PUTs typing=false without timeout to clear', async () => {
+      const fetch = fakeFetch(async ({ init }) => {
+        expect(JSON.parse(init.body as string)).toEqual({ typing: false })
+        return new Response('{}', { status: 200 })
+      })
+      const client = new MatrixClient({
+        homeserver: 'https://hs.example.com',
+        asToken: 'as-secret',
+        fetch: fetch as unknown as typeof globalThis.fetch,
+      })
+      await client.setTyping({
+        roomId: '!r:example.com',
+        asUserId: '@architect:example.com',
+        typing: false,
+      })
+    })
+
+    it('throws on non-2xx', async () => {
+      const fetch = fakeFetch(async () => new Response('boom', { status: 500 }))
+      const client = new MatrixClient({
+        homeserver: 'https://hs.example.com',
+        asToken: 'as-secret',
+        fetch: fetch as unknown as typeof globalThis.fetch,
+      })
+      await expect(
+        client.setTyping({ roomId: '!r', asUserId: '@a:x', typing: true }),
+      ).rejects.toThrow(/setTyping/)
+    })
+  })
+
+  describe('MatrixClient.setPresence', () => {
+    it('PUTs presence to the presence/status endpoint, impersonating the asUserId', async () => {
+      const fetch = fakeFetch(async ({ url, init }) => {
+        expect(url).toBe(
+          'https://hs.example.com/_matrix/client/v3/presence/%40architect%3Aexample.com/status' +
+            '?user_id=%40architect%3Aexample.com',
+        )
+        expect(init.method).toBe('PUT')
+        expect(JSON.parse(init.body as string)).toEqual({ presence: 'online' })
+        return new Response('{}', { status: 200 })
+      })
+      const client = new MatrixClient({
+        homeserver: 'https://hs.example.com',
+        asToken: 'as-secret',
+        fetch: fetch as unknown as typeof globalThis.fetch,
+      })
+      await client.setPresence({ asUserId: '@architect:example.com', presence: 'online' })
+    })
+
+    it('includes status_msg when provided', async () => {
+      const fetch = fakeFetch(async ({ init }) => {
+        expect(JSON.parse(init.body as string)).toEqual({
+          presence: 'unavailable',
+          status_msg: 'running prompt',
+        })
+        return new Response('{}', { status: 200 })
+      })
+      const client = new MatrixClient({
+        homeserver: 'https://hs.example.com',
+        asToken: 'as-secret',
+        fetch: fetch as unknown as typeof globalThis.fetch,
+      })
+      await client.setPresence({
+        asUserId: '@architect:example.com',
+        presence: 'unavailable',
+        statusMsg: 'running prompt',
+      })
+    })
+
+    it('throws on non-2xx', async () => {
+      const fetch = fakeFetch(async () => new Response('nope', { status: 403 }))
+      const client = new MatrixClient({
+        homeserver: 'https://hs.example.com',
+        asToken: 'as-secret',
+        fetch: fetch as unknown as typeof globalThis.fetch,
+      })
+      await expect(
+        client.setPresence({ asUserId: '@a:x', presence: 'online' }),
+      ).rejects.toThrow(/setPresence/)
+    })
+  })
+
   it('sends a custom event type when content type is set', async () => {
     const fetch = fakeFetch(async ({ url, init }) => {
       expect(url).toMatch(/\/send\/eco\.zoon\.approval_request\//)
