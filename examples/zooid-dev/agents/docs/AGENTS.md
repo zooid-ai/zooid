@@ -15,8 +15,11 @@ honest, present-tense documentation about what Zooid currently does.
   `@zooid/transport-matrix`, `@zooid/cli`, …). Read-only symlink. Use
   this to verify that the SPECs match real code: real exported names,
   real config keys, real HTTP routes.
-- `output/` — the only directory you may write to. Put each
-  documentation file you produce here.
+- `homepage/` — symlink into the live Astro site
+  (`zooid-homepage/site`). **This is your write target.** You may edit
+  anywhere under it: content, components, layouts, `astro.config.mjs`,
+  `package.json`, etc. Doc pages live in `homepage/src/content/docs/`
+  and use `.mdx`.
 
 Ignore everything outside this `agents/docs/` subtree. The
 `workforce.yaml`, `opencode.json`, sibling agents — none of that is
@@ -37,22 +40,33 @@ For every session:
    confirm the exported names, types, or routes match what the spec
    claims. If they don't, trust the code — file paths and identifiers
    in the source are the ground truth.
-3. **Plan the diff in plain English.** State which files under
-   `output/` you'll create or update and what each will say after.
-   Keep this in your chat reply — don't write a planning file.
-4. **Write the docs** with the `Write` tool, one file per topic
-   under `output/`. Suggested initial layout:
-   - `output/overview.md` — what Zooid is, in two paragraphs, plus a
-     bulleted list of shipped capabilities tagged with their epic ID.
-   - `output/concepts/<topic>.md` — conceptual writeups (transports,
-     ACP, approvals, runtimes). One file per concept.
-   - `output/reference/<topic>.md` — concrete reference (config keys,
-     HTTP routes, SSE event shapes). One file per surface area.
+3. **Survey the existing site.** List `homepage/src/content/docs/` to
+   see what pages already exist. Edit existing pages in place when the
+   topic already has a home; create a new page only when nothing
+   covers it. Inspect `homepage/astro.config.mjs`, layouts, and
+   components when a change requires more than a content edit (new
+   nav entry, new collection, new component).
+4. **Plan the diff in plain English.** State which files you'll
+   create or update and what each will say after. Keep this in your
+   chat reply — don't write a planning file.
+5. **Write the docs** with the `Write` tool, one file per topic.
+   Doc pages go under `homepage/src/content/docs/`:
+   - `homepage/src/content/docs/index.mdx` — landing page.
+   - `homepage/src/content/docs/guides/<topic>.mdx` — task-oriented
+     walkthroughs.
+   - `homepage/src/content/docs/concepts/<topic>.mdx` — conceptual
+     writeups (transports, ACP, approvals, runtimes). One file per
+     concept.
+   - `homepage/src/content/docs/reference/<topic>.mdx` — concrete
+     reference (config keys, HTTP routes, SSE event shapes). One file
+     per surface area.
+   Site-wide changes (Astro config, layouts, components) live next to
+   their natural homes under `homepage/` — edit them in place.
 
 ## Rules
 
-- Only ever write under `./output/`. Never modify `.refs/`,
-  `AGENTS.md`, or anything outside this folder.
+- Write only under `./homepage/`. Never modify `.refs/`, `AGENTS.md`,
+  or anything outside this folder.
 - Cite epic IDs in the doc body where copy maps to a concrete spec
   (e.g., "Matrix transport [ZOD020]"). The IDs are stable; readers
   use them to find the source spec.
@@ -64,5 +78,5 @@ For every session:
 - If the user gives you a narrow prompt ("document the matrix
   transport's create-if-missing behavior"), do exactly that. If the
   prompt is broad ("document Zooid"), do the full procedure above.
-- An engineer should be able to scan one output file in 60 seconds
-  and know whether Zooid solves their problem.
+- An engineer should be able to scan one doc page in 60 seconds and
+  know whether Zooid solves their problem.

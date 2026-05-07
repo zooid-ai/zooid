@@ -26,6 +26,8 @@ export function acpUpdateToAgentEvent(
         title: update.title,
         kind: update.kind,
         status: update.status,
+        rawInput: update.rawInput,
+        locations: mapLocations(update.locations),
       }
     case 'tool_call_update':
       return {
@@ -35,6 +37,9 @@ export function acpUpdateToAgentEvent(
         status: nullToUndef<ToolCallStatus>(update.status),
         kind: nullToUndef<ToolKind>(update.kind),
         content: nullToUndef<ToolCallContent[]>(update.content),
+        rawInput: update.rawInput,
+        rawOutput: update.rawOutput,
+        locations: mapLocations(update.locations),
       }
     case 'plan':
       return { type: 'plan', sessionId, entries: update.entries }
@@ -54,4 +59,11 @@ export function approvalDecisionToPermissionResponse(
 
 function nullToUndef<T>(v: T | null | undefined): T | undefined {
   return v ?? undefined
+}
+
+function mapLocations(
+  locs: Array<{ path: string; line?: number | null }> | null | undefined,
+): { path: string; line?: number }[] | undefined {
+  if (!locs || locs.length === 0) return undefined
+  return locs.map((l) => ({ path: l.path, line: l.line ?? undefined }))
 }

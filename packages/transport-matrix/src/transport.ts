@@ -190,12 +190,41 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         for (const a of bindings) {
           agents.endSession(a.name, threadRoot)
         }
-        // Drop participation state so future replies re-establish membership.
-        threadStates.delete(threadRoot)
+        // NB: keep threadStates intact. Per ZOD039 § /clear, only the agent's
+        // session memory is wiped — thread-routing state (participants /
+        // root-mentions) must survive so the next bare reply still routes to
+        // the most-recently-posting agent under the same sessionKey.
         continue
       }
       if (evt.type === 'eco.zoon.interrupt') {
         const content = (evt.content ?? {}) as { session_id?: string; reason?: string }
+        // Thread-relation form (client-friendly): /interrupt in a thread sends
+        // an empty event with `m.relates_to: thread/<root>`. Cancel every
+        // session whose threadRoot matches.
+        const relates = evt.content?.['m.relates_to'] as
+          | { rel_type?: string; event_id?: string }
+          | undefined
+        const threadRoot =
+          relates?.rel_type === 'm.thread' && relates.event_id ? relates.event_id : undefined
+        if (threadRoot) {
+          const targets: Array<{ sessionId: string; agent: string }> = []
+          for (const [sessionId, ctx] of sessions) {
+            if (ctx.threadRoot === threadRoot) {
+              targets.push({ sessionId, agent: ctx.agent.name })
+            }
+          }
+          for (const t of targets) {
+            console.log(
+              `[matrix] interrupt session=${t.sessionId} agent=${t.agent} thread=${threadRoot}` +
+                (content.reason ? ` reason=${content.reason}` : ''),
+            )
+            await agents.cancelSession(t.agent, t.sessionId).catch((err) => {
+              console.error(`[matrix] cancelSession(${t.agent}, ${t.sessionId}) failed:`, err)
+            })
+          }
+          continue
+        }
+        // Legacy form: explicit session_id in content.
         if (!content.session_id) {
           console.warn(`[matrix] eco.zoon.interrupt missing session_id (event_id=${evt.event_id})`)
           continue
@@ -236,6 +265,26 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       // Agent-promotion: top-level inbound event becomes the thread root.
       // For in-thread messages the existing root is preserved.
       const promotedRoot = inboundThreadRoot(evt) ?? evt.event_id
+      // Self-heal: if this is a thread reply but we have no in-memory state
+      // for the root (e.g. daemon was just restarted), reconstruct it by
+      // fetching the thread root + relations from the server.
+      const inboundRel = inboundThreadRoot(evt)
+      if (
+        evt.type === 'm.room.message' &&
+        inboundRel &&
+        !threadStates.has(inboundRel) &&
+        evt.room_id
+      ) {
+        try {
+          const rebuilt = await rebuildThreadState(client, evt.room_id, inboundRel, bindings)
+          threadStates.set(inboundRel, rebuilt)
+          console.log(
+            `[matrix] rebuilt threadState for ${inboundRel}: participants=${rebuilt.participants.join(',')} rootMentions=${rebuilt.rootMentions.join(',')}`,
+          )
+        } catch (err) {
+          console.warn(`[matrix] failed to rebuild threadState for ${inboundRel}:`, err)
+        }
+      }
       const matches = route(evt, bindings, threadStates)
       // Suppress the no-match warning for events sent by our own bots.
       const senderIsBot = bindings.some((b) => b.userId === evt.sender)
@@ -372,6 +421,54 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     },
     pool,
   }
+}
+
+/**
+ * Reconstruct the in-memory ThreadState for a thread root by fetching the
+ * root event + its thread relations from the server. Used to recover the
+ * implicit-routing rule from ZOD039 § Implicit triggers in threads after a
+ * daemon restart wipes the in-memory cache.
+ */
+export async function rebuildThreadState(
+  client: MatrixClient,
+  roomId: string,
+  rootEventId: string,
+  bindings: AgentBinding[],
+): Promise<ThreadState> {
+  const state: ThreadState = { participants: [], rootMentions: [] }
+  // Impersonate an agent that's actually a member of this room (AS reads
+  // require room membership). Falling through to the first binding would
+  // 403 if that agent never joined the target room.
+  const asUser = (bindings.find((b) => b.rooms.includes(roomId)) ?? bindings[0])?.userId
+  if (!asUser) return state
+
+  const root = await client.fetchEvent(roomId, rootEventId, asUser)
+  if (root) {
+    const rootMentions = new Set(extractMentions(root as never))
+    for (const a of bindings) {
+      if (rootMentions.has(a.userId) && !state.rootMentions.includes(a.name)) {
+        state.rootMentions.push(a.name)
+      }
+    }
+  }
+
+  const thread = await client.fetchThreadRelations(roomId, rootEventId, asUser)
+  // Also seed root-mentions from any subsequent agent @mentions in the thread.
+  for (const ev of thread) {
+    const mentions = new Set(extractMentions(ev as never))
+    for (const a of bindings) {
+      if (mentions.has(a.userId) && !state.rootMentions.includes(a.name)) {
+        state.rootMentions.push(a.name)
+      }
+    }
+    const sender = (ev as { sender?: string }).sender
+    const type = (ev as { type?: string }).type
+    if (type === 'm.room.message' && sender) {
+      const a = bindings.find((b) => b.userId === sender)
+      if (a && state.participants.at(-1) !== a.name) state.participants.push(a.name)
+    }
+  }
+  return state
 }
 
 function logInbound(evt: MatrixEvent): void {

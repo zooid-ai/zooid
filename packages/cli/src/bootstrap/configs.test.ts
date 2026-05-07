@@ -13,6 +13,7 @@ describe('renderTuwunelToml', () => {
     expect(toml).toContain(
       'yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = true',
     )
+    expect(toml).toContain('allow_local_presence = true')
     expect(toml).toContain('port = [8448]')
   })
 

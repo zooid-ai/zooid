@@ -154,6 +154,51 @@ export class MatrixClient {
     if (!r.ok) throw new Error(`setPresence(${input.asUserId}) failed: ${r.status}`)
   }
 
+  /**
+   * Fetch a single event from a room. Used to recover thread-root context
+   * after a daemon restart wipes the in-memory threadStates cache.
+   */
+  async fetchEvent(
+    roomId: string,
+    eventId: string,
+    asUserId: string,
+  ): Promise<Record<string, unknown> | null> {
+    const url =
+      `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}` +
+      `/event/${encodeURIComponent(eventId)}` +
+      `?user_id=${encodeURIComponent(asUserId)}`
+    const r = await this.fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${this.asToken}` },
+    })
+    if (r.status === 404) return null
+    if (!r.ok) throw new Error(`fetchEvent(${eventId}) failed: ${r.status}`)
+    return (await r.json()) as Record<string, unknown>
+  }
+
+  /**
+   * Fetch all replies to a thread root via the relations endpoint.
+   * Returns events oldest-first.
+   */
+  async fetchThreadRelations(
+    roomId: string,
+    rootEventId: string,
+    asUserId: string,
+  ): Promise<Array<Record<string, unknown>>> {
+    const url =
+      `${this.homeserver}/_matrix/client/v1/rooms/${encodeURIComponent(roomId)}` +
+      `/relations/${encodeURIComponent(rootEventId)}/m.thread` +
+      `?dir=f&limit=100&user_id=${encodeURIComponent(asUserId)}`
+    const r = await this.fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${this.asToken}` },
+    })
+    if (r.status === 404) return []
+    if (!r.ok) throw new Error(`fetchThreadRelations(${rootEventId}) failed: ${r.status}`)
+    const body = (await r.json()) as { chunk?: Array<Record<string, unknown>> }
+    return body.chunk ?? []
+  }
+
   private async sendEvent(
     roomId: string,
     asUserId: string,

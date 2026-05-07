@@ -430,6 +430,71 @@ describe('eco.zoon.session_reset', () => {
     })
     expect(agents.endSession).not.toHaveBeenCalled()
   })
+
+  it('preserves thread routing state — bare reply after /clear still triggers the same agent', async () => {
+    const { transport, agents } = makeTransport()
+    // Turn 1: user @mentions architect — architect becomes a participant.
+    agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
+      agents.onEvent('architect', {
+        type: 'message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: { type: 'text', text: 'ok' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$root',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+
+    // /clear in the thread.
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'eco.zoon.session_reset',
+          event_id: '$reset',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: { 'm.relates_to': { rel_type: 'm.thread', event_id: '$root' } },
+        },
+      ],
+    })
+    expect(agents.endSession).toHaveBeenCalledWith('architect', '$root')
+
+    agents.ensureSession.mockClear()
+
+    // Bare follow-up — no @mention — must still route to architect (most-recent-poster
+    // rule survives /clear; only the agent's session memory is wiped).
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$followup',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'still here?',
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+  })
 })
 
 describe('typing indicator lifecycle', () => {
@@ -872,6 +937,42 @@ describe('eco.zoon.interrupt handling', () => {
       ],
     })
     expect(agents.cancelSession).not.toHaveBeenCalled()
+  })
+
+  it('cancels the matching session when interrupt carries a thread relation (no session_id)', async () => {
+    const { transport, agents, finishPrompt } = makeTransport()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$threadRoot',
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: { msgtype: 'm.text', body: 'hi', 'm.mentions': { user_ids: ['@architect:example.com'] } },
+        },
+      ],
+    })
+    await settleTurn()
+
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'eco.zoon.interrupt',
+          event_id: '$intT',
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: {
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$threadRoot' },
+            reason: 'user_initiated',
+          },
+        },
+      ],
+    })
+    expect(agents.cancelSession).toHaveBeenCalledWith('architect', 'sess-$threadRoot')
+    finishPrompt()
+    await settleTurn()
   })
 
   it('is idempotent — a second interrupt for the same session re-invokes cancelSession', async () => {

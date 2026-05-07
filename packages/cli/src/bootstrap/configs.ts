@@ -21,6 +21,7 @@ export function renderTuwunelToml(opts: TuwunelTomlOpts): string {
     'appservice_dir = "/var/lib/tuwunel/registrations"',
     'allow_registration = true',
     'yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = true',
+    'allow_local_presence = true',
     'address = ["0.0.0.0"]',
     `port = [${TUWUNEL_INTERNAL_PORT}]`,
     '',

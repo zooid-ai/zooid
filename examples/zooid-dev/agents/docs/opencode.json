@@ -12,7 +12,8 @@
   },
   "tools": {
     "webfetch": false,
-    "bash": false
+    "bash": false,
+    "task": false
   },
   "permission": {
     "edit": "ask"

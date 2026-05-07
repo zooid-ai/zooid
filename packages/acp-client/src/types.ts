@@ -41,6 +41,11 @@ export interface MessageChunkEvent {
   content: ContentBlock
 }
 
+export interface ToolCallLocation {
+  path: string
+  line?: number
+}
+
 export interface ToolCallEvent {
   type: 'tool_call'
   sessionId: string
@@ -48,6 +53,8 @@ export interface ToolCallEvent {
   title: string
   kind?: ToolKind
   status?: ToolCallStatus
+  rawInput?: unknown
+  locations?: ToolCallLocation[]
 }
 
 export interface ToolCallUpdateEvent {
@@ -57,6 +64,9 @@ export interface ToolCallUpdateEvent {
   status?: ToolCallStatus
   kind?: ToolKind
   content?: ToolCallContent[]
+  rawInput?: unknown
+  rawOutput?: unknown
+  locations?: ToolCallLocation[]
 }
 
 export interface PlanEvent {
