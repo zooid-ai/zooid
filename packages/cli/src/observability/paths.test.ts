@@ -90,4 +90,15 @@ describe('observability paths', () => {
     })
     expect(removed).toEqual([])
   })
+
+  it('treats its dataDir argument as the data root: logs become a top-level sibling', () => {
+    // Pre-ZOD041 we passed the matrix dir, so logs landed at <matrix>/logs/.
+    // Post-ZOD041 we pass the root, so logs land at <root>/logs/ (matrix is its sibling).
+    const root = '/abs/data'
+    const p = resolveLogPaths({ dataDir: root, now: new Date('2026-05-06T10:00:00Z') })
+    expect(p.logsDir).toBe('/abs/data/logs')
+    expect(p.dayDir).toBe('/abs/data/logs/2026-05-06')
+    // Sanity: NOT under matrix.
+    expect(p.logsDir.startsWith('/abs/data/matrix')).toBe(false)
+  })
 })

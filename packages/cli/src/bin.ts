@@ -22,7 +22,7 @@ cli
 
 cli
   .command('dev', 'Tuwunel + daemon + UI for local development')
-  .option('--data <dir>', 'Persistent data dir', { default: './data/matrix' })
+  .option('--data <dir>', 'Persistent data root dir', { default: './data' })
   .option('--engine <docker|podman>', 'Container engine', { default: 'docker' })
   .option('--ui-port <n>', 'UI HTTP port', { default: 5173 })
   .option('--admin-user <name>', 'Admin username', { default: 'admin' })
@@ -44,7 +44,7 @@ cli
     'logs [source]',
     'Read captured logs. source=tuwunel|daemon|dev|agent-<name>[.acp], or "prune" to delete old days',
   )
-  .option('--data <dir>', 'Persistent data dir', { default: './data/matrix' })
+  .option('--data <dir>', 'Persistent data root dir', { default: './data' })
   .option('--day <YYYY-MM-DD>', 'Day partition (defaults to today)')
   .option('--turn <id>', 'Filter ACP taps to a single turn id')
   .option('-f, --follow', 'Tail the file (not yet implemented)')
@@ -69,7 +69,7 @@ cli
 
 cli
   .command('status', 'Print Tuwunel + daemon health')
-  .option('--data <dir>', 'Persistent data dir', { default: './data/matrix' })
+  .option('--data <dir>', 'Persistent data root dir', { default: './data' })
   .option('--port <n>', 'Tuwunel host port (defaults to workforce.yaml)')
   .action(async (flags) => {
     await runStatus({

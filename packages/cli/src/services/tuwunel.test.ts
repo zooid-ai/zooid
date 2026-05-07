@@ -36,6 +36,11 @@ describe('buildRunArgs', () => {
     expect(args).toContain(
       '/abs/data/matrix/config/registrations:/var/lib/tuwunel/registrations:ro',
     )
+    // ZOD041 deliberately does NOT mount ${dataRoot}/logs into the container.
+    // Today the daemon captures tuwunel's stdout/stderr via captureChildToFile
+    // — there's no internal tuwunel log directive yet. A future cycle that flips
+    // tuwunel.toml to write its own logs can add the mount alongside that change.
+    expect(args.some((a) => a.endsWith(':/var/log/tuwunel'))).toBe(false)
     expect(args).toContain('TUWUNEL_CONFIG=/etc/tuwunel/tuwunel.toml')
     expect(args[args.length - 1]).toBe(base.image)
   })

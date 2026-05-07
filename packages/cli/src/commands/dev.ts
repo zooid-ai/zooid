@@ -11,6 +11,7 @@ import {
 } from '@zooid/core'
 import { ensureAdminUser } from '../bootstrap/admin.js'
 import { writeBootstrapConfigs } from '../bootstrap/configs.js'
+import { resolveDataLayout } from '../bootstrap/data-layout.js'
 import { deriveHomeserverShape } from '../bootstrap/derive.js'
 import { resolvePaths } from '../bootstrap/paths.js'
 import { ensureTokens, type Tokens } from '../bootstrap/tokens.js'
@@ -109,11 +110,12 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
   const port = flags.hostPort ?? shape.port
   const homeserver = `http://localhost:${port}`
 
-  const dataDir = resolve(cwd, flags.dataDir)
-  const paths = resolvePaths(dataDir)
-  const logPaths = resolveLogPaths({ dataDir })
+  const dataRoot = resolve(cwd, flags.dataDir)
+  const layout = resolveDataLayout(dataRoot)
+  const paths = resolvePaths(layout.matrixDir)
+  const logPaths = resolveLogPaths({ dataDir: layout.dataRoot })
   await ensureDayFolder(logPaths)
-  await pruneOldDays({ dataDir, retainDays: 14 })
+  await pruneOldDays({ dataDir: layout.dataRoot, retainDays: 14 })
 
   const ctx: DevCtx = { logPaths }
 
@@ -275,7 +277,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
       chalk.bold('Tuwunel is up.') + ` ${homeserver}`,
       chalk.bold('UI:        ') + ` http://localhost:${flags.uiPort}`,
       `  ${chalk.cyan('admin user:')} ${flags.adminUser} / ${flags.adminPassword}`,
-      `  ${chalk.cyan('data dir:')} ${paths.dataDir}`,
+      `  ${chalk.cyan('data dir:')} ${layout.dataRoot}`,
       ...(ctx.webWatch
         ? [`  ${chalk.cyan('web watcher:')} live (vite build --watch on @zoon/web)`]
         : []),

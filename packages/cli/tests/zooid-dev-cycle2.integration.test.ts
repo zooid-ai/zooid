@@ -55,7 +55,7 @@ describe.skipIf(!dockerAvailable())(
 
       const handle = await runDev({
         cwd: workDir,
-        dataDir: join(workDir, 'data', 'matrix'),
+        dataDir: join(workDir, 'data'),
         hostPort: HOST_PORT,
         uiPort: UI_PORT,
         engine: 'docker',
@@ -112,7 +112,7 @@ describe.skipIf(!dockerAvailable())(
     it('a second runDev against the same data dir reuses tokens and the admin', async () => {
       const handle = await runDev({
         cwd: workDir,
-        dataDir: join(workDir, 'data', 'matrix'),
+        dataDir: join(workDir, 'data'),
         hostPort: HOST_PORT,
         uiPort: UI_PORT + 1,
         engine: 'docker',
