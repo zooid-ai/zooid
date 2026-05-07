@@ -104,8 +104,8 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
     throw new Error('workforce.yaml: zooid dev requires at least one matrix transport')
   }
   const agentUserIds = Object.values(preview.agents)
-    .filter((a) => a.transport === matrix.name && a.matrix_user_id)
-    .map((a) => a.matrix_user_id!)
+    .filter((a) => a.matrix?.transport === matrix.name)
+    .map((a) => a.matrix!.user_id)
   const shape = deriveHomeserverShape(matrix.transport, agentUserIds)
   const port = flags.hostPort ?? shape.port
   const homeserver = `http://localhost:${port}`

@@ -26,22 +26,24 @@ transports:
 
 agents:
   echo:
-    transport: matrix
-    matrix_user_id: '@echo:localhost'
-    rooms:
-      - '#welcome:localhost'
-    trigger: mention
     workdir: .
     acp:
       command: node
       args: ['--import', 'tsx', './agents/echo/echo-agent.ts']
+    matrix:
+      transport: matrix
+      user_id: '@echo:localhost'
+      rooms:
+        - '#welcome:localhost'
+      trigger: mention
 
   docs:
-    transport: matrix
-    matrix_user_id: '@docs:localhost'
-    rooms:
-      - '#docs:localhost'
-    trigger: mention
     workdir: ./agents/docs
     acp:
       preset: opencode
+    matrix:
+      transport: matrix
+      user_id: '@docs:localhost'
+      rooms:
+        - '#docs:localhost'
+      trigger: mention

@@ -12,10 +12,11 @@ transports:
 const QA_AGENTS = `
 agents:
   qa:
-    transport: http-local
     workdir: ./qa
     acp:
       preset: claude
+    http:
+      transport: http-local
 `
 
 describe('loadWorkforceConfig', () => {
@@ -31,11 +32,11 @@ ${HTTP_TRANSPORT.trimStart()}${QA_AGENTS}`)
       agents: {
         qa: {
           name: 'qa',
-          transport: 'http-local',
           workdir: './qa',
           hooks: {},
           acp: { preset: 'claude' },
           approval_timeout_ms: 0,
+          http: { transport: 'http-local' },
         },
       },
       hooks: {},
@@ -69,41 +70,26 @@ ${QA_AGENTS}`)
     expect(config.runtime).toBe('docker')
   })
 
-  it('default image is ghcr.io/zooid-ai/zooid-agent-base:latest when runtime is docker', () => {
-    const config = loadWorkforceConfig(`runtime: docker${HTTP_TRANSPORT}${QA_AGENTS}`)
-    expect(config.docker?.image).toBe('ghcr.io/zooid-ai/zooid-agent-base:latest')
-  })
-
-  it('parses docker.image override', () => {
+  it('parses container.image override at workforce level', () => {
     const config = loadWorkforceConfig(`
 runtime: docker
 ${HTTP_TRANSPORT.trimStart()}
-docker:
+container:
   image: ghcr.io/zooid-ai/zooid-agent-base:1.2.3
 agents:
   qa:
-    transport: http-local
     workdir: ./qa
     acp:
       preset: claude
+    http:
+      transport: http-local
 `)
-    expect(config.docker?.image).toBe('ghcr.io/zooid-ai/zooid-agent-base:1.2.3')
+    expect(config.container?.image).toBe('ghcr.io/zooid-ai/zooid-agent-base:1.2.3')
   })
 
-  it('docker block is undefined when runtime is local', () => {
-    const config = loadWorkforceConfig(`
-runtime: local
-${HTTP_TRANSPORT.trimStart()}
-docker:
-  image: whatever
-agents:
-  qa:
-    transport: http-local
-    workdir: ./qa
-    acp:
-      preset: claude
-`)
-    expect(config.docker).toBeUndefined()
+  it('container is undefined when omitted under runtime: docker', () => {
+    const config = loadWorkforceConfig(`runtime: docker${HTTP_TRANSPORT}${QA_AGENTS}`)
+    expect(config.container).toBeUndefined()
   })
 
   it('rejects http transport with non-integer port', () => {
@@ -149,17 +135,17 @@ runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 agents:
   qa:
-    transport: http-local
     workdir: ./workspaces/qa
     acp:
       preset: claude
+    http: { transport: http-local }
     hooks:
       pre_turn: ./hooks/qa-pre.sh
   product:
-    transport: http-local
     workdir: ./workspaces/product
     acp:
       preset: codex
+    http: { transport: http-local }
 `)
     expect(Object.keys(config.agents).sort()).toEqual(['product', 'qa'])
     expect(config.agents.qa!.acp).toEqual({ preset: 'claude' })
@@ -177,15 +163,15 @@ hooks:
   post_turn: daemon-post
 agents:
   qa:
-    transport: http-local
     workdir: ./qa
     acp: { preset: claude }
+    http: { transport: http-local }
     hooks:
       pre_turn: qa-pre
   product:
-    transport: http-local
     workdir: ./product
     acp: { preset: codex }
+    http: { transport: http-local }
 `)
     expect(config.agents.qa!.hooks).toEqual({
       pre_turn: 'qa-pre',
@@ -205,9 +191,9 @@ hooks:
   pre_turn: daemon-pre
 agents:
   qa:
-    transport: http-local
     workdir: ./qa
     acp: { preset: claude }
+    http: { transport: http-local }
     hooks:
       pre_turn: ~
 `)
@@ -242,8 +228,8 @@ runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 agents:
   qa:
-    transport: http-local
     acp: { preset: claude }
+    http: { transport: http-local }
 `),
     ).toThrow(/agents\.qa\.workdir is required/i)
   })
@@ -255,112 +241,51 @@ runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 agents:
   Qa:
-    transport: http-local
     workdir: ./qa
     acp: { preset: claude }
+    http: { transport: http-local }
 `),
     ).toThrow(/agents\.Qa: name must match/i)
   })
 })
 
-describe('loadWorkforceConfig — per-agent docker block', () => {
-  it('parses per-agent docker.image', () => {
+describe('loadWorkforceConfig — per-agent container block', () => {
+  it('parses per-agent container.image', () => {
     const config = loadWorkforceConfig(`
 runtime: docker
 ${HTTP_TRANSPORT.trimStart()}
 agents:
   qa:
-    transport: http-local
     workdir: ./qa
     acp: { preset: claude }
+    http: { transport: http-local }
   ship:
-    transport: http-local
     workdir: ./ship
     acp: { preset: codex }
-    docker:
+    http: { transport: http-local }
+    container:
       image: ghcr.io/zooid-ai/zooid-agent-base:custom
 `)
-    expect(config.agents.qa!.docker?.image).toBeUndefined()
-    expect(config.agents.ship!.docker?.image).toBe(
+    expect(config.agents.qa!.container?.image).toBeUndefined()
+    expect(config.agents.ship!.container?.image).toBe(
       'ghcr.io/zooid-ai/zooid-agent-base:custom',
     )
   })
 
-  it('rejects agents.*.docker when runtime is not docker', () => {
+  it('rejects agents.*.container when runtime is local', () => {
     expect(() =>
       loadWorkforceConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 agents:
   qa:
-    transport: http-local
     workdir: ./qa
     acp: { preset: claude }
-    docker:
+    http: { transport: http-local }
+    container:
       image: x
 `),
-    ).toThrow(/docker.*only.*when runtime.*docker/i)
-  })
-})
-
-describe('parseAgentDocker — forward_env', () => {
-  const base = `
-runtime: docker
-${HTTP_TRANSPORT.trimStart()}
-agents:
-`
-
-  it('accepts plain pass-through entries', () => {
-    const cfg = loadWorkforceConfig(`${base}
-  qa:
-    transport: http-local
-    workdir: .
-    acp: { preset: claude }
-    docker:
-      forward_env:
-        - HTTPS_PROXY
-        - JIRA_URL
-`)
-    expect(cfg.agents.qa!.docker?.forward_env).toEqual(['HTTPS_PROXY', 'JIRA_URL'])
-  })
-
-  it('accepts rename entries (HOST:CONTAINER)', () => {
-    const cfg = loadWorkforceConfig(`${base}
-  qa:
-    transport: http-local
-    workdir: .
-    acp: { preset: claude }
-    docker:
-      forward_env:
-        - CORP_JIRA_TOKEN:JIRA_TOKEN
-`)
-    expect(cfg.agents.qa!.docker?.forward_env).toEqual(['CORP_JIRA_TOKEN:JIRA_TOKEN'])
-  })
-
-  it('rejects ":FOO" (empty host name)', () => {
-    expect(() =>
-      loadWorkforceConfig(`${base}
-  qa:
-    transport: http-local
-    workdir: .
-    acp: { preset: claude }
-    docker:
-      forward_env: [":FOO"]
-`),
-    ).toThrow(/empty host or container name/i)
-  })
-
-  it('rejects "FOO:" (empty container name)', () => {
-    expect(() =>
-      loadWorkforceConfig(`${base}
-  qa:
-    transport: http-local
-    workdir: .
-    acp: { preset: claude }
-    docker:
-      forward_env: ["FOO:"]
-`),
-    ).toThrow(/empty host or container name/i)
+    ).toThrow(/container.*only valid when runtime is 'docker' or 'podman'/i)
   })
 })
 
@@ -372,11 +297,11 @@ describe('mergeCliFlags', () => {
       agents: {
         qa: {
           name: 'qa',
-          transport: 'http-local',
           workdir: './qa',
           hooks: {},
           acp: { preset: 'claude' },
           approval_timeout_ms: 0,
+          http: { transport: 'http-local' },
         },
       },
       hooks: {},
@@ -395,19 +320,19 @@ describe('mergeCliFlags', () => {
     expect(merged.agents.qa!.workdir).toBe('./qa')
   })
 
-  it('accepts --runtime docker from CLI flags, sets default image', () => {
+  it('accepts --runtime docker from CLI flags (no auto-default image)', () => {
     const merged = mergeCliFlags(baseConfig(), { runtime: 'docker' })
     expect(merged.runtime).toBe('docker')
-    expect(merged.docker?.image).toBe('ghcr.io/zooid-ai/zooid-agent-base:latest')
+    expect(merged.container).toBeUndefined()
   })
 
-  it('CLI --image overrides docker.image', () => {
+  it('CLI --image overrides container.image', () => {
     const dockerBase = baseConfig({
       runtime: 'docker',
-      docker: { image: 'ghcr.io/zooid-ai/zooid-agent-base:1.0.0' },
+      container: { image: 'ghcr.io/zooid-ai/zooid-agent-base:1.0.0' },
     })
     const merged = mergeCliFlags(dockerBase, { image: 'custom:2.0' })
-    expect(merged.docker?.image).toBe('custom:2.0')
+    expect(merged.container?.image).toBe('custom:2.0')
   })
 
   it('rejects unknown --runtime values from CLI flags', () => {
@@ -429,20 +354,21 @@ transports:
 `
 
 describe('loadWorkforceConfig (matrix transport)', () => {
-  it('parses a matrix transport with per-agent matrix fields', () => {
+  it('parses a matrix transport with a matrix: binding block', () => {
     const config = loadWorkforceConfig(`
 runtime: local
 ${MATRIX_TRANSPORT.trimStart()}
 agents:
   architect:
-    transport: matrix-local
     workdir: ./architect
-    matrix_user_id: '@architect:localhost'
-    rooms:
-      - '!r1:localhost'
-    trigger: mention
     acp:
       preset: claude
+    matrix:
+      transport: matrix-local
+      user_id: '@architect:localhost'
+      rooms:
+        - '!r1:localhost'
+      trigger: mention
 `)
     const t = config.transports['matrix-local']!
     expect(t.type).toBe('matrix')
@@ -450,9 +376,9 @@ agents:
       expect(t.homeserver).toBe('http://localhost:8448')
       expect(t.user_namespace).toBe('@.*:localhost')
     }
-    expect(config.agents.architect!.matrix_user_id).toBe('@architect:localhost')
-    expect(config.agents.architect!.rooms).toEqual(['!r1:localhost'])
-    expect(config.agents.architect!.trigger).toBe('mention')
+    expect(config.agents.architect!.matrix?.user_id).toBe('@architect:localhost')
+    expect(config.agents.architect!.matrix?.rooms).toEqual(['!r1:localhost'])
+    expect(config.agents.architect!.matrix?.trigger).toBe('mention')
   })
 
   it('defaults trigger to "mention" when omitted', () => {
@@ -461,48 +387,51 @@ runtime: local
 ${MATRIX_TRANSPORT.trimStart()}
 agents:
   architect:
-    transport: matrix-local
     workdir: ./architect
-    matrix_user_id: '@architect:localhost'
-    rooms:
-      - '!r1:localhost'
     acp:
       preset: claude
+    matrix:
+      transport: matrix-local
+      user_id: '@architect:localhost'
+      rooms:
+        - '!r1:localhost'
 `)
-    expect(config.agents.architect!.trigger).toBe('mention')
+    expect(config.agents.architect!.matrix?.trigger).toBe('mention')
   })
 
-  it('rejects per-agent matrix_user_id when transport is type: http', () => {
+  it('rejects matrix block referencing http transport', () => {
     expect(() =>
       loadWorkforceConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 agents:
   qa:
-    transport: http-local
     workdir: ./qa
-    matrix_user_id: '@qa:localhost'
-    acp:
-      preset: claude
+    acp: { preset: claude }
+    matrix:
+      transport: http-local
+      user_id: '@qa:localhost'
+      rooms: ['!r:localhost']
 `),
-    ).toThrow(/matrix_user_id is only valid when transport is type: matrix/)
+    ).toThrow(/matrix.*references transport.*type: http/i)
   })
 
-  it('rejects bad matrix_user_id format', () => {
+  it('rejects bad matrix.user_id format', () => {
     expect(() =>
       loadWorkforceConfig(`
 runtime: local
 ${MATRIX_TRANSPORT.trimStart()}
 agents:
   architect:
-    transport: matrix-local
     workdir: ./architect
-    matrix_user_id: 'not-a-matrix-id'
-    rooms:
-      - '!r1:localhost'
     acp:
       preset: claude
+    matrix:
+      transport: matrix-local
+      user_id: 'not-a-matrix-id'
+      rooms:
+        - '!r1:localhost'
 `),
-    ).toThrow(/matrix_user_id must look like @localpart:server/)
+    ).toThrow(/matrix\.user_id must look like @localpart:server/)
   })
 })

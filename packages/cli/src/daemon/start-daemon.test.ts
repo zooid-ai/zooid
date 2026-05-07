@@ -23,9 +23,9 @@ describe('startDaemon — http transport (smoke without Matrix)', () => {
         '    port: 0',
         'agents:',
         '  noop:',
-        '    transport: http-local',
         '    workdir: .',
         '    acp: { preset: claude }',
+        '    http: { transport: http-local }',
       ].join('\n'),
     )
     process.env.ZOOID_TOKEN = 'test-token'
@@ -55,9 +55,9 @@ describe('startDaemon — http transport (smoke without Matrix)', () => {
         'runtime: local',
         'agents:',
         '  a:',
-        '    transport: x',
         '    workdir: .',
         '    acp: { preset: claude }',
+        '    http: { transport: x }',
       ].join('\n'),
     )
     await expect(

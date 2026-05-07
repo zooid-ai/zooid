@@ -52,11 +52,11 @@ export async function collectStatus(opts: {
   const daemonUp = await probe(daemonUrl)
   const agents: StatusReport['agents'] = []
   for (const a of Object.values(cfg.agents)) {
-    if (a.matrix_user_id) {
+    if (a.matrix) {
       agents.push({
         name: a.name,
-        userId: a.matrix_user_id,
-        trigger: a.trigger ?? 'mention',
+        userId: a.matrix.user_id,
+        trigger: a.matrix.trigger,
       })
     }
   }
@@ -77,8 +77,8 @@ export async function runStatus(flags: StatusFlags): Promise<void> {
       const matrix = findMatrixTransport(cfg)
       if (matrix) {
         const userIds = Object.values(cfg.agents)
-          .filter((a) => a.transport === matrix.name && a.matrix_user_id)
-          .map((a) => a.matrix_user_id!)
+          .filter((a) => a.matrix?.transport === matrix.name)
+          .map((a) => a.matrix!.user_id)
         port = deriveHomeserverShape(matrix.transport, userIds).port
       }
     }

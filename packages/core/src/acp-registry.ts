@@ -54,8 +54,10 @@ export interface AcpRegistry {
 export interface AcpAgentRegistryOptions {
   runtime: AcpRuntime
   agents: Record<string, AgentConfig>
-  /** Per-agent env to forward to each `AcpClient`'s spawn spec. */
-  forwardEnv?: Record<string, Record<string, string>>
+  /** Per-agent env passed to each `AcpClient`'s spawn spec. */
+  env?: Record<string, Record<string, string>>
+  /** Per-agent container image. Used by DockerAcpRuntime; ignored by LocalAcpRuntime. */
+  image?: Record<string, string | undefined>
   /** Initial event handler (the transport may overwrite at app creation). */
   onEvent?: AcpRegistryEventHandler
   /** Initial approval handler (the transport may overwrite at app creation). */
@@ -116,6 +118,14 @@ export class AcpAgentRegistry implements AcpRegistry {
     return Object.prototype.hasOwnProperty.call(this.opts.agents, name)
   }
 
+  resolveSpawnEnv(name: string): Record<string, string> {
+    return this.opts.env?.[name] ?? {}
+  }
+
+  resolveSpawnImage(name: string): string | undefined {
+    return this.opts.image?.[name]
+  }
+
   getApprovalTimeoutMs(name: string): number {
     return this.opts.agents[name]?.approval_timeout_ms ?? 0
   }
@@ -172,8 +182,9 @@ export class AcpAgentRegistry implements AcpRegistry {
         id: name,
         command: spawn.command,
         args: spawn.args,
-        env: this.opts.forwardEnv?.[name],
+        env: this.opts.env?.[name],
         cwd: cfg.workdir,
+        image: this.opts.image?.[name],
       },
       agentDataDir: this.opts.agentsDir ? join(this.opts.agentsDir, name) : undefined,
       runtime: this.opts.runtime,

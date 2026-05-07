@@ -25,12 +25,13 @@ const yaml = [
   '    port: 9099',
   'agents:',
   '  assistant:',
-  '    transport: m',
-  '    matrix_user_id: "@assistant:localhost"',
-  '    rooms: ["!general:localhost"]',
-  '    trigger: mention',
   '    workdir: .',
   '    acp: { preset: claude }',
+  '    matrix:',
+  '      transport: m',
+  '      user_id: "@assistant:localhost"',
+  '      rooms: ["!general:localhost"]',
+  '      trigger: mention',
 ].join('\n')
 
 describe('collectStatus', () => {

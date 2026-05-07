@@ -7,7 +7,6 @@ import {
   type TapEvent,
   type WorkforceConfig,
 } from '@zooid/core'
-import { resolveForwardEnv } from './forward-env.js'
 
 export interface BuildAcpRegistryOptions {
   /** Override the runtime selection (tests). */
@@ -31,9 +30,9 @@ export interface BuildAcpRegistryOptions {
  *   - `runtime: docker`  → `DockerAcpRuntime` (engine: docker)
  *   - `runtime: podman`  → `DockerAcpRuntime` (engine: podman)
  *
- * Per-agent `docker.forward_env` is resolved against `process.env` and
- * threaded into the registry's `forwardEnv` so each `AcpClient` gets the
- * right vars in its spawn spec.
+ * Per-agent `container.env` is passed through to each `AcpClient`'s spawn
+ * spec verbatim (interpolation happens at parse time in `@zooid/core`).
+ * The image is resolved as `agent.container?.image ?? cfg.container?.image`.
  */
 export function buildAcpRegistry(
   cfg: WorkforceConfig,
@@ -46,14 +45,17 @@ export function buildAcpRegistry(
   }
 
   const runtime = opts.runtime ?? defaultRuntimeFor(cfg)
-  const forwardEnv: Record<string, Record<string, string>> = {}
+  const env: Record<string, Record<string, string>> = {}
+  const image: Record<string, string | undefined> = {}
   for (const [name, agent] of Object.entries(cfg.agents)) {
-    forwardEnv[name] = resolveForwardEnv(agent.docker?.forward_env)
+    env[name] = agent.container?.env ?? {}
+    image[name] = agent.container?.image ?? cfg.container?.image
   }
   return new AcpAgentRegistry({
     runtime,
     agents: cfg.agents,
-    forwardEnv,
+    env,
+    image,
     approvals: opts.approvals,
     onTap: opts.onTap,
     agentsDir: opts.agentsDir,
@@ -63,10 +65,10 @@ export function buildAcpRegistry(
 function defaultRuntimeFor(cfg: WorkforceConfig): AcpRuntime {
   if (cfg.runtime === 'local') return new LocalAcpRuntime()
   if (cfg.runtime === 'docker') {
-    return new DockerAcpRuntime({ defaultImage: cfg.docker?.image, engine: 'docker' })
+    return new DockerAcpRuntime({ defaultImage: cfg.container?.image, engine: 'docker' })
   }
   if (cfg.runtime === 'podman') {
-    return new DockerAcpRuntime({ defaultImage: cfg.docker?.image, engine: 'podman' })
+    return new DockerAcpRuntime({ defaultImage: cfg.container?.image, engine: 'podman' })
   }
   throw new Error(`unsupported runtime: ${cfg.runtime}`)
 }

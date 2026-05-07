@@ -17,15 +17,15 @@ describe('examples/zooid-dev/workforce.yaml', () => {
     expect(matrixEntries).toHaveLength(1)
     expect(Object.keys(cfg.agents).sort()).toEqual(['docs', 'echo'])
 
-    const echo = cfg.agents.echo
-    expect(echo.matrix_user_id).toBe('@echo:localhost')
-    expect(echo.trigger).toBe('mention')
-    expect(echo.rooms).toEqual(['#welcome:localhost'])
+    const echo = cfg.agents.echo!
+    expect(echo.matrix?.user_id).toBe('@echo:localhost')
+    expect(echo.matrix?.trigger).toBe('mention')
+    expect(echo.matrix?.rooms).toEqual(['#welcome:localhost'])
 
-    const docs = cfg.agents.docs
-    expect(docs.matrix_user_id).toBe('@docs:localhost')
-    expect(docs.trigger).toBe('mention')
-    expect(docs.rooms).toEqual(['#docs:localhost'])
+    const docs = cfg.agents.docs!
+    expect(docs.matrix?.user_id).toBe('@docs:localhost')
+    expect(docs.matrix?.trigger).toBe('mention')
+    expect(docs.matrix?.rooms).toEqual(['#docs:localhost'])
     expect(docs.acp).toEqual({ preset: 'opencode' })
   })
 })

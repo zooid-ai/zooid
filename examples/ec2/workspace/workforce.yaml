@@ -7,9 +7,10 @@ transports:
 
 agents:
   code:
-    transport: http-local
     workdir: .
     acp:
       preset: claude
-    docker:
+    http:
+      transport: http-local
+    container:
       image: ghcr.io/zooid-ai/budd-agent-claude-code:latest

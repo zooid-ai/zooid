@@ -12,7 +12,11 @@
       "import": "./src/index.ts"
     }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -27,6 +31,7 @@
   },
   "dependencies": {
     "@zooid/acp-client": "workspace:^",
+    "dotenv-expand": "^13.0.0",
     "yaml": "^2.5.0"
   },
   "devDependencies": {

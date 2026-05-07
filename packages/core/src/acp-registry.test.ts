@@ -57,7 +57,7 @@ describe('AcpAgentRegistry', () => {
           approval_timeout_ms: 0,
         },
       },
-      forwardEnv: { triage: { ANTHROPIC_API_KEY: 'sk-test' } },
+      env: { triage: { ANTHROPIC_API_KEY: 'sk-test' } },
     })
   })
 
@@ -119,7 +119,7 @@ describe('AcpAgentRegistry', () => {
     expect(opts.agent.args).toEqual(['acp'])
   })
 
-  it('passes per-agent forwardEnv into AcpClient.agent.env', async () => {
+  it('passes per-agent env into AcpClient.agent.env', async () => {
     const { AcpClient } = (await import('@zooid/acp-client')) as unknown as {
       AcpClient: ReturnType<typeof vi.fn>
     }

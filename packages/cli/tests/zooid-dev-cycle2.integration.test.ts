@@ -34,12 +34,13 @@ const yaml = [
   `    port: ${AS_PORT}`,
   'agents:',
   '  assistant:',
-  '    transport: m',
-  '    matrix_user_id: "@assistant:localhost"',
-  '    rooms: ["!placeholder:localhost"]',
-  '    trigger: mention',
   '    workdir: .',
   '    acp: { preset: claude }',
+  '    matrix:',
+  '      transport: m',
+  '      user_id: "@assistant:localhost"',
+  '      rooms: ["!placeholder:localhost"]',
+  '      trigger: mention',
 ].join('\n')
 
 describe.skipIf(!dockerAvailable())(

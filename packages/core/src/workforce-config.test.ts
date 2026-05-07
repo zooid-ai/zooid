@@ -15,12 +15,13 @@ transports:
 
 agents:
   assistant:
-    transport: matrix-local
-    matrix_user_id: '@assistant:localhost'
-    rooms: ['!general:localhost']
-    trigger: mention
     workdir: .
     acp: { preset: claude }
+    matrix:
+      transport: matrix-local
+      user_id: '@assistant:localhost'
+      rooms: ['!general:localhost']
+      trigger: mention
 `
 
 describe('loadWorkforceConfig — new shape', () => {
@@ -34,8 +35,8 @@ describe('loadWorkforceConfig — new shape', () => {
       sender_localpart: 'zooid',
       user_namespace: '@.*:localhost',
     })
-    expect(c.agents.assistant.transport).toBe('matrix-local')
-    expect(c.agents.assistant.matrix_user_id).toBe('@assistant:localhost')
+    expect(c.agents.assistant!.matrix?.transport).toBe('matrix-local')
+    expect(c.agents.assistant!.matrix?.user_id).toBe('@assistant:localhost')
   })
 
   it('runtime defaults to docker when omitted', () => {
@@ -46,9 +47,10 @@ transports:
     port: 8080
 agents:
   one:
-    transport: http-only
     workdir: .
     acp: { preset: claude }
+    http:
+      transport: http-only
 `
     expect(loadWorkforceConfig(yaml).runtime).toBe('docker')
   })
@@ -59,9 +61,10 @@ agents:
 transports: {}
 agents:
   a:
-    transport: x
     workdir: .
     acp: { preset: claude }
+    http:
+      transport: x
 `),
     ).toThrow(/transports.*at least one/i)
   })
@@ -79,11 +82,14 @@ transports:
     user_namespace: '@.*:localhost'
 agents:
   oops:
-    transport: ghost
     workdir: .
     acp: { preset: claude }
+    matrix:
+      transport: ghost
+      user_id: '@oops:localhost'
+      rooms: ['!r:localhost']
 `),
-    ).toThrow(/agents\.oops\.transport.*ghost.*not declared/i)
+    ).toThrow(/agents\.oops\.matrix\.transport.*ghost.*not declared/i)
   })
 
   it('errors when a transport has an unknown type', () => {
@@ -94,31 +100,36 @@ transports:
     type: smtp
 agents:
   a:
-    transport: bad
     workdir: .
     acp: { preset: claude }
+    http:
+      transport: bad
 `),
     ).toThrow(/transports\.bad\.type.*matrix.*http/i)
   })
 
-  it('errors when matrix-only fields appear on a non-matrix-transport agent', () => {
+  it('errors when a matrix-typed transport is referenced from an http: block', () => {
     expect(() =>
       loadWorkforceConfig(`
 transports:
-  http-only:
-    type: http
-    port: 8080
+  m:
+    type: matrix
+    homeserver: http://localhost:8448
+    as_token: t
+    hs_token: h
+    sender_localpart: z
+    user_namespace: '@.*:l'
 agents:
   one:
-    transport: http-only
-    matrix_user_id: '@x:y'
     workdir: .
     acp: { preset: claude }
+    http:
+      transport: m
 `),
-    ).toThrow(/matrix_user_id.*only valid.*matrix/i)
+    ).toThrow(/http.*references transport.*type: matrix/i)
   })
 
-  it('errors when a matrix-transport agent omits matrix_user_id', () => {
+  it('errors when a matrix block omits user_id', () => {
     expect(() =>
       loadWorkforceConfig(`
 transports:
@@ -131,11 +142,13 @@ transports:
     user_namespace: '@.*:localhost'
 agents:
   oops:
-    transport: matrix-local
     workdir: .
     acp: { preset: claude }
+    matrix:
+      transport: matrix-local
+      rooms: ['!r:localhost']
 `),
-    ).toThrow(/agents\.oops\.matrix_user_id.*required/i)
+    ).toThrow(/agents\.oops\.matrix\.user_id.*@localpart:server/i)
   })
 
   it('allows multiple transports of mixed types', () => {
@@ -153,19 +166,21 @@ transports:
     port: 8080
 agents:
   m:
-    transport: matrix-local
-    matrix_user_id: '@m:localhost'
-    rooms: ['!a:localhost']
     workdir: .
     acp: { preset: claude }
+    matrix:
+      transport: matrix-local
+      user_id: '@m:localhost'
+      rooms: ['!a:localhost']
   h:
-    transport: http-direct
     workdir: .
     acp: { preset: claude }
+    http:
+      transport: http-direct
 `
     const c = loadWorkforceConfig(yaml)
     expect(Object.keys(c.transports)).toEqual(['matrix-local', 'http-direct'])
-    expect(c.agents.m.transport).toBe('matrix-local')
-    expect(c.agents.h.transport).toBe('http-direct')
+    expect(c.agents.m!.matrix?.transport).toBe('matrix-local')
+    expect(c.agents.h!.http?.transport).toBe('http-direct')
   })
 })

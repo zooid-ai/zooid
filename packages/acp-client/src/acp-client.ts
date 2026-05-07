@@ -34,6 +34,8 @@ export interface SpawnRuntime {
     args: string[]
     env?: Record<string, string>
     cwd?: string
+    /** Container image. Honoured by container runtimes; ignored by local spawners. */
+    image?: string
   }): ChildProcess
 }
 
@@ -92,6 +94,7 @@ export class AcpClient {
         args,
         env: this.options.agent.env,
         cwd: this.options.agent.cwd,
+        image: this.options.agent.image,
       })
       this.runtimeChild = child
       if (!child.stdout || !child.stdin) {

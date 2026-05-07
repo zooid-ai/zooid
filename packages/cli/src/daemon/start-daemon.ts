@@ -92,17 +92,12 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     })
     const bindings: AgentBinding[] = []
     for (const a of Object.values(config.agents)) {
-      if (a.transport !== matrix.name) continue
-      if (!a.matrix_user_id || !a.rooms || !a.trigger) {
-        throw new Error(
-          `agent ${a.name}: matrix_user_id, rooms, and trigger are required`,
-        )
-      }
+      if (a.matrix?.transport !== matrix.name) continue
       bindings.push({
         name: a.name,
-        userId: a.matrix_user_id,
-        rooms: a.rooms,
-        trigger: a.trigger,
+        userId: a.matrix.user_id,
+        rooms: a.matrix.rooms,
+        trigger: a.matrix.trigger,
       })
     }
     const transport = createMatrixTransport({

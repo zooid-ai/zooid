@@ -13,7 +13,7 @@ agents:
 describe('agents.<name>.acp', () => {
   it('parses preset form', () => {
     const cfg = loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     acp:
       preset: claude
@@ -23,7 +23,7 @@ describe('agents.<name>.acp', () => {
 
   it('parses explicit form, defaulting args to []', () => {
     const cfg = loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     acp:
       command: opencode
@@ -33,7 +33,7 @@ describe('agents.<name>.acp', () => {
 
   it('parses explicit form with args', () => {
     const cfg = loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     acp:
       command: opencode
@@ -48,7 +48,7 @@ describe('agents.<name>.acp', () => {
   it('rejects both preset and command together', () => {
     expect(() =>
       loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     acp:
       preset: claude
@@ -60,7 +60,7 @@ describe('agents.<name>.acp', () => {
   it('rejects empty acp block', () => {
     expect(() =>
       loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     acp: {}
 `),
@@ -70,7 +70,7 @@ describe('agents.<name>.acp', () => {
   it('rejects unknown preset', () => {
     expect(() =>
       loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     acp:
       preset: made-up
@@ -81,7 +81,7 @@ describe('agents.<name>.acp', () => {
   it('requires acp on every agent (no implicit default adapter)', () => {
     expect(() =>
       loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
 `),
     ).toThrow(/agents\.triage:.*acp/i)
@@ -91,7 +91,7 @@ describe('agents.<name>.acp', () => {
 describe('agents.<name>.approval_timeout', () => {
   it('defaults to 0 (no timeout) when unset', () => {
     const cfg = loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     acp: { preset: claude }
 `)
@@ -101,7 +101,7 @@ describe('agents.<name>.approval_timeout', () => {
   it('parses h/m/s suffix duration strings', () => {
     const mk = (v: string) =>
       loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     acp: { preset: claude }
     approval_timeout: ${v}
@@ -115,7 +115,7 @@ describe('agents.<name>.approval_timeout', () => {
 
   it('accepts 0 as "no timeout"', () => {
     const cfg = loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     acp: { preset: claude }
     approval_timeout: 0
@@ -126,7 +126,7 @@ describe('agents.<name>.approval_timeout', () => {
   it('rejects malformed durations with a clear error', () => {
     expect(() =>
       loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     acp: { preset: claude }
     approval_timeout: forever
@@ -139,7 +139,7 @@ describe('legacy adapter: is rejected', () => {
   it('rejects workforce.yaml that uses adapter:', () => {
     expect(() =>
       loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     adapter: claude
     acp:
@@ -151,7 +151,7 @@ describe('legacy adapter: is rejected', () => {
   it('rejects the object form too', () => {
     expect(() =>
       loadWorkforceConfig(`${baseYaml}  triage:
-    transport: http-local
+    http: { transport: http-local }
     workdir: .
     adapter: { type: claude }
     acp:

@@ -5,7 +5,6 @@ export {
   findMatrixTransport,
   findHttpTransport,
   findConfigFile,
-  DEFAULT_DOCKER_IMAGE,
 } from './config.js'
 export {
   AcpAgentRegistry,
@@ -30,9 +29,11 @@ export type {
   AcpSpawnSpec,
 } from './acp-types.js'
 export type {
-  DockerConfig,
   AgentConfig,
-  AgentDockerConfig,
+  ContainerConfig,
+  WorkforceContainerConfig,
+  MatrixBinding,
+  HttpBinding,
   WorkforceConfig,
   TransportConfig,
   MatrixTransportConfig,

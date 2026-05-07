@@ -14,7 +14,8 @@ transports:
 
 agents:
   reviewer:
-    transport: http-local
     workdir: .
     acp:
       preset: opencode
+    http:
+      transport: http-local

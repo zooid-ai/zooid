@@ -3,20 +3,25 @@ import { join } from 'node:path'
 import { parse } from 'yaml'
 import type { AcpAgentSpec } from './acp-types.js'
 import { isPreset } from '@zooid/acp-client'
+import { interpolateEnv, interpolateString } from './env-interpolation.js'
 import type {
   AgentConfig,
-  AgentDockerConfig,
   CliFlags,
+  ContainerConfig,
+  HttpBinding,
   HttpTransportConfig,
+  MatrixBinding,
   MatrixTransportConfig,
   TransportConfig,
   WorkforceConfig,
+  WorkforceContainerConfig,
 } from './types.js'
-
-export const DEFAULT_DOCKER_IMAGE = 'ghcr.io/zooid-ai/zooid-agent-base:latest'
 
 const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
 const MATRIX_USER_ID_RE = /^@[A-Za-z0-9._\-=/+]+:[A-Za-z0-9.\-]+$/
+
+const TRANSPORT_KINDS = ['matrix', 'http'] as const
+type TransportKind = (typeof TRANSPORT_KINDS)[number]
 
 function parseAcpBlock(name: string, raw: unknown): AcpAgentSpec {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -90,48 +95,66 @@ function parseApprovalTimeout(name: string, raw: unknown): number {
   throw new Error('unreachable')
 }
 
-function parseAgentDocker(name: string, raw: unknown): AgentDockerConfig {
+function parseAgentContainer(
+  name: string,
+  raw: unknown,
+  processEnv: NodeJS.ProcessEnv,
+): ContainerConfig {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new Error(`agents.${name}.docker must be a mapping`)
+    throw new Error(`agents.${name}.container must be a mapping`)
   }
-  const d = raw as Record<string, unknown>
-  const out: AgentDockerConfig = {}
-  if (d.image !== undefined) {
-    if (typeof d.image !== 'string' || d.image.length === 0) {
-      throw new Error(`agents.${name}.docker.image must be a non-empty string`)
+  const r = raw as Record<string, unknown>
+  const out: ContainerConfig = {}
+  if (r.image !== undefined) {
+    if (typeof r.image !== 'string' || r.image.length === 0) {
+      throw new Error(`agents.${name}.container.image must be a non-empty string`)
     }
-    out.image = d.image
+    out.image = r.image
   }
-  if (d.forward_env !== undefined) {
-    if (!Array.isArray(d.forward_env)) {
-      throw new Error(`agents.${name}.docker.forward_env must be an array of strings`)
+  if (r.env !== undefined && r.env !== null) {
+    if (typeof r.env !== 'object' || Array.isArray(r.env)) {
+      throw new Error(`agents.${name}.container.env must be a mapping`)
     }
-    const list: string[] = []
-    for (const v of d.forward_env) {
-      if (typeof v !== 'string' || v.length === 0) {
+    const rawEnv = r.env as Record<string, unknown>
+    const stringEnv: Record<string, string> = {}
+    for (const [k, v] of Object.entries(rawEnv)) {
+      if (typeof v !== 'string') {
         throw new Error(
-          `agents.${name}.docker.forward_env[] must be a non-empty string`,
+          `agents.${name}.container.env.${k}: must be a string (got ${typeof v})`,
         )
       }
-      const parts = v.split(':')
-      if (parts.length > 2) {
-        throw new Error(
-          `agents.${name}.docker.forward_env[] "${v}" is not a valid env spec (expected NAME or HOST:CONTAINER)`,
-        )
-      }
-      if (parts.length === 2 && (parts[0]!.length === 0 || parts[1]!.length === 0)) {
-        throw new Error(
-          `agents.${name}.docker.forward_env[] has empty host or container name in "${v}"`,
-        )
-      }
-      list.push(v)
+      stringEnv[k] = v
     }
-    out.forward_env = list
+    out.env = interpolateEnv(stringEnv, processEnv, `agents.${name}.container.env`)
   }
   return out
 }
 
-function parseTransports(raw: unknown): Record<string, TransportConfig> {
+function parseWorkforceContainer(raw: unknown): WorkforceContainerConfig {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('container must be a mapping')
+  }
+  const r = raw as Record<string, unknown>
+  const out: WorkforceContainerConfig = {}
+  if (r.env !== undefined) {
+    throw new Error(
+      "Top-level 'container.env' is not supported (workforce-level env defaults are out of scope; see [ZOD043]). " +
+        'Move env entries to per-agent container.env.',
+    )
+  }
+  if (r.image !== undefined) {
+    if (typeof r.image !== 'string' || r.image.length === 0) {
+      throw new Error('container.image must be a non-empty string')
+    }
+    out.image = r.image
+  }
+  return out
+}
+
+function parseTransports(
+  raw: unknown,
+  processEnv: NodeJS.ProcessEnv,
+): Record<string, TransportConfig> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('transports: must be a mapping with at least one entry')
   }
@@ -142,12 +165,16 @@ function parseTransports(raw: unknown): Record<string, TransportConfig> {
   }
   const out: Record<string, TransportConfig> = {}
   for (const name of names) {
-    out[name] = parseTransport(name, r[name])
+    out[name] = parseTransport(name, r[name], processEnv)
   }
   return out
 }
 
-function parseTransport(name: string, raw: unknown): TransportConfig {
+function parseTransport(
+  name: string,
+  raw: unknown,
+  processEnv: NodeJS.ProcessEnv,
+): TransportConfig {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(`transports.${name}: must be a mapping`)
   }
@@ -172,9 +199,9 @@ function parseTransport(name: string, raw: unknown): TransportConfig {
     }
     const out: MatrixTransportConfig = {
       type: 'matrix',
-      homeserver: r.homeserver as string,
-      as_token: r.as_token as string,
-      hs_token: r.hs_token as string,
+      homeserver: interpolateString(r.homeserver as string, processEnv),
+      as_token: interpolateString(r.as_token as string, processEnv),
+      hs_token: interpolateString(r.hs_token as string, processEnv),
       sender_localpart: r.sender_localpart as string,
       user_namespace: r.user_namespace as string,
     }
@@ -196,11 +223,91 @@ function parseTransport(name: string, raw: unknown): TransportConfig {
   return { type: 'http', port }
 }
 
+function parseTransportBinding(
+  name: string,
+  entry: Record<string, unknown>,
+  transports: Record<string, TransportConfig>,
+): { matrix?: MatrixBinding; http?: HttpBinding } {
+  const present = TRANSPORT_KINDS.filter(
+    (k) => entry[k] !== undefined && entry[k] !== null,
+  )
+  if (present.length === 0) {
+    throw new Error(
+      `agents.${name}: must declare exactly one transport-kind block ` +
+        `(e.g. 'matrix:' or 'http:'). Saw none.`,
+    )
+  }
+  if (present.length > 1) {
+    throw new Error(
+      `agents.${name}: must declare exactly one transport-kind block. ` +
+        `Saw: ${present.join(', ')}. To run "the same agent" on two transports, ` +
+        `declare two agents (e.g. ${name}-matrix and ${name}-http).`,
+    )
+  }
+  const kind = present[0] as TransportKind
+  const blockRaw = entry[kind]
+  if (typeof blockRaw !== 'object' || blockRaw === null || Array.isArray(blockRaw)) {
+    throw new Error(`agents.${name}.${kind}: must be a mapping`)
+  }
+  const block = blockRaw as Record<string, unknown>
+  if (typeof block.transport !== 'string' || block.transport.length === 0) {
+    throw new Error(`agents.${name}.${kind}.transport (string) is required`)
+  }
+  const refName = block.transport
+  const refTransport = transports[refName]
+  if (!refTransport) {
+    throw new Error(
+      `agents.${name}.${kind}.transport "${refName}" is not declared in transports`,
+    )
+  }
+  if (refTransport.type !== kind) {
+    throw new Error(
+      `agents.${name}.${kind} references transport "${refName}" of type: ${refTransport.type}. ` +
+        `Block name and referenced transport's type must match.`,
+    )
+  }
+
+  if (kind === 'matrix') {
+    if (typeof block.user_id !== 'string' || !MATRIX_USER_ID_RE.test(block.user_id)) {
+      throw new Error(
+        `agents.${name}.matrix.user_id must look like @localpart:server (got ${JSON.stringify(block.user_id)})`,
+      )
+    }
+    if (!Array.isArray(block.rooms) || block.rooms.length === 0) {
+      throw new Error(`agents.${name}.matrix.rooms is required and must be a non-empty array`)
+    }
+    const rooms: string[] = []
+    for (const r of block.rooms) {
+      if (typeof r !== 'string' || r.length === 0) {
+        throw new Error(`agents.${name}.matrix.rooms[] must be a non-empty string`)
+      }
+      rooms.push(r)
+    }
+    const tr = block.trigger ?? 'mention'
+    if (tr !== 'mention' && tr !== 'any') {
+      throw new Error(
+        `agents.${name}.matrix.trigger must be "mention" or "any" (got ${JSON.stringify(tr)})`,
+      )
+    }
+    return {
+      matrix: {
+        transport: refName,
+        user_id: block.user_id,
+        rooms,
+        trigger: tr,
+      },
+    }
+  }
+  // kind === 'http'
+  return { http: { transport: refName } }
+}
+
 function parseAgents(
   raw: unknown,
   runtime: 'local' | 'docker' | 'podman',
   transports: Record<string, TransportConfig>,
   daemonHooks: { pre_turn?: string; post_turn?: string },
+  processEnv: NodeJS.ProcessEnv,
 ): Record<string, AgentConfig> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('agents: must be a mapping')
@@ -234,17 +341,30 @@ function parseAgents(
     const acp = parseAcpBlock(name, entry.acp)
     const approval_timeout_ms = parseApprovalTimeout(name, entry.approval_timeout)
 
-    if (typeof entry.transport !== 'string' || entry.transport.length === 0) {
-      throw new Error(`agents.${name}.transport is required (name of a transports entry)`)
-    }
-    const transportName = entry.transport
-    const t = transports[transportName]
-    if (!t) {
+    // Reject legacy fields up front with pointers to [ZOD043].
+    if (entry.docker !== undefined) {
       throw new Error(
-        `agents.${name}.transport "${transportName}" is not declared in transports`,
+        `agents.${name}.docker is no longer supported. ` +
+          `Move 'image' to agents.${name}.container.image, and 'forward_env' entries to ` +
+          `agents.${name}.container.env with \${VAR} interpolation. See [ZOD043].`,
       )
     }
-    const isMatrix = t.type === 'matrix'
+    if (typeof entry.transport === 'string') {
+      throw new Error(
+        `agents.${name}.transport (string) is no longer supported at the agent level. ` +
+          `Move it inside a transport-kind block, e.g.:\n` +
+          `  matrix:\n    transport: <name>\n    user_id: "@..."\n    rooms: [...]\n` +
+          `See [ZOD043].`,
+      )
+    }
+    for (const k of ['matrix_user_id', 'rooms', 'trigger'] as const) {
+      if (entry[k] !== undefined) {
+        throw new Error(
+          `agents.${name}.${k} is no longer supported as a flat field. ` +
+            `Move it inside a 'matrix:' block on the agent. See [ZOD043].`,
+        )
+      }
+    }
 
     const agentHooks: AgentConfig['hooks'] = {}
     if (daemonHooks.pre_turn !== undefined) agentHooks.pre_turn = daemonHooks.pre_turn
@@ -264,78 +384,31 @@ function parseAgents(
       }
     }
 
-    let dockerBlock: AgentDockerConfig | undefined
-    if (entry.docker !== undefined && entry.docker !== null) {
-      if (runtime !== 'docker' && runtime !== 'podman') {
+    let containerBlock: ContainerConfig | undefined
+    if (entry.container !== undefined && entry.container !== null) {
+      if (runtime === 'local') {
         throw new Error(
-          `agents.${name}.docker is only valid when runtime: docker or runtime: podman (got runtime: ${runtime})`,
+          `agents.${name}.container is only valid when runtime is 'docker' or 'podman'. ` +
+            `runtime: local spawns agents as host child processes — there is no container, ` +
+            `so 'image' is inert and 'env' would silently lie (the agent inherits the daemon's ` +
+            `full process.env regardless).`,
         )
       }
-      dockerBlock = parseAgentDocker(name, entry.docker)
+      containerBlock = parseAgentContainer(name, entry.container, processEnv)
     }
 
-    const matrixOnly = ['matrix_user_id', 'rooms', 'trigger'] as const
-    if (!isMatrix) {
-      for (const k of matrixOnly) {
-        if (entry[k] !== undefined) {
-          throw new Error(
-            `agents.${name}.${k} is only valid when transport is type: matrix (got type: ${t.type})`,
-          )
-        }
-      }
-    }
-    let matrixUserId: string | undefined
-    let rooms: string[] | undefined
-    let trigger: 'mention' | 'any' | undefined
-    if (isMatrix) {
-      if (entry.matrix_user_id === undefined) {
-        throw new Error(
-          `agents.${name}.matrix_user_id is required when referencing a matrix transport`,
-        )
-      }
-      if (
-        typeof entry.matrix_user_id !== 'string' ||
-        !MATRIX_USER_ID_RE.test(entry.matrix_user_id)
-      ) {
-        throw new Error(
-          `agents.${name}.matrix_user_id must look like @localpart:server (got ${JSON.stringify(entry.matrix_user_id)})`,
-        )
-      }
-      matrixUserId = entry.matrix_user_id
-      if (entry.rooms === undefined || !Array.isArray(entry.rooms) || entry.rooms.length === 0) {
-        throw new Error(
-          `agents.${name}.rooms is required and must be a non-empty array when referencing a matrix transport`,
-        )
-      }
-      const ws: string[] = []
-      for (const r of entry.rooms) {
-        if (typeof r !== 'string' || r.length === 0) {
-          throw new Error(`agents.${name}.rooms[] must be a non-empty string`)
-        }
-        ws.push(r)
-      }
-      rooms = ws
-      const tr = entry.trigger ?? 'mention'
-      if (tr !== 'mention' && tr !== 'any') {
-        throw new Error(
-          `agents.${name}.trigger must be "mention" or "any" (got ${JSON.stringify(tr)})`,
-        )
-      }
-      trigger = tr as 'mention' | 'any'
-    }
+    const binding = parseTransportBinding(name, entry, transports)
 
     const agentCfg: AgentConfig = {
       name,
-      transport: transportName,
       workdir: entry.workdir,
       hooks: agentHooks,
       acp,
       approval_timeout_ms,
     }
-    if (dockerBlock) agentCfg.docker = dockerBlock
-    if (matrixUserId) agentCfg.matrix_user_id = matrixUserId
-    if (rooms) agentCfg.rooms = rooms
-    if (trigger) agentCfg.trigger = trigger
+    if (containerBlock) agentCfg.container = containerBlock
+    if (binding.matrix) agentCfg.matrix = binding.matrix
+    if (binding.http) agentCfg.http = binding.http
     result[name] = agentCfg
   }
   return result
@@ -349,13 +422,6 @@ function parseRuntime(raw: unknown): 'local' | 'docker' | 'podman' {
   return runtime
 }
 
-function parseDocker(raw: unknown): { image: string } {
-  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
-  const image =
-    typeof r.image === 'string' && r.image.length > 0 ? r.image : DEFAULT_DOCKER_IMAGE
-  return { image }
-}
-
 function workforceHooks(raw: Record<string, unknown>): { pre_turn?: string; post_turn?: string } {
   const out: { pre_turn?: string; post_turn?: string } = {}
   if (raw.hooks && typeof raw.hooks === 'object') {
@@ -366,21 +432,8 @@ function workforceHooks(raw: Record<string, unknown>): { pre_turn?: string; post
   return out
 }
 
-/**
- * Replace `${VAR}` references with values from process.env. An undefined var
- * leaves the placeholder untouched so downstream validation produces a clearer
- * error than a silent empty-string. Used so `zooid dev` can write tokens to
- * `.env` and have the loaded config see them via `process.env`.
- */
-function expandEnvVars(text: string): string {
-  return text.replace(/\$\{([A-Z_][A-Z0-9_]*)\}/g, (m, name) => {
-    const v = process.env[name]
-    return v === undefined ? m : v
-  })
-}
-
 export function loadWorkforceConfig(yamlText: string): WorkforceConfig {
-  const raw = parse(expandEnvVars(yamlText)) ?? {}
+  const raw = parse(yamlText) ?? {}
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error('workforce.yaml must be a YAML object')
   }
@@ -401,14 +454,21 @@ export function loadWorkforceConfig(yamlText: string): WorkforceConfig {
       'top-level workdir is not supported; define agents: { <name>: { workdir: ... } } instead',
     )
   }
+  if (r.docker !== undefined) {
+    throw new Error(
+      "Top-level 'docker' block is no longer supported. " +
+        "Move 'image' to top-level 'container.image'. See [ZOD043].",
+    )
+  }
   if (r.agents === undefined) {
     throw new Error('agents: is required — workforce.yaml must define at least one agent')
   }
 
   const runtime = parseRuntime(r.runtime)
-  const transports = parseTransports(r.transports)
+  const processEnv = process.env
+  const transports = parseTransports(r.transports, processEnv)
   const hooks = workforceHooks(r)
-  const agents = parseAgents(r.agents, runtime, transports, hooks)
+  const agents = parseAgents(r.agents, runtime, transports, hooks, processEnv)
 
   const cfg: WorkforceConfig = {
     runtime,
@@ -416,8 +476,14 @@ export function loadWorkforceConfig(yamlText: string): WorkforceConfig {
     agents,
     hooks,
   }
-  if (runtime === 'docker' || runtime === 'podman') {
-    cfg.docker = parseDocker(r.docker)
+  if (r.container !== undefined && r.container !== null) {
+    if (runtime === 'local') {
+      throw new Error(
+        "container is only valid when runtime is 'docker' or 'podman'. " +
+          'runtime: local does not run agents in containers; image is ignored. See [ZOD043].',
+      )
+    }
+    cfg.container = parseWorkforceContainer(r.container)
   }
   return cfg
 }
@@ -493,9 +559,11 @@ export function mergeCliFlags(base: WorkforceConfig, flags: CliFlags): Workforce
     hooks: { ...base.hooks },
   }
   if (runtime === 'docker' || runtime === 'podman') {
-    const baseDocker = base.docker ?? { image: DEFAULT_DOCKER_IMAGE }
-    merged.docker = {
-      image: flags.image ?? baseDocker.image ?? DEFAULT_DOCKER_IMAGE,
+    const image = flags.image ?? base.container?.image
+    if (image !== undefined) {
+      merged.container = { image }
+    } else if (base.container !== undefined) {
+      merged.container = { ...base.container }
     }
   }
   return merged

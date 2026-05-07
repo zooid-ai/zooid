@@ -18,6 +18,8 @@ export interface AgentConfig {
   args?: string[]
   env?: Record<string, string>
   cwd?: string
+  /** Container image. Forwarded to the spawn runtime; ignored by host-spawn paths. */
+  image?: string
 }
 
 export interface PromptInput {
