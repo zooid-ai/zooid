@@ -103,7 +103,7 @@ describe('matrix transport /transactions', () => {
     expect(await res.json()).toEqual({})
   })
 
-  it('routes a mentioned message to the agent and replies in-thread', async () => {
+  it('replies in a thread rooted on the inbound event when the message is top-level', async () => {
     const { transport, agents, client } = makeTransport()
     const events = [
       {
@@ -118,7 +118,6 @@ describe('matrix transport /transactions', () => {
         },
       },
     ]
-    // Have prompt() emit a streaming text event to drive the reply
     agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
       agents.onEvent('architect', {
         type: 'message_chunk',
@@ -131,21 +130,21 @@ describe('matrix transport /transactions', () => {
     const res = await postTxn(transport.app, { events })
     expect(res.status).toBe(200)
     await settleTurn()
-    // Non-threaded messages now use the room as the session key; the reply
-    // also goes to the room (not in-thread).
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '!r:example.com')
+    // Agent-promotion: sessionKey is the inbound event_id, NOT the room.
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    // The reply threads against the user's message.
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         roomId: '!r:example.com',
         asUserId: '@architect:example.com',
-        threadRoot: undefined,
+        threadRoot: '$root',
         content: expect.objectContaining({ msgtype: 'm.text', body: 'hello back' }),
       }),
     )
   })
 
   it('uses an in-thread message event_id as the thread root when one is set', async () => {
-    const { transport, agents } = makeTransport()
+    const { transport, agents, client } = makeTransport()
     const events = [
       {
         type: 'm.room.message',
@@ -160,14 +159,24 @@ describe('matrix transport /transactions', () => {
         },
       },
     ]
+    agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
+      agents.onEvent('architect', {
+        type: 'message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: { type: 'text', text: 'reply' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
     await postTxn(transport.app, { events })
     await settleTurn()
     expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ threadRoot: '$root' }),
+    )
   })
 
   it('emits eco.zoon.approval_request when an approval is registered', async () => {
     const { transport, approvals, client } = makeTransport()
-    // Drive a turn so the transport remembers which room the session belongs to.
     await postTxn(transport.app, {
       events: [
         {
@@ -186,12 +195,10 @@ describe('matrix transport /transactions', () => {
     await settleTurn()
     approvals.emit('registered', {
       approvalId: 'a1',
-      // Session key is the room for non-threaded messages.
-      sessionId: 'sess-!r:example.com',
+      sessionId: 'sess-$root',          // session is keyed on the promoted thread root
       toolCallId: 't1',
       options: [{ optionId: 'allow_once', name: 'Allow', kind: 'allow_once' }],
     })
-    // Wait a microtask for the listener to fire
     await new Promise((r) => setImmediate(r))
     expect(client.sendCustomEvent).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -224,6 +231,204 @@ describe('matrix transport /transactions', () => {
       'a1',
       { decision: 'allow', optionId: 'allow_once' },
     )
+  })
+})
+
+describe('thread implicit triggers', () => {
+  it('triggers the most-recent-posting agent for a bare reply in a thread', async () => {
+    const { transport, agents } = makeTransport()
+    // Turn 1: user @mentions architect at top level. Agent-promotion makes
+    // $root the thread root and architect a thread participant.
+    agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
+      agents.onEvent('architect', {
+        type: 'message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: { type: 'text', text: 'hi' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$root',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    agents.ensureSession.mockClear()
+
+    // Turn 2: user replies in the thread WITHOUT @mention.
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$reply2',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'follow up',
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+
+    // architect should be triggered implicitly because they posted in the thread.
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+  })
+
+  it("inherits the thread root's @mentions when no agent has posted yet", async () => {
+    const { transport, agents } = makeTransport()
+    // Have prompt() never resolve, so no agent reply has landed when turn 2 arrives.
+    agents.prompt.mockImplementation(() => new Promise(() => {}))
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$root',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'long question',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    agents.ensureSession.mockClear()
+
+    // User adds a clarifying reply in-thread before architect has replied.
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$clarify',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'btw focus on the auth module',
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    // Inherits the root's @mention of architect.
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+  })
+
+  it('does not trigger any agent for a bare top-level message', async () => {
+    const { transport, agents } = makeTransport()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$bare',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: { msgtype: 'm.text', body: 'just thinking out loud' },
+        },
+      ],
+    })
+    await settleTurn()
+    expect(agents.ensureSession).not.toHaveBeenCalled()
+  })
+
+  it('an explicit @mention in a thread always triggers the named agent', async () => {
+    const { transport, agents } = makeTransport()
+    agents.prompt.mockImplementationOnce(async (_n: string, p: { threadId: string }) => {
+      agents.onEvent('architect', {
+        type: 'message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: { type: 'text', text: 'hi' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$root',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+
+    agents.ensureSession.mockClear()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$reply',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'one more thing',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+  })
+})
+
+describe('eco.zoon.session_reset', () => {
+  it('ends the thread-keyed session when sent inside a thread', async () => {
+    const { transport, agents } = makeTransport()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'eco.zoon.session_reset',
+          event_id: '$reset',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+          },
+        },
+      ],
+    })
+    expect(agents.endSession).toHaveBeenCalledWith('architect', '$root')
+  })
+
+  it('is a no-op when sent at room scope (no thread relation)', async () => {
+    const { transport, agents } = makeTransport()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'eco.zoon.session_reset',
+          event_id: '$reset-room',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {},
+        },
+      ],
+    })
+    expect(agents.endSession).not.toHaveBeenCalled()
   })
 })
 
@@ -403,7 +608,7 @@ describe('presence lifecycle', () => {
     await settleTurn()
     await (agents.onEvent as (n: string, e: unknown) => unknown)('architect', {
       type: 'message_chunk',
-      sessionId: 'sess-!r:example.com',
+      sessionId: 'sess-$e5',
       content: { type: 'text', text: 'reply' },
     })
     finishPrompt()
@@ -432,7 +637,7 @@ describe('tool-call and plan event bridging', () => {
       ],
     })
     await settleTurn()
-    return { transport, agents, client, finishPrompt, sessionId: 'sess-!r:example.com' }
+    return { transport, agents, client, finishPrompt, sessionId: 'sess-$e6' }
   }
 
   it('forwards tool_call as eco.zoon.tool_call in-room under the agent bot user', async () => {
@@ -570,7 +775,7 @@ describe('tool-call and plan event bridging', () => {
       ],
     })
     await settleTurn()
-    const sessionId = 'sess-!r:example.com'
+    const sessionId = 'sess-$e8'
     await (agents.onEvent as (n: string, e: unknown) => unknown)('architect', {
       type: 'message_chunk',
       sessionId,
@@ -611,11 +816,11 @@ describe('eco.zoon.interrupt handling', () => {
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
           sender: '@user:example.com',
-          content: { session_id: 'sess-!r:example.com', reason: 'user_initiated' },
+          content: { session_id: 'sess-$start', reason: 'user_initiated' },
         },
       ],
     })
-    expect(agents.cancelSession).toHaveBeenCalledWith('architect', 'sess-!r:example.com')
+    expect(agents.cancelSession).toHaveBeenCalledWith('architect', 'sess-$start')
     finishPrompt()
     await settleTurn()
   })
@@ -692,7 +897,7 @@ describe('eco.zoon.interrupt handling', () => {
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
           sender: '@user:example.com',
-          content: { session_id: 'sess-!r:example.com' },
+          content: { session_id: 'sess-$s4' },
         },
       ],
     })
@@ -722,5 +927,54 @@ describe('eco.zoon.interrupt handling', () => {
       'Bearer wrong-secret',
     )
     expect(r.status).toBe(403)
+  })
+})
+
+describe('full loop integration', () => {
+  it('top-level @mention → in-thread reply → bare follow-up triggers same agent', async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockImplementation(async (_n: string, p: { threadId: string }) => {
+      agents.onEvent('architect', {
+        type: 'message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: { type: 'text', text: 'reply ' + p.threadId.slice(0, 6) },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+
+    // Turn 1: top-level mention.
+    await postTxn(transport.app, {
+      events: [{
+        type: 'm.room.message', event_id: '$root', room_id: '!r:example.com',
+        sender: '@alice:example.com',
+        content: {
+          msgtype: 'm.text', body: 'hi @architect',
+          'm.mentions': { user_ids: ['@architect:example.com'] },
+        },
+      }],
+    })
+    await settleTurn()
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ threadRoot: '$root' }),
+    )
+
+    // Turn 2: bare reply in thread — implicit trigger, same session.
+    agents.ensureSession.mockClear()
+    client.sendMessage.mockClear()
+    await postTxn(transport.app, {
+      events: [{
+        type: 'm.room.message', event_id: '$bare', room_id: '!r:example.com',
+        sender: '@alice:example.com',
+        content: {
+          msgtype: 'm.text', body: 'follow up',
+          'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+        },
+      }],
+    })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ threadRoot: '$root' }),
+    )
   })
 })

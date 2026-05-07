@@ -4,8 +4,8 @@ import type { AcpRegistry, ApprovalCorrelator, RegisteredApproval } from '@zooid
 import type { AgentEvent } from '@zooid/acp-client'
 import { MatrixClient } from './matrix-client.js'
 import { BotPool } from './bot-pool.js'
-import { route, type AgentBinding } from './router.js'
-import { stripMention } from './mentions.js'
+import { route, type AgentBinding, type ThreadState } from './router.js'
+import { stripMention, extractMentions } from './mentions.js'
 import { toToolCallBody, toUpdateBody, toPlanBody } from './event-encoders.js'
 
 export interface CreateMatrixTransportOptions {
@@ -21,8 +21,8 @@ export interface CreateMatrixTransportOptions {
 interface SessionContext {
   agent: AgentBinding
   roomId: string
-  /** Set only when the originating message was part of a Matrix thread. */
-  threadRoot?: string
+  /** Always set — every session is thread-scoped via agent-promotion. */
+  threadRoot: string
 }
 
 interface MatrixEvent {
@@ -41,6 +41,11 @@ interface MatrixEvent {
 const STARTUP_GRACE_MS = 5_000
 const SEEN_EVENT_CAP = 5_000
 
+function inboundThreadRoot(evt: MatrixEvent): string | undefined {
+  const r = evt.content?.['m.relates_to']
+  return r?.rel_type === 'm.thread' && r.event_id ? r.event_id : undefined
+}
+
 export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const { agents, approvals, client, bindings, hsToken, adminUserId } = opts
   const pool = new BotPool(client, bindings)
@@ -49,6 +54,8 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   // Per-session promise tail so out-of-band events (tool_call, plan, etc.)
   // serialize on the wire even though the ACP producer doesn't await us.
   const sendQueue = new Map<string, Promise<void>>()
+  // Thread participation index: keyed by thread root event_id.
+  const threadStates = new Map<string, ThreadState>()
   // Drop events older than this — Tuwunel may replay a backlog after the
   // daemon was offline, and we don't want yesterday's "@docs hi" to fire now.
   const cutoffTs = Date.now() - STARTUP_GRACE_MS
@@ -85,9 +92,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         : event.type === 'tool_call_update'
           ? toUpdateBody(event)
           : toPlanBody(event)
-    if (ctx.threadRoot) {
-      body['m.relates_to'] = { rel_type: 'm.thread', event_id: ctx.threadRoot }
-    }
+    body['m.relates_to'] = { rel_type: 'm.thread', event_id: ctx.threadRoot }
     const tail = (sendQueue.get(event.sessionId) ?? Promise.resolve()).then(async () => {
       try {
         await client.sendCustomEvent({
@@ -120,9 +125,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       tool_call_id: handle.toolCallId,
       options: handle.options,
     }
-    if (ctx.threadRoot) {
-      content['m.relates_to'] = { rel_type: 'm.thread', event_id: ctx.threadRoot }
-    }
+    content['m.relates_to'] = { rel_type: 'm.thread', event_id: ctx.threadRoot }
     if (handle.toolKind !== undefined) content.tool_kind = handle.toolKind
     if (handle.toolTitle !== undefined) content.tool_title = handle.toolTitle
     if (handle.toolInput !== undefined) content.tool_input = handle.toolInput
@@ -152,12 +155,10 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     for (const evt of body.events ?? []) {
       if (evt.event_id) {
         if (seenEventIds.has(evt.event_id)) {
-          // Tuwunel retried this transaction (or sent it twice). Already taken.
           continue
         }
         seenEventIds.add(evt.event_id)
         if (seenEventIds.size > SEEN_EVENT_CAP) {
-          // Bound memory by dropping the oldest insertion. JS Sets keep insertion order.
           const first = seenEventIds.values().next().value
           if (first !== undefined) seenEventIds.delete(first)
         }
@@ -174,23 +175,23 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         continue
       }
       if (evt.type === 'eco.zoon.session_reset') {
-        // /clear from the composer: drop any session keyed on the room (or
-        // in-thread root, if the reset was sent inside a thread). We blanket
-        // every binding — endSession() on a key with no session is a no-op,
-        // and the key itself is room-scoped, so no cross-room collateral.
+        // Spec § /clear: room-scope reset is unsupported. Only thread-scoped
+        // resets carry a thread relation; drop bare room-level resets silently.
         const relates = evt.content?.['m.relates_to'] as
           | { rel_type?: string; event_id?: string }
           | undefined
-        const threaded =
+        const threadRoot =
           relates?.rel_type === 'm.thread' && relates.event_id ? relates.event_id : undefined
-        const sessionKey = threaded ?? evt.room_id
-        console.log(`[matrix] inbound eco.zoon.session_reset in ${evt.room_id} (key=${sessionKey})`)
-        if (sessionKey) {
-          for (const a of bindings) {
-            agents.endSession(a.name, sessionKey)
-            console.log(`[matrix] session reset → endSession(${a.name}, ${sessionKey})`)
-          }
+        if (!threadRoot) {
+          console.log('[matrix] dropping eco.zoon.session_reset without thread relation')
+          continue
         }
+        console.log(`[matrix] inbound eco.zoon.session_reset in ${evt.room_id} thread=${threadRoot}`)
+        for (const a of bindings) {
+          agents.endSession(a.name, threadRoot)
+        }
+        // Drop participation state so future replies re-establish membership.
+        threadStates.delete(threadRoot)
         continue
       }
       if (evt.type === 'eco.zoon.interrupt') {
@@ -232,11 +233,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         continue
       }
       logInbound(evt)
-      const matches = route(evt, bindings)
-      // Suppress the no-match warning for events sent by our own bots: an
-      // agent's reply echoes back through the appservice and (correctly)
-      // matches no one. Real "nothing matched your mention" cases — from
-      // human senders — still warn.
+      // Agent-promotion: top-level inbound event becomes the thread root.
+      // For in-thread messages the existing root is preserved.
+      const promotedRoot = inboundThreadRoot(evt) ?? evt.event_id
+      const matches = route(evt, bindings, threadStates)
+      // Suppress the no-match warning for events sent by our own bots.
       const senderIsBot = bindings.some((b) => b.userId === evt.sender)
       if (evt.type === 'm.room.message' && matches.length === 0 && !senderIsBot) {
         console.warn(
@@ -244,14 +245,35 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
             ` (bindings: ${bindings.map((b) => `${b.name}@${b.userId}[${b.trigger}]`).join(', ')})`,
         )
       }
+      // Seed thread state for any agent mentions in this event.
+      if (matches.length > 0 && promotedRoot) {
+        let st = threadStates.get(promotedRoot)
+        if (!st) {
+          st = { participants: [], rootMentions: [] }
+          threadStates.set(promotedRoot, st)
+        }
+        const msgMentions = new Set(extractMentions(evt as never))
+        for (const a of bindings) {
+          if (msgMentions.has(a.userId) && !st.rootMentions.includes(a.name)) {
+            st.rootMentions.push(a.name)
+          }
+        }
+      }
       for (const a of matches) {
         console.log(`[matrix] → ${a.name} (${a.userId})`)
-        // Fire-and-forget: ACP turns can take minutes (long opencode runs),
-        // far longer than Tuwunel's PUT timeout. If we await here, Tuwunel
-        // retries the transaction and we re-process the same message.
-        void runTurn(a, evt).catch((err) => {
-          console.error(`[matrix] runTurn failed for ${a.name}:`, err)
-        })
+        void runTurn(a, evt)
+          .then(() => {
+            if (!promotedRoot) return
+            let st = threadStates.get(promotedRoot)
+            if (!st) {
+              st = { participants: [], rootMentions: [] }
+              threadStates.set(promotedRoot, st)
+            }
+            if (st.participants.at(-1) !== a.name) st.participants.push(a.name)
+          })
+          .catch((err) => {
+            console.error(`[matrix] runTurn failed for ${a.name}:`, err)
+          })
       }
     }
     return c.json({})
@@ -278,17 +300,14 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   app.get('/healthz', (c) => c.text('ok'))
 
   async function runTurn(agent: AgentBinding, evt: MatrixEvent): Promise<void> {
-    if (!evt.room_id) return
-    const relates = evt.content?.['m.relates_to']
-    // Reply in-thread only when the user message was in-thread. Otherwise the
-    // reply is a normal room message.
-    const replyThreadRoot =
-      relates?.rel_type === 'm.thread' && relates.event_id ? relates.event_id : undefined
-    // Session boundary: a Matrix thread, when one was started; otherwise the
-    // room itself. Same room → same session → same context, until /clear.
-    const sessionKey = replyThreadRoot ?? evt.room_id
+    if (!evt.room_id || !evt.event_id) return
+    const inbound = inboundThreadRoot(evt)
+    // Agent-promotion: top-level inbound becomes a thread root via the agent's
+    // first reply. sessionKey is always a thread root id, never the room id.
+    const threadRoot = inbound ?? evt.event_id
+    const sessionKey = threadRoot
     const sessionId = await agents.ensureSession(agent.name, sessionKey)
-    sessions.set(sessionId, { agent, roomId: evt.room_id, threadRoot: replyThreadRoot })
+    sessions.set(sessionId, { agent, roomId: evt.room_id, threadRoot })
     buffers.set(sessionId, '')
 
     const roomId = evt.room_id
@@ -324,7 +343,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           roomId: evt.room_id,
           asUserId: agent.userId,
           content: { msgtype: 'm.text', body: text },
-          threadRoot: replyThreadRoot,
+          threadRoot,                  // every reply threads, full stop
         })
       } else {
         console.warn(
