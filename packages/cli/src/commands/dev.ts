@@ -199,6 +199,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
             cwd,
             installSignalHandlers: false,
             adminUserId: `@${flags.adminUser}:${shape.serverName}`,
+            agentsDir: layout.agentsDir,
             onTap: (agentName, event) => captures[agentName]?.onTap(event),
           })
         },

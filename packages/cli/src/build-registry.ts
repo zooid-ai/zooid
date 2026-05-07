@@ -16,6 +16,12 @@ export interface BuildAcpRegistryOptions {
   approvals?: ApprovalCorrelator
   /** Observability tap forwarded to each AcpClient. */
   onTap?: (agentName: string, event: TapEvent) => void
+  /**
+   * Per-agent state root (`<dataRoot>/agents/`). When set, each AcpClient
+   * persists its `(threadId → sessionId)` map under
+   * `<agentsDir>/<agentName>/sessions.json` so threads survive daemon restarts.
+   */
+  agentsDir?: string
 }
 
 /**
@@ -50,6 +56,7 @@ export function buildAcpRegistry(
     forwardEnv,
     approvals: opts.approvals,
     onTap: opts.onTap,
+    agentsDir: opts.agentsDir,
   })
 }
 

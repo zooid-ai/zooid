@@ -9,11 +9,13 @@ const cli = cac('zooid')
 
 cli
   .command('start', 'Run the daemon (production entry-point)')
+  .option('--data <dir>', 'Persistent data root dir', { default: './data' })
   .option('--runtime <local|docker|podman>', 'Agent runtime')
   .option('--image <ref>', 'Agent container image')
   .option('--print-token', 'Print a 32-byte hex token and exit')
   .action(async (flags) => {
     await runStart({
+      dataDir: flags.data,
       runtime: flags.runtime,
       image: flags.image,
       printToken: flags.printToken,

@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import {
   AcpClient,
   resolvePreset,
@@ -75,6 +76,13 @@ export interface AcpAgentRegistryOptions {
    * the host (e.g. the dev CLI capturing them to disk).
    */
   onTap?: (agentName: string, event: TapEvent) => void
+  /**
+   * Root directory under which each agent gets a per-agent state dir
+   * (`<agentsDir>/<agentName>/`). Used by the AcpClient session store to
+   * persist ACP `sessionId`s across daemon restarts. Optional: when unset,
+   * session continuity across restarts is disabled.
+   */
+  agentsDir?: string
 }
 
 export class AcpAgentRegistry implements AcpRegistry {
@@ -167,6 +175,7 @@ export class AcpAgentRegistry implements AcpRegistry {
         env: this.opts.forwardEnv?.[name],
         cwd: cfg.workdir,
       },
+      agentDataDir: this.opts.agentsDir ? join(this.opts.agentsDir, name) : undefined,
       runtime: this.opts.runtime,
       onEvent: (e) => this.onEvent(name, e),
       onApprovalRequest: (req) => this.onApprovalRequest(name, req),

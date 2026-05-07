@@ -8,6 +8,7 @@ import {
 } from '@agentclientprotocol/sdk'
 import { AgentProcess } from './agent-process.js'
 import { SessionMap } from './session-map.js'
+import { JsonFileSessionStore } from './session-store.js'
 import { resolvePreset } from './presets.js'
 import {
   acpUpdateToAgentEvent,
@@ -38,6 +39,13 @@ export interface SpawnRuntime {
 
 export interface AcpClientOptions {
   agent: AgentConfig
+  /**
+   * Per-agent state directory (typically `<dataRoot>/agents/<agentId>/`).
+   * `sessions.json` is written here so threads survive daemon restarts.
+   * When omitted, session continuity across restarts is disabled (a warning
+   * is logged once on first ensureSession).
+   */
+  agentDataDir?: string
   onEvent: (event: AgentEvent) => void
   onApprovalRequest: (req: ApprovalRequest) => Promise<ApprovalDecision>
   /**
@@ -60,6 +68,10 @@ export class AcpClient {
   private runtimeChild: ChildProcess | null = null
   private connection: ClientSideConnection | null = null
   private readonly sessions = new SessionMap()
+  private store: JsonFileSessionStore | null = null
+  private storeLoaded: Promise<void> | null = null
+  private agentCapabilities: { loadSession?: boolean } = {}
+  private warnedNoStore = false
   private initialized = false
   private readonly turns: TurnTracker | null
 
@@ -109,7 +121,7 @@ export class AcpClient {
 
     this.connection = new ClientSideConnection(() => this.buildClient(), stream)
 
-    await this.connection.initialize({
+    const init = await this.connection.initialize({
       protocolVersion: PROTOCOL_VERSION,
       clientCapabilities: {
         fs: { readTextFile: false, writeTextFile: false },
@@ -117,6 +129,7 @@ export class AcpClient {
       },
       clientInfo: { name: 'zooid', title: 'Zooid', version: '0.0.1' },
     })
+    this.agentCapabilities = init.agentCapabilities ?? {}
     this.initialized = true
   }
 
@@ -133,17 +146,69 @@ export class AcpClient {
     if (!this.connection || !this.initialized) {
       throw new Error('AcpClient.start() must be called before ensureSession()')
     }
+    await this.ensureStoreLoaded()
+
     const key = { threadId, agentId: this.options.agent.id }
-    let session = this.sessions.get(key)
-    if (!session) {
-      const { sessionId } = await this.connection.newSession({
-        cwd: this.options.agent.cwd ?? process.cwd(),
-        mcpServers: [],
-      })
-      session = { sessionId, startedAt: Date.now() }
-      this.sessions.set(key, session)
+    const cached = this.sessions.get(key)
+    if (cached) return cached.sessionId
+
+    const persisted = this.store?.get(threadId)
+    if (persisted && this.agentCapabilities.loadSession) {
+      try {
+        await this.connection.loadSession({
+          sessionId: persisted,
+          cwd: this.options.agent.cwd ?? process.cwd(),
+          mcpServers: [],
+        })
+        this.sessions.set(key, { sessionId: persisted, startedAt: Date.now() })
+        return persisted
+      } catch (err) {
+        console.warn(
+          `[acp-client:${this.options.agent.id}] loadSession(${persisted}) failed; ` +
+            `falling back to newSession:`,
+          err,
+        )
+        await this.store?.delete(threadId)
+      }
     }
-    return session.sessionId
+
+    const { sessionId } = await this.connection.newSession({
+      cwd: this.options.agent.cwd ?? process.cwd(),
+      mcpServers: [],
+    })
+    this.sessions.set(key, { sessionId, startedAt: Date.now() })
+    await this.store?.set(threadId, sessionId)
+    return sessionId
+  }
+
+  private async ensureStoreLoaded(): Promise<void> {
+    if (!this.store) {
+      if (!this.options.agentDataDir) {
+        if (!this.warnedNoStore) {
+          console.warn(
+            `[acp-client:${this.options.agent.id}] no agentDataDir configured; ` +
+              `session continuity across restarts disabled`,
+          )
+          this.warnedNoStore = true
+        }
+        this.storeLoaded = Promise.resolve()
+        return this.storeLoaded
+      }
+      this.store = new JsonFileSessionStore({
+        agentId: this.options.agent.id,
+        dir: this.options.agentDataDir,
+      })
+    }
+    if (!this.storeLoaded) {
+      this.storeLoaded = this.store.load().catch((err) => {
+        console.warn(`[acp-client:${this.options.agent.id}] store load failed:`, err)
+      })
+    }
+    await this.storeLoaded
+  }
+
+  private async flushStore(): Promise<void> {
+    if (this.store) await this.store.flush()
   }
 
   async cancel(sessionId: string): Promise<void> {
@@ -157,6 +222,7 @@ export class AcpClient {
    */
   endSession(threadId: string): void {
     this.sessions.delete({ threadId, agentId: this.options.agent.id })
+    void this.store?.delete(threadId)
   }
 
   async prompt(input: PromptInput): Promise<PromptResult> {

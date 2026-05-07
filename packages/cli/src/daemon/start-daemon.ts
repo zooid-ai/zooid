@@ -28,6 +28,12 @@ export interface StartDaemonOpts {
   adminUserId?: string
   /** Observability tap forwarded to each AcpClient. */
   onTap?: (agentName: string, event: TapEvent) => void
+  /**
+   * Per-agent state root (`<dataRoot>/agents/`). Threaded into
+   * `buildAcpRegistry` so each AcpClient persists `sessionId`s across
+   * daemon restarts.
+   */
+  agentsDir?: string
 }
 
 export interface DaemonHandle {
@@ -62,7 +68,11 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   const config = mergeCliFlags(base, opts.cliFlags ?? {})
 
   const approvals = new ApprovalCorrelator()
-  const registry = buildAcpRegistry(config, { approvals, onTap: opts.onTap })
+  const registry = buildAcpRegistry(config, {
+    approvals,
+    onTap: opts.onTap,
+    agentsDir: opts.agentsDir,
+  })
   const agentNames = Object.keys(config.agents)
 
   let server: ServerType | null = null
