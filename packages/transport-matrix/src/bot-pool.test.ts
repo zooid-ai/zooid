@@ -157,3 +157,94 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
     expect(calls).toEqual(['join:@echo:localhost->!abc:localhost'])
   })
 })
+
+describe('BotPool.bootstrap workforce-space attachment', () => {
+  it('writes m.space.child for each resolved agent room when spaceRoomId is provided', async () => {
+    const sendStateEvent = vi.fn(async () => ({ event_id: '$ev' }))
+    const joinRoom = vi.fn(async () => undefined)
+    const registerBot = vi.fn(async () => undefined)
+    const resolveAlias = vi.fn(async (alias: string) =>
+      alias === '#welcome:zoon.local' ? '!welcome:zoon.local' : null,
+    )
+    const createRoom = vi.fn(async () => '!created:zoon.local')
+
+    const pool = new BotPool(
+      {
+        registerBot,
+        joinRoom,
+        resolveAlias,
+        createRoom,
+        sendStateEvent,
+      } as never,
+      [
+        {
+          name: 'planner',
+          userId: '@planner:zoon.local',
+          rooms: ['#welcome:zoon.local'],
+          trigger: 'mention',
+        },
+      ],
+    )
+
+    await pool.bootstrap({
+      adminUserId: '@admin:zoon.local',
+      spaceRoomId: '!space:zoon.local',
+      asUserId: '@zooid:zoon.local',
+    })
+
+    expect(sendStateEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        roomId: '!space:zoon.local',
+        eventType: 'm.space.child',
+        stateKey: '!welcome:zoon.local',
+        asUserId: '@zooid:zoon.local',
+        content: expect.objectContaining({ via: ['zoon.local'] }),
+      }),
+    )
+  })
+
+  it('does nothing extra when spaceRoomId is omitted', async () => {
+    const sendStateEvent = vi.fn(async () => ({ event_id: '$ev' }))
+    const pool = new BotPool(
+      {
+        registerBot: vi.fn(async () => undefined),
+        joinRoom: vi.fn(async () => undefined),
+        resolveAlias: vi.fn(async () => '!r:zoon.local'),
+        createRoom: vi.fn(async () => '!r:zoon.local'),
+        sendStateEvent,
+      } as never,
+      [
+        {
+          name: 'planner',
+          userId: '@planner:zoon.local',
+          rooms: ['#r:zoon.local'],
+          trigger: 'mention',
+        },
+      ],
+    )
+    await pool.bootstrap({})
+    expect(sendStateEvent).not.toHaveBeenCalled()
+  })
+
+  it('deduplicates the m.space.child write across agents sharing a room', async () => {
+    const sendStateEvent = vi.fn(async () => ({ event_id: '$ev' }))
+    const pool = new BotPool(
+      {
+        registerBot: vi.fn(async () => undefined),
+        joinRoom: vi.fn(async () => undefined),
+        resolveAlias: vi.fn(async () => '!shared:zoon.local'),
+        createRoom: vi.fn(async () => '!shared:zoon.local'),
+        sendStateEvent,
+      } as never,
+      [
+        { name: 'a', userId: '@a:zoon.local', rooms: ['#shared:zoon.local'], trigger: 'any' },
+        { name: 'b', userId: '@b:zoon.local', rooms: ['#shared:zoon.local'], trigger: 'any' },
+      ],
+    )
+    await pool.bootstrap({ spaceRoomId: '!space:zoon.local', asUserId: '@zooid:zoon.local' })
+    const childWrites = sendStateEvent.mock.calls.filter(
+      ([opts]) => (opts as { eventType: string }).eventType === 'm.space.child',
+    )
+    expect(childWrites).toHaveLength(1)
+  })
+})

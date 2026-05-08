@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MatrixClient } from './matrix-client.js'
-import { ensureWorkforceSpace } from './space-provisioner.js'
+import { ensureWorkforceSpace, serverNameFromMxid } from './space-provisioner.js'
 
 function clientWithFetches(...handlers: Array<(url: string, init?: RequestInit) => Response>) {
   let i = 0
@@ -71,5 +71,19 @@ describe('ensureWorkforceSpace', () => {
         preset: 'public_chat',
       }),
     ).rejects.toThrow(/500/)
+  })
+})
+
+describe('serverNameFromMxid', () => {
+  it('returns the part after the first colon', () => {
+    expect(serverNameFromMxid('@zooid:zoon.local')).toBe('zoon.local')
+  })
+
+  it('handles federated server names with ports', () => {
+    expect(serverNameFromMxid('@zooid:hs.example.com:8448')).toBe('hs.example.com:8448')
+  })
+
+  it('throws on an mxid without a server', () => {
+    expect(() => serverNameFromMxid('@zooid')).toThrow(/server/)
   })
 })

@@ -117,11 +117,6 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     // events back to host.docker.internal:<port>.
     server = serve({ fetch: transport.app.fetch, port: requestedPort, hostname: '0.0.0.0' })
     port = await listenAsync(server)
-    // Bootstrap *after* the listener is up: registerBot/createRoom/joinRoom
-    // each trigger Tuwunel to push events back to the AS, and Tuwunel only
-    // retries those a few times before dropping. Listening first ensures
-    // those pushes don't hit a connection-refused.
-    await transport.bootstrap()
 
     // user_namespace is a regex like `@.*:localhost`; the part after the last
     // `:` is the homeserver's server_name. Fall back to the homeserver URL's
@@ -131,8 +126,9 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       new URL(matrix.transport.homeserver).hostname
     const asUserId = `@${matrix.transport.sender_localpart}:${serverName}`
     const spaceLocalpart = matrix.transport.space ?? 'dev'
+    let spaceRoomId: string | undefined
     try {
-      const spaceRoomId = await ensureWorkforceSpace({
+      spaceRoomId = await ensureWorkforceSpace({
         client,
         asUserId,
         serverName,
@@ -140,16 +136,31 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         preset: 'public_chat',
       })
       console.log(`[matrix] ensured workforce space #${spaceLocalpart}:${serverName} → ${spaceRoomId}`)
-      const publisher: PublisherHandle = await startWorkforcePublisher({
-        client,
-        spaceRoomId,
-        asUserId,
-        getAgents: () => bindings,
-      })
-      console.log(`[matrix] published eco.zoon.workforce (${bindings.length} agents)`)
-      void publisher
     } catch (err) {
       console.warn('[matrix] workforce space provisioning failed:', err)
+    }
+
+    // Bootstrap *after* the listener is up: registerBot/createRoom/joinRoom
+    // each trigger Tuwunel to push events back to the AS, and Tuwunel only
+    // retries those a few times before dropping. Listening first ensures
+    // those pushes don't hit a connection-refused. Bootstrap also runs
+    // *after* the space exists so BotPool can attach each agent room as
+    // m.space.child while joining it.
+    await transport.bootstrap({ spaceRoomId, asUserId })
+
+    if (spaceRoomId) {
+      try {
+        const publisher: PublisherHandle = await startWorkforcePublisher({
+          client,
+          spaceRoomId,
+          asUserId,
+          getAgents: () => bindings,
+        })
+        console.log(`[matrix] published eco.zoon.workforce (${bindings.length} agents)`)
+        void publisher
+      } catch (err) {
+        console.warn('[matrix] workforce roster publication failed:', err)
+      }
     }
   } else {
     const http = findHttpTransport(config)

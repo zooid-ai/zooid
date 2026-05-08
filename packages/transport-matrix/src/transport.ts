@@ -409,8 +409,8 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
 
   return {
     app,
-    bootstrap: async () => {
-      await pool.bootstrap({ adminUserId })
+    bootstrap: async (bootstrapOpts: { spaceRoomId?: string; asUserId?: string } = {}) => {
+      await pool.bootstrap({ adminUserId, ...bootstrapOpts })
       await Promise.allSettled(
         bindings.map((b) =>
           client.setPresence({ asUserId: b.userId, presence: 'online' }).catch((err) => {

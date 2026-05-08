@@ -1,22 +1,28 @@
 import type { MatrixClient } from './matrix-client.js'
 import type { AgentBinding } from './router.js'
+import { serverNameFromMxid } from './space-provisioner.js'
 
 export interface BootstrapOpts {
   /** Invited to any newly-created room; absent = no invite. */
   adminUserId?: string
+  /** Workforce space room ID. When set, every resolved agent room is attached as m.space.child. */
+  spaceRoomId?: string
+  /** AS bot user ID. Required when spaceRoomId is set; sender of the m.space.child write. */
+  asUserId?: string
 }
 
 export class BotPool {
   constructor(
     private readonly client: Pick<
       MatrixClient,
-      'registerBot' | 'joinRoom' | 'resolveAlias' | 'createRoom'
+      'registerBot' | 'joinRoom' | 'resolveAlias' | 'createRoom' | 'sendStateEvent'
     >,
     private readonly agents: AgentBinding[],
   ) {}
 
   async bootstrap(opts: BootstrapOpts = {}): Promise<void> {
     const aliasToId = new Map<string, string>()
+    const attachedToSpace = new Set<string>()
     for (const a of this.agents) {
       try {
         await this.client.registerBot(localpart(a.userId))
@@ -52,6 +58,28 @@ export class BotPool {
           // matches on event.room_id) sees a hit when Tuwunel pushes events.
           a.rooms[i] = resolved
           await this.client.joinRoom(resolved, a.userId)
+
+          if (
+            opts.spaceRoomId &&
+            opts.asUserId &&
+            !attachedToSpace.has(resolved)
+          ) {
+            attachedToSpace.add(resolved)
+            const via = serverNameFromMxid(a.userId)
+            try {
+              await this.client.sendStateEvent({
+                roomId: opts.spaceRoomId,
+                asUserId: opts.asUserId,
+                eventType: 'm.space.child',
+                stateKey: resolved,
+                content: { via: [via] },
+              })
+            } catch (err) {
+              console.warn(
+                `[matrix] m.space.child(${resolved}) failed: ${(err as Error).message}`,
+              )
+            }
+          }
         } catch (err) {
           console.warn(
             `[matrix] join failed (${a.userId} → ${room}): ${(err as Error).message}`,

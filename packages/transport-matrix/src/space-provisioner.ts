@@ -24,3 +24,11 @@ export async function ensureWorkforceSpace(opts: EnsureSpaceOpts): Promise<strin
     },
   })
 }
+
+export function serverNameFromMxid(mxid: string): string {
+  const colon = mxid.indexOf(':')
+  if (colon < 0) {
+    throw new Error(`mxid lacks server: ${mxid}`)
+  }
+  return mxid.slice(colon + 1)
+}
