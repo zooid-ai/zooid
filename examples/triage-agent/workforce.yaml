@@ -13,7 +13,7 @@ transports:
 
 agents:
   default:
-    workdir: .
+    workdir: ./agents/default
     acp:
       preset: claude
     http:

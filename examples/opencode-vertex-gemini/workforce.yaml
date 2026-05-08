@@ -1,21 +1,34 @@
-# opencode + Vertex Gemini 3.1 Pro example.
+# opencode + Vertex Gemini 3.1 Pro — docker + matrix smoke.
 #
-# The opencode shim reads opencode.json from cwd, which pins
-# google-vertex/gemini-3.1-pro-preview and uses Vertex Express auth
-# (GOOGLE_VERTEX_API_KEY from .env). zooid spawns the shim via the
-# `opencode` preset under runtime: local; the host's env is inherited.
+# Boots a Tuwunel-backed Matrix homeserver (via `zooid dev`), connects the
+# zooid daemon as an Application Service, and spawns the reviewer agent in
+# a docker container built from the sibling Dockerfile. Mention
+# @reviewer:localhost in the #review room to drive a turn.
 
-runtime: local
+runtime: docker
 
 transports:
-  http-local:
-    type: http
-    port: 8080
+  matrix:
+    type: matrix
+    homeserver: http://localhost:8448
+    as_token: ${MATRIX_AS_TOKEN}
+    hs_token: ${MATRIX_HS_TOKEN}
+    sender_localpart: zooid
+    user_namespace: '@.*:localhost'
+    port: 9099
 
 agents:
   reviewer:
-    workdir: .
+    workdir: /workspace
     acp:
       preset: opencode
-    http:
-      transport: http-local
+    container:
+      image: zooid-opencode-vertex:smoke
+      env:
+        GOOGLE_VERTEX_API_KEY: ${GOOGLE_VERTEX_API_KEY}
+    matrix:
+      transport: matrix
+      user_id: '@reviewer:localhost'
+      rooms:
+        - '#review:localhost'
+      trigger: mention

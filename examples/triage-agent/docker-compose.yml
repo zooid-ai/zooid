@@ -22,7 +22,7 @@
 #          -H "Content-Type: application/json" \
 #          -d '{"decision":"allow","option_id":"allow-once"}'
 #
-#   5. When turn.end fires, check ./tickets/ for the result.
+#   5. When turn.end fires, check ./agents/default/tickets/ for the result.
 #
 # The image is the single zooid-agent-base — no per-CLI Dockerfile baked
 # in. The Claude Code ACP shim is fetched on first run via `npx -y` inside

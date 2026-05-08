@@ -7,7 +7,7 @@ transports:
 
 agents:
   code:
-    workdir: .
+    workdir: ./agents/code
     acp:
       preset: claude
     http:

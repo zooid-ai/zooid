@@ -1,9 +1,9 @@
 # Triage Agent
 
 A zooid example that turns vague bug reports into structured engineering
-tickets by exploring the zooid monorepo itself. The agent reads
-`../../packages/` (the real zooid packages, including the marketing
-`homepage` package) and writes a ticket here in `tickets/`.
+tickets by exploring the zooid monorepo itself. The agent runs from
+`agents/default/` and reads `../../../../packages/` (the real zooid
+packages), writing a ticket here in `agents/default/tickets/`.
 
 This is the canonical end-to-end smoke for the ACP-based zooid stack:
 the daemon spawns the Claude Code ACP shim, surfaces tool-permission
@@ -17,7 +17,7 @@ You give it a fuzzy report:
 
 The agent:
 
-1. Reads the workspace under `../../packages/`
+1. Reads the workspace under `../../../../packages/`
 2. Identifies the most likely package (here, `packages/transport-http`)
 3. Opens the relevant source files and finds the specific component
 4. Asks for permission to write a new file under `tickets/`
@@ -89,12 +89,13 @@ Claude Code ACP shim (auto-installed via `npx`). From this directory:
    ```
 
 5. When the SSE stream emits `{"type":"turn.end","stop_reason":"end_turn"}`,
-   a new ticket file is in `./tickets/`.
+   a new ticket file is in `./agents/default/tickets/`.
 
-The daemon reads `workforce.yaml` from the current directory and uses `.`
-as its working dir, so `CLAUDE.md`, `.claude/settings.json`, and
-`tickets/` are all in cwd and `../../packages/` resolves to the real
-zooid packages on disk.
+The daemon reads `workforce.yaml` from the current directory and the
+agent runs with `workdir: ./agents/default`, so the agent's cwd is
+`agents/default/`. `CLAUDE.md`, `.claude/settings.json`, and `tickets/`
+all live there, and `../../../../packages/` resolves to the real zooid
+packages on disk.
 
 ## Running it (Docker)
 
@@ -122,10 +123,10 @@ on first run via `npx -y` inside the container.
 | Path | Purpose |
 |---|---|
 | `workforce.yaml` | zooid configuration (transport, runtime, agents) |
-| `CLAUDE.md` | The triage agent's personality and operating rules |
-| `.claude/settings.json` | Belt-and-suspenders pre-approved tool permissions inside the shim |
+| `agents/default/CLAUDE.md` | The triage agent's personality and operating rules |
+| `agents/default/.claude/settings.json` | Belt-and-suspenders pre-approved tool permissions inside the shim |
+| `agents/default/tickets/` | Where the agent writes structured tickets |
 | `docker-compose.yml` | Optional: containerized run on `zooid-agent-base` |
-| `tickets/` | Where the agent writes structured tickets |
 | `.env` | (gitignored) Your `ANTHROPIC_API_KEY` and `ZOOID_TOKEN` — only needed for the Docker flow |
 
 ### Why `.claude/settings.json`?

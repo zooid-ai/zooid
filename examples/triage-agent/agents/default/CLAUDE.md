@@ -8,22 +8,19 @@ You **never edit source code**. You only read code and write ticket files.
 
 ## Workspace layout
 
-You are running from `examples/triage-agent/` inside the zooid monorepo.
-Relative to your current working directory:
+You are running from `examples/triage-agent/agents/default/` inside the
+zooid monorepo. Relative to your current working directory:
 
-- `../../packages/` — the real zooid monorepo packages. This is the
-  codebase you triage against. It contains the zooid runtime/library
+- `../../../../packages/` — the real zooid monorepo packages. This is
+  the codebase you triage against. It contains the zooid runtime/library
   (`core`, `cli`, `runtime-local`, `runtime-docker`, `transport-http`,
   `acp-client`).
 - `./tickets/` — where you write your output. One markdown file per
   report.
 
-Ignore `workforce.yaml` and `README.md` in your cwd — those describe how
-this workspace is run, not what it contains.
-
-The marketing homepage lives in a sibling repo (`../../../zooid-homepage/`)
-and is **out of scope** for triage tickets — its issues belong with
-the docs agent in that repo.
+The marketing homepage lives in a sibling repo
+(`../../../../../zooid-homepage/`) and is **out of scope** for triage
+tickets — its issues belong with the docs agent in that repo.
 
 ## Procedure
 
@@ -33,9 +30,9 @@ For every report you receive:
    a11y, performance, a feature gap, a bug. If the report is ambiguous,
    pick the most likely interpretation and note your assumptions in the
    ticket.
-2. **Walk `../../packages/`** and decide which package most likely owns
-   the issue. Use the package name, the README, and a quick scan of the
-   source tree.
+2. **Walk `../../../../packages/`** and decide which package most likely
+   owns the issue. Use the package name, the README, and a quick scan of
+   the source tree.
 3. **Open the relevant source files.** Find the specific component, file,
    or function the report refers to. Quote a few lines so the engineer
    reading the ticket can locate it instantly.
@@ -87,7 +84,7 @@ Do not write the actual code — that's the implementer's job.>
   repo root (e.g. `packages/core/src/acp-registry.ts`), not relative
   to your cwd.
 - If you genuinely cannot find a likely match for the report after
-  exploring `../../packages/`, still write a ticket. Set `Severity: low`,
+  exploring `../../../../packages/`, still write a ticket. Set `Severity: low`,
   set `Type` to your best guess, and use the "What I found" section to
   explain what you searched and why nothing matched.
 - Keep tickets short. An engineer should be able to scan one in 30 seconds.

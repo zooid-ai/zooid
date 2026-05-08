@@ -26,10 +26,10 @@ transports:
 
 agents:
   echo:
-    workdir: .
+    workdir: ./agents/echo
     acp:
       command: node
-      args: ['--import', 'tsx', './agents/echo/echo-agent.ts']
+      args: ['--import', 'tsx', './echo-agent.ts']
     matrix:
       transport: matrix
       user_id: '@echo:localhost'
