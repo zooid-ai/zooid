@@ -123,6 +123,8 @@ export interface MatrixTransportConfig {
   user_namespace: string
   /** AS HTTP listener port. Defaults to 8080. */
   port?: number
+  /** Workforce space localpart. Resolves to alias `#<space>:<server>`. Defaults to `dev`. */
+  space?: string
 }
 
 /**

@@ -101,6 +101,47 @@ export class MatrixClient {
     return j.room_id
   }
 
+  async createRoomRaw(opts: {
+    asUserId: string
+    body: Record<string, unknown>
+  }): Promise<string> {
+    const url = `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.asUserId)}`
+    const r = await this.fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.asToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(opts.body),
+    })
+    if (!r.ok) throw new Error(`createRoomRaw failed: ${r.status}`)
+    const j = (await r.json()) as { room_id: string }
+    return j.room_id
+  }
+
+  async sendStateEvent(opts: {
+    roomId: string
+    asUserId: string
+    eventType: string
+    stateKey?: string
+    content: Record<string, unknown>
+  }): Promise<{ event_id: string }> {
+    const url =
+      `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}` +
+      `/state/${encodeURIComponent(opts.eventType)}/${encodeURIComponent(opts.stateKey ?? '')}` +
+      `?user_id=${encodeURIComponent(opts.asUserId)}`
+    const r = await this.fetch(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${this.asToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(opts.content),
+    })
+    if (!r.ok) throw new Error(`sendStateEvent ${opts.eventType} failed: ${r.status}`)
+    return (await r.json()) as { event_id: string }
+  }
+
   async joinRoom(roomIdOrAlias: string, asUserId: string): Promise<void> {
     const url =
       `${this.homeserver}/_matrix/client/v3/join/${encodeURIComponent(roomIdOrAlias)}` +

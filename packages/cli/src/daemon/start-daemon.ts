@@ -15,7 +15,10 @@ import { createApp } from '@zooid/transport-http'
 import {
   MatrixClient,
   createMatrixTransport,
+  ensureWorkforceSpace,
+  startWorkforcePublisher,
   type AgentBinding,
+  type PublisherHandle,
 } from '@zooid/transport-matrix'
 import { buildAcpRegistry } from '../build-registry.js'
 
@@ -119,6 +122,35 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     // retries those a few times before dropping. Listening first ensures
     // those pushes don't hit a connection-refused.
     await transport.bootstrap()
+
+    // user_namespace is a regex like `@.*:localhost`; the part after the last
+    // `:` is the homeserver's server_name. Fall back to the homeserver URL's
+    // host if the namespace shape is unexpected.
+    const serverName =
+      matrix.transport.user_namespace.split(':').slice(1).join(':').replace(/\\?\)?$/, '') ||
+      new URL(matrix.transport.homeserver).hostname
+    const asUserId = `@${matrix.transport.sender_localpart}:${serverName}`
+    const spaceLocalpart = matrix.transport.space ?? 'dev'
+    try {
+      const spaceRoomId = await ensureWorkforceSpace({
+        client,
+        asUserId,
+        serverName,
+        spaceLocalpart,
+        preset: 'public_chat',
+      })
+      console.log(`[matrix] ensured workforce space #${spaceLocalpart}:${serverName} → ${spaceRoomId}`)
+      const publisher: PublisherHandle = await startWorkforcePublisher({
+        client,
+        spaceRoomId,
+        asUserId,
+        getAgents: () => bindings,
+      })
+      console.log(`[matrix] published eco.zoon.workforce (${bindings.length} agents)`)
+      void publisher
+    } catch (err) {
+      console.warn('[matrix] workforce space provisioning failed:', err)
+    }
   } else {
     const http = findHttpTransport(config)
     if (!http) throw new Error('no transport declared in zooid.yaml')

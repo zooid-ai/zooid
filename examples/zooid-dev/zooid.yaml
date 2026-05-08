@@ -23,6 +23,9 @@ transports:
     sender_localpart: zooid
     user_namespace: '@.*:localhost'
     port: 9099
+    # Workforce space localpart. Resolves to alias #<space>:<server_name>.
+    # Defaults to `dev` when omitted.
+    # space: dev
 
 agents:
   echo:

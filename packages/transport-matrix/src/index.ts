@@ -9,3 +9,16 @@ export type { AgentBinding, RouteMatch } from './router.js'
 export { BotPool } from './bot-pool.js'
 export { createMatrixTransport } from './transport.js'
 export type { CreateMatrixTransportOptions } from './transport.js'
+export { ensureWorkforceSpace } from './space-provisioner.js'
+export type { EnsureSpaceOpts } from './space-provisioner.js'
+export {
+  buildWorkforceRoster,
+  publishWorkforce,
+  startWorkforcePublisher,
+} from './workforce-publisher.js'
+export type {
+  WorkforceRoster,
+  PublishOpts,
+  PublisherHandle,
+  StartOpts as StartWorkforcePublisherOpts,
+} from './workforce-publisher.js'

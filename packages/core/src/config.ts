@@ -213,6 +213,14 @@ function parseTransport(
       }
       out.port = r.port as number
     }
+    if (r.space !== undefined) {
+      if (typeof r.space !== 'string' || r.space.length === 0) {
+        throw new Error(
+          `transports.${name}.space must be a non-empty string (got ${JSON.stringify(r.space)})`,
+        )
+      }
+      out.space = r.space
+    }
     return out
   }
   // type: 'http'
