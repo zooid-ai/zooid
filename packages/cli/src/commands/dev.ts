@@ -7,7 +7,7 @@ import { serve, type ServerType } from '@hono/node-server'
 import {
   findConfigFile,
   findMatrixTransport,
-  loadWorkforceConfig,
+  loadZooidConfig,
 } from '@zooid/core'
 import { ensureAdminUser } from '../bootstrap/admin.js'
 import { writeBootstrapConfigs } from '../bootstrap/configs.js'
@@ -89,19 +89,19 @@ interface DevCtx {
 export async function runDev(flags: DevFlags): Promise<DevHandle> {
   const cwd = flags.cwd ?? process.cwd()
   const found = findConfigFile(cwd)
-  if (!found) throw new Error(`workforce.yaml not found in ${cwd}`)
+  if (!found) throw new Error(`zooid.yaml not found in ${cwd}`)
   // Load .env files from the workforce dir before anything reads process.env.
   // Order matches the convention used by Vite/Next: .env.local overrides .env,
   // and real shell vars override both (loadEnvFile never overwrites existing
   // process.env entries). Spawned agents inherit these via runtime-local.
   loadEnvFiles(cwd)
   // Use the unparsed text so that env-var expansion happens inside
-  // loadWorkforceConfig once tokens are exported.
+  // loadZooidConfig once tokens are exported.
   const rawYaml = readFileSync(found.path, 'utf8')
-  const preview = loadWorkforceConfig(rawYaml)
+  const preview = loadZooidConfig(rawYaml)
   const matrix = findMatrixTransport(preview)
   if (!matrix) {
-    throw new Error('workforce.yaml: zooid dev requires at least one matrix transport')
+    throw new Error('zooid.yaml: zooid dev requires at least one matrix transport')
   }
   const agentUserIds = Object.values(preview.agents)
     .filter((a) => a.matrix?.transport === matrix.name)
@@ -178,7 +178,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
         title: 'Start daemon',
         task: async () => {
           if (!ctx.tokens) throw new Error('tokens not ready')
-          // Export tokens so loadWorkforceConfig's env interpolation can fill
+          // Export tokens so loadZooidConfig's env interpolation can fill
           // the ${MATRIX_AS_TOKEN}/${MATRIX_HS_TOKEN} placeholders.
           process.env.MATRIX_AS_TOKEN = ctx.tokens.asToken
           process.env.MATRIX_HS_TOKEN = ctx.tokens.hsToken

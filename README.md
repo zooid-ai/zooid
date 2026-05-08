@@ -5,7 +5,7 @@ HTTP API. You hand it a prompt; it spawns the agent against a workspace
 directory and streams the agent's stdout back as Server-Sent Events.
 
 Designed to be deployed as a container: `FROM ghcr.io/zooid-ai/budd-agent-claude-code`, layer in
-your `workforce.yaml` and `CLAUDE.md`, push it anywhere that runs containers,
+your `zooid.yaml` and `CLAUDE.md`, push it anywhere that runs containers,
 and you have an addressable agent endpoint.
 
 ## Why
@@ -89,7 +89,7 @@ FROM ghcr.io/zooid-ai/budd-agent-claude-code
 COPY CLAUDE.md /workspace/CLAUDE.md
 
 # Optional: customise the daemon (hooks, port, runtime)
-COPY workforce.yaml /workspace/workforce.yaml
+COPY zooid.yaml /workspace/zooid.yaml
 
 WORKDIR /workspace
 ```
@@ -97,7 +97,7 @@ WORKDIR /workspace
 Push it to your registry, run it on Fly / Railway / Kubernetes / your laptop.
 The endpoint is the same.
 
-## `workforce.yaml`
+## `zooid.yaml`
 
 Required. Loaded from the current working directory. Each agent must declare
 an `acp` block and reference a transport by name.
@@ -185,7 +185,7 @@ at runtime.
 examples/triage-agent/
 ├── CLAUDE.md                    # Agent personality & instructions
 ├── .claude/settings.json        # Tool permissions
-├── workforce.yaml               # Required: runtime, transports, agents
+├── zooid.yaml               # Required: runtime, transports, agents
 └── Dockerfile                   # Agent image definition
 ```
 

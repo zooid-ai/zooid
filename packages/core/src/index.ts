@@ -1,5 +1,5 @@
 export {
-  loadWorkforceConfig,
+  loadZooidConfig,
   mergeCliFlags,
   findTransport,
   findMatrixTransport,
@@ -31,10 +31,10 @@ export type {
 export type {
   AgentConfig,
   ContainerConfig,
-  WorkforceContainerConfig,
+  ZooidContainerConfig,
   MatrixBinding,
   HttpBinding,
-  WorkforceConfig,
+  ZooidConfig,
   TransportConfig,
   MatrixTransportConfig,
   HttpTransportConfig,

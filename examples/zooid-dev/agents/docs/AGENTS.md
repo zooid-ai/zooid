@@ -22,7 +22,7 @@ honest, present-tense documentation about what Zooid currently does.
   and use `.mdx`.
 
 Ignore everything outside this `agents/docs/` subtree. The
-`workforce.yaml`, `opencode.json`, sibling agents — none of that is
+`zooid.yaml`, `opencode.json`, sibling agents — none of that is
 the product.
 
 ## Procedure

@@ -11,8 +11,8 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 describe('startDaemon — http transport (smoke without Matrix)', () => {
-  it('starts an http transport when workforce.yaml only declares one', async () => {
-    const yamlPath = join(dir, 'workforce.yaml')
+  it('starts an http transport when zooid.yaml only declares one', async () => {
+    const yamlPath = join(dir, 'zooid.yaml')
     writeFileSync(
       yamlPath,
       [
@@ -48,7 +48,7 @@ describe('startDaemon — http transport (smoke without Matrix)', () => {
   })
 
   it('rejects when no transport is declared', async () => {
-    const yamlPath = join(dir, 'workforce.yaml')
+    const yamlPath = join(dir, 'zooid.yaml')
     writeFileSync(
       yamlPath,
       [

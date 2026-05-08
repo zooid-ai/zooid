@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { LocalAcpRuntime } from '@zooid/runtime-local'
 import { DockerAcpRuntime } from '@zooid/runtime-docker'
-import type { WorkforceConfig } from '@zooid/core'
+import type { ZooidConfig } from '@zooid/core'
 import { buildAcpRegistry } from './build-registry.js'
 
-function cfg(overrides: Partial<WorkforceConfig> & Pick<WorkforceConfig, 'runtime'>): WorkforceConfig {
+function cfg(overrides: Partial<ZooidConfig> & Pick<ZooidConfig, 'runtime'>): ZooidConfig {
   return {
     runtime: overrides.runtime,
     transports: overrides.transports ?? { 'http-local': { type: 'http', port: 8080 } },
@@ -20,7 +20,7 @@ function cfg(overrides: Partial<WorkforceConfig> & Pick<WorkforceConfig, 'runtim
     },
     hooks: {},
     container: overrides.container,
-  } as WorkforceConfig
+  } as ZooidConfig
 }
 
 describe('buildAcpRegistry', () => {
@@ -46,7 +46,7 @@ describe('buildAcpRegistry', () => {
   })
 
   it('throws if any agent has no acp block (defense in depth)', () => {
-    const c: WorkforceConfig = {
+    const c: ZooidConfig = {
       runtime: 'local',
       transports: { 'http-local': { type: 'http', port: 8080 } },
       agents: {

@@ -48,7 +48,7 @@ describe.skipIf(!dockerAvailable())(
   () => {
     beforeAll(async () => {
       workDir = mkdtempSync(join(tmpdir(), 'zooid-dev2-'))
-      writeFileSync(join(workDir, 'workforce.yaml'), yaml)
+      writeFileSync(join(workDir, 'zooid.yaml'), yaml)
       const stubDist = join(workDir, 'web-dist')
       execSync(`mkdir -p "${stubDist}"`)
       writeFileSync(join(stubDist, 'index.html'), '<!doctype html><div id=root></div>')

@@ -72,7 +72,7 @@ cli
 cli
   .command('status', 'Print Tuwunel + daemon health')
   .option('--data <dir>', 'Persistent data root dir', { default: './data' })
-  .option('--port <n>', 'Tuwunel host port (defaults to workforce.yaml)')
+  .option('--port <n>', 'Tuwunel host port (defaults to zooid.yaml)')
   .action(async (flags) => {
     await runStatus({
       dataDir: flags.data,

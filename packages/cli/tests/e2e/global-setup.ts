@@ -31,12 +31,12 @@ export default async function globalSetup(): Promise<void> {
   // Don't `cp -R` the example folder — pnpm's symlinked node_modules become
   // dead under a different path and the echo shim's `node --import tsx`
   // resolution breaks. Run against the original example dir, override
-  // workforce.yaml's hardcoded port via a temp config dir, and put data/
+  // zooid.yaml's hardcoded port via a temp config dir, and put data/
   // somewhere we can clean up.
   const dataDir = mkdtempSync(join(tmpdir(), 'zooid-e2e-data-'))
   const workDir = mkdtempSync(join(tmpdir(), 'zooid-e2e-cfg-'))
-  const yamlPath = join(workDir, 'workforce.yaml')
-  copyFileSync(join(EXAMPLE_DIR, 'workforce.yaml'), yamlPath)
+  const yamlPath = join(workDir, 'zooid.yaml')
+  copyFileSync(join(EXAMPLE_DIR, 'zooid.yaml'), yamlPath)
   writeFileSync(
     yamlPath,
     readFileSync(yamlPath, 'utf8').replace(

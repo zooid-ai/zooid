@@ -12,7 +12,7 @@ const base: MatrixTransportConfig = {
 }
 
 describe('deriveHomeserverShape', () => {
-  it('extracts host, port, and server_name from a localhost workforce.yaml', () => {
+  it('extracts host, port, and server_name from a localhost zooid.yaml', () => {
     const shape = deriveHomeserverShape(base, [
       '@assistant:localhost',
       '@monitor:localhost',

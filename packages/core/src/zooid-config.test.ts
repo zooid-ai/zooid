@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { loadWorkforceConfig } from './config.js'
+import { loadZooidConfig } from './config.js'
 
 const minimal = `
 runtime: docker
@@ -24,9 +24,9 @@ agents:
       trigger: mention
 `
 
-describe('loadWorkforceConfig — new shape', () => {
+describe('loadZooidConfig — new shape', () => {
   it('parses a single-matrix-transport workforce', () => {
-    const c = loadWorkforceConfig(minimal)
+    const c = loadZooidConfig(minimal)
     expect(c.transports['matrix-local']).toMatchObject({
       type: 'matrix',
       homeserver: 'http://localhost:8448',
@@ -52,12 +52,12 @@ agents:
     http:
       transport: http-only
 `
-    expect(loadWorkforceConfig(yaml).runtime).toBe('docker')
+    expect(loadZooidConfig(yaml).runtime).toBe('docker')
   })
 
   it('errors when transports is empty', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 transports: {}
 agents:
   a:
@@ -71,7 +71,7 @@ agents:
 
   it("errors when an agent's transport reference doesn't exist", () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 transports:
   matrix-local:
     type: matrix
@@ -94,7 +94,7 @@ agents:
 
   it('errors when a transport has an unknown type', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 transports:
   bad:
     type: smtp
@@ -110,7 +110,7 @@ agents:
 
   it('errors when a matrix-typed transport is referenced from an http: block', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 transports:
   m:
     type: matrix
@@ -131,7 +131,7 @@ agents:
 
   it('errors when a matrix block omits user_id', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 transports:
   matrix-local:
     type: matrix
@@ -178,7 +178,7 @@ agents:
     http:
       transport: http-direct
 `
-    const c = loadWorkforceConfig(yaml)
+    const c = loadZooidConfig(yaml)
     expect(Object.keys(c.transports)).toEqual(['matrix-local', 'http-direct'])
     expect(c.agents.m!.matrix?.transport).toBe('matrix-local')
     expect(c.agents.h!.http?.transport).toBe('http-direct')

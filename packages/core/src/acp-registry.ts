@@ -32,7 +32,7 @@ export type AcpRegistryApprovalHandler = (
  */
 export interface AcpRegistry {
   hasAgent(name: string): boolean
-  /** Per-agent approval timeout from workforce.yaml. 0 means no timeout. */
+  /** Per-agent approval timeout from zooid.yaml. 0 means no timeout. */
   getApprovalTimeoutMs(name: string): number
   ensureSession(name: string, threadId: string): Promise<string>
   /** Drop the in-memory session for (agent, threadId). Next prompt re-creates one. */

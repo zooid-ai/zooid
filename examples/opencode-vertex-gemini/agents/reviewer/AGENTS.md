@@ -13,7 +13,7 @@ markdown finding under `./findings/`.
 - `src/throttle.test.ts` — its existing test suite
 - `findings/` — your output goes here, one markdown file per session
 
-Ignore `workforce.yaml`, `opencode.json`, `README.md`, `.env`, and `AGENTS.md`
+Ignore `zooid.yaml`, `opencode.json`, `README.md`, `.env`, and `AGENTS.md`
 in your cwd — they describe the harness, not the code you review.
 
 ## Procedure

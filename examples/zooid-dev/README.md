@@ -54,7 +54,7 @@ once that wires through the UI.)
 
 ## What's in this folder
 
-- `workforce.yaml` — the workforce-as-code config consumed by
+- `zooid.yaml` — the workforce-as-code config consumed by
   `zooid dev`.
 - `agents/echo/echo-agent.ts` — a tiny ACP-speaking shim. Read it to
   see how little code an agent needs to integrate with Zooid.

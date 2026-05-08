@@ -2,7 +2,7 @@
 #
 # Bakes this agent's workspace at /workspace and installs opencode globally
 # so the ACP shim is on PATH. Used by `runtime: docker` in the example's
-# workforce.yaml.
+# zooid.yaml.
 #
 # Build (from this directory):
 #   docker build -t zooid-opencode-vertex:smoke .

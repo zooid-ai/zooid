@@ -48,17 +48,17 @@ export interface ContainerConfig {
  * Workforce-level container defaults. Currently `image` only — see
  * [ZOD043] §Non-goals on workforce-level env.
  */
-export interface WorkforceContainerConfig {
+export interface ZooidContainerConfig {
   image?: string
 }
 
 /**
  * Matrix transport binding. Lives under `agents.<name>.matrix:` in
- * workforce.yaml. The block name (`matrix`) is the transport-kind
+ * zooid.yaml. The block name (`matrix`) is the transport-kind
  * discriminator: `transports[transport].type` must equal `"matrix"`.
  */
 export interface MatrixBinding {
-  /** Ref into `WorkforceConfig.transports`. Resolved transport must have type: 'matrix'. */
+  /** Ref into `ZooidConfig.transports`. Resolved transport must have type: 'matrix'. */
   transport: string
   /** Full Matrix user ID for this agent's bot, e.g. `@architect:example.com`. */
   user_id: string
@@ -70,15 +70,15 @@ export interface MatrixBinding {
 
 /**
  * HTTP transport binding. Lives under `agents.<name>.http:` in
- * workforce.yaml. Reserved for future HTTP-specific binding fields.
+ * zooid.yaml. Reserved for future HTTP-specific binding fields.
  */
 export interface HttpBinding {
-  /** Ref into `WorkforceConfig.transports`. Resolved transport must have type: 'http'. */
+  /** Ref into `ZooidConfig.transports`. Resolved transport must have type: 'http'. */
   transport: string
 }
 
 /**
- * Per-agent config inside a multi-agent workforce.yaml. Each agent has its
+ * Per-agent config inside a multi-agent zooid.yaml. Each agent has its
  * own workspace, hooks, an ACP block describing the shim to spawn, and
  * exactly one transport-kind block (`matrix` or `http`).
  */
@@ -136,14 +136,14 @@ export interface HttpTransportConfig {
 export type TransportConfig = MatrixTransportConfig | HttpTransportConfig
 
 /**
- * Parsed workforce.yaml shape. Always multi-agent — `agents:` is required and
+ * Parsed zooid.yaml shape. Always multi-agent — `agents:` is required and
  * must have at least one entry. At least one transport must be declared and
  * each agent must reference one by name.
  */
-export interface WorkforceConfig {
+export interface ZooidConfig {
   runtime: 'local' | 'docker' | 'podman'
   /** Workforce-wide container defaults. Image only — no workforce-level env. Rejected when runtime: local. */
-  container?: WorkforceContainerConfig
+  container?: ZooidContainerConfig
   /** Required. Map of operator-chosen names → transport config. At least one entry. */
   transports: Record<string, TransportConfig>
   /** Required. Must have at least one entry. */

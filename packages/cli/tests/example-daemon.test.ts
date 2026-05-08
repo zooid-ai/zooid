@@ -2,16 +2,16 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { loadWorkforceConfig } from '@zooid/core'
+import { loadZooidConfig } from '@zooid/core'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const EXAMPLE = join(HERE, '..', '..', '..', 'examples', 'zooid-dev', 'workforce.yaml')
+const EXAMPLE = join(HERE, '..', '..', '..', 'examples', 'zooid-dev', 'zooid.yaml')
 
-describe('examples/zooid-dev/workforce.yaml', () => {
+describe('examples/zooid-dev/zooid.yaml', () => {
   it('parses and declares one matrix transport with echo + docs agents', () => {
     process.env.MATRIX_AS_TOKEN = 'as-test'
     process.env.MATRIX_HS_TOKEN = 'hs-test'
-    const cfg = loadWorkforceConfig(readFileSync(EXAMPLE, 'utf8'))
+    const cfg = loadZooidConfig(readFileSync(EXAMPLE, 'utf8'))
     const transports = cfg.transports ?? {}
     const matrixEntries = Object.entries(transports).filter(([, t]) => t.type === 'matrix')
     expect(matrixEntries).toHaveLength(1)

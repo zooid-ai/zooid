@@ -87,7 +87,7 @@ check `findings/` for the new markdown file.
 
 | Path | Purpose |
 |---|---|
-| `workforce.yaml` | zooid config — `acp: { preset: opencode }`, runtime: local |
+| `zooid.yaml` | zooid config — `acp: { preset: opencode }`, runtime: local |
 | `opencode.json` | Pins the model (`google-vertex/gemini-3.1-pro-preview`) |
 | `AGENTS.md` | The reviewer's job description and finding format |
 | `src/throttle.ts` | The implementation under review |

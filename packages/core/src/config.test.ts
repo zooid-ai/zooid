@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { loadWorkforceConfig, mergeCliFlags } from './config.js'
-import type { WorkforceConfig } from './types.js'
+import { loadZooidConfig, mergeCliFlags } from './config.js'
+import type { ZooidConfig } from './types.js'
 
 const HTTP_TRANSPORT = `
 transports:
@@ -19,9 +19,9 @@ agents:
       transport: http-local
 `
 
-describe('loadWorkforceConfig', () => {
-  it('parses a minimal workforce.yaml', () => {
-    const config = loadWorkforceConfig(`
+describe('loadZooidConfig', () => {
+  it('parses a minimal zooid.yaml', () => {
+    const config = loadZooidConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}${QA_AGENTS}`)
     expect(config).toEqual({
@@ -44,7 +44,7 @@ ${HTTP_TRANSPORT.trimStart()}${QA_AGENTS}`)
   })
 
   it('parses workforce-wide hooks', () => {
-    const config = loadWorkforceConfig(`
+    const config = loadZooidConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 hooks:
@@ -56,7 +56,7 @@ ${QA_AGENTS.trimStart()}`)
   })
 
   it('http transport defaults port to 8080', () => {
-    const config = loadWorkforceConfig(`
+    const config = loadZooidConfig(`
 runtime: local
 transports:
   http-local:
@@ -66,12 +66,12 @@ ${QA_AGENTS}`)
   })
 
   it('default runtime flips to docker', () => {
-    const config = loadWorkforceConfig(`${HTTP_TRANSPORT}${QA_AGENTS}`)
+    const config = loadZooidConfig(`${HTTP_TRANSPORT}${QA_AGENTS}`)
     expect(config.runtime).toBe('docker')
   })
 
   it('parses container.image override at workforce level', () => {
-    const config = loadWorkforceConfig(`
+    const config = loadZooidConfig(`
 runtime: docker
 ${HTTP_TRANSPORT.trimStart()}
 container:
@@ -88,13 +88,13 @@ agents:
   })
 
   it('container is undefined when omitted under runtime: docker', () => {
-    const config = loadWorkforceConfig(`runtime: docker${HTTP_TRANSPORT}${QA_AGENTS}`)
+    const config = loadZooidConfig(`runtime: docker${HTTP_TRANSPORT}${QA_AGENTS}`)
     expect(config.container).toBeUndefined()
   })
 
   it('rejects http transport with non-integer port', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 runtime: local
 transports:
   http-local:
@@ -105,12 +105,12 @@ ${QA_AGENTS}`),
   })
 
   it('rejects malformed yaml', () => {
-    expect(() => loadWorkforceConfig(`runtime: local\n  bad: indent`)).toThrow()
+    expect(() => loadZooidConfig(`runtime: local\n  bad: indent`)).toThrow()
   })
 
   it('rejects top-level transport: (legacy shape)', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 transport: http
 runtime: local
 ${QA_AGENTS}`),
@@ -119,7 +119,7 @@ ${QA_AGENTS}`),
 
   it('rejects top-level matrix: (legacy shape)', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 runtime: local
 matrix:
   homeserver: http://localhost:8448
@@ -128,9 +128,9 @@ ${HTTP_TRANSPORT}${QA_AGENTS}`),
   })
 })
 
-describe('loadWorkforceConfig — agents map', () => {
+describe('loadZooidConfig — agents map', () => {
   it('parses multiple agents with per-agent workdir, hooks, and acp blocks', () => {
-    const config = loadWorkforceConfig(`
+    const config = loadZooidConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 agents:
@@ -155,7 +155,7 @@ agents:
   })
 
   it('merges workforce-wide hooks into each agent, per-agent overrides win', () => {
-    const config = loadWorkforceConfig(`
+    const config = loadZooidConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 hooks:
@@ -184,7 +184,7 @@ agents:
   })
 
   it('null at agent-level disables a workforce-wide hook', () => {
-    const config = loadWorkforceConfig(`
+    const config = loadZooidConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 hooks:
@@ -202,19 +202,19 @@ agents:
 
   it('rejects missing agents key', () => {
     expect(() =>
-      loadWorkforceConfig(`runtime: local${HTTP_TRANSPORT}`),
+      loadZooidConfig(`runtime: local${HTTP_TRANSPORT}`),
     ).toThrow(/agents: is required/i)
   })
 
   it('rejects empty agents: map', () => {
     expect(() =>
-      loadWorkforceConfig(`runtime: local${HTTP_TRANSPORT}\nagents: {}`),
+      loadZooidConfig(`runtime: local${HTTP_TRANSPORT}\nagents: {}`),
     ).toThrow(/agents: must have at least one entry/i)
   })
 
   it('rejects top-level workdir (flat form removed)', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 runtime: local
 workdir: ./
 ${HTTP_TRANSPORT}${QA_AGENTS}`),
@@ -223,7 +223,7 @@ ${HTTP_TRANSPORT}${QA_AGENTS}`),
 
   it('rejects agents entry missing workdir', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 agents:
@@ -236,7 +236,7 @@ agents:
 
   it('rejects bad agent names', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 agents:
@@ -249,9 +249,9 @@ agents:
   })
 })
 
-describe('loadWorkforceConfig — per-agent container block', () => {
+describe('loadZooidConfig — per-agent container block', () => {
   it('parses per-agent container.image', () => {
-    const config = loadWorkforceConfig(`
+    const config = loadZooidConfig(`
 runtime: docker
 ${HTTP_TRANSPORT.trimStart()}
 agents:
@@ -274,7 +274,7 @@ agents:
 
   it('rejects agents.*.container when runtime is local', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 agents:
@@ -290,7 +290,7 @@ agents:
 })
 
 describe('mergeCliFlags', () => {
-  function baseConfig(overrides: Partial<WorkforceConfig> = {}): WorkforceConfig {
+  function baseConfig(overrides: Partial<ZooidConfig> = {}): ZooidConfig {
     return {
       runtime: 'local',
       transports: { 'http-local': { type: 'http', port: 8080 } },
@@ -353,9 +353,9 @@ transports:
     user_namespace: '@.*:localhost'
 `
 
-describe('loadWorkforceConfig (matrix transport)', () => {
+describe('loadZooidConfig (matrix transport)', () => {
   it('parses a matrix transport with a matrix: binding block', () => {
-    const config = loadWorkforceConfig(`
+    const config = loadZooidConfig(`
 runtime: local
 ${MATRIX_TRANSPORT.trimStart()}
 agents:
@@ -382,7 +382,7 @@ agents:
   })
 
   it('defaults trigger to "mention" when omitted', () => {
-    const config = loadWorkforceConfig(`
+    const config = loadZooidConfig(`
 runtime: local
 ${MATRIX_TRANSPORT.trimStart()}
 agents:
@@ -401,7 +401,7 @@ agents:
 
   it('rejects matrix block referencing http transport', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 runtime: local
 ${HTTP_TRANSPORT.trimStart()}
 agents:
@@ -418,7 +418,7 @@ agents:
 
   it('rejects bad matrix.user_id format', () => {
     expect(() =>
-      loadWorkforceConfig(`
+      loadZooidConfig(`
 runtime: local
 ${MATRIX_TRANSPORT.trimStart()}
 agents:

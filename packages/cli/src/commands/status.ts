@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs'
 import chalk from 'chalk'
-import { findConfigFile, findMatrixTransport, loadWorkforceConfig } from '@zooid/core'
+import { findConfigFile, findMatrixTransport, loadZooidConfig } from '@zooid/core'
 import { deriveHomeserverShape } from '../bootstrap/derive.js'
 
 export interface StatusFlags {
   cwd?: string
   dataDir: string
-  /** Tuwunel host port. If omitted, derived from workforce.yaml's matrix transport. */
+  /** Tuwunel host port. If omitted, derived from zooid.yaml's matrix transport. */
   port?: number
 }
 
@@ -39,11 +39,11 @@ export async function collectStatus(opts: {
   if (!found) {
     return {
       tuwunel,
-      daemon: { status: 'unknown', reason: 'no workforce.yaml' },
+      daemon: { status: 'unknown', reason: 'no zooid.yaml' },
       agents: [],
     }
   }
-  const cfg = loadWorkforceConfig(readFileSync(found.path, 'utf8'))
+  const cfg = loadZooidConfig(readFileSync(found.path, 'utf8'))
   const matrixEntry = Object.entries(cfg.transports).find(
     ([, t]) => t.type === 'matrix',
   ) as [string, { port?: number }] | undefined
@@ -73,7 +73,7 @@ export async function runStatus(flags: StatusFlags): Promise<void> {
   if (port === undefined) {
     const found = findConfigFile(cwd)
     if (found) {
-      const cfg = loadWorkforceConfig(readFileSync(found.path, 'utf8'))
+      const cfg = loadZooidConfig(readFileSync(found.path, 'utf8'))
       const matrix = findMatrixTransport(cfg)
       if (matrix) {
         const userIds = Object.values(cfg.agents)

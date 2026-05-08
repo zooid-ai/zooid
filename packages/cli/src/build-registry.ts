@@ -5,7 +5,7 @@ import {
   type AcpRuntime,
   type ApprovalCorrelator,
   type TapEvent,
-  type WorkforceConfig,
+  type ZooidConfig,
 } from '@zooid/core'
 
 export interface BuildAcpRegistryOptions {
@@ -35,7 +35,7 @@ export interface BuildAcpRegistryOptions {
  * The image is resolved as `agent.container?.image ?? cfg.container?.image`.
  */
 export function buildAcpRegistry(
-  cfg: WorkforceConfig,
+  cfg: ZooidConfig,
   opts: BuildAcpRegistryOptions = {},
 ): AcpAgentRegistry {
   for (const [name, agent] of Object.entries(cfg.agents)) {
@@ -62,7 +62,7 @@ export function buildAcpRegistry(
   })
 }
 
-function defaultRuntimeFor(cfg: WorkforceConfig): AcpRuntime {
+function defaultRuntimeFor(cfg: ZooidConfig): AcpRuntime {
   if (cfg.runtime === 'local') return new LocalAcpRuntime()
   if (cfg.runtime === 'docker') {
     return new DockerAcpRuntime({ defaultImage: cfg.container?.image, engine: 'docker' })

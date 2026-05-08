@@ -13,7 +13,7 @@ docker build -t ghcr.io/zooid-ai/zooid-agent-base:local \
   packages/runtime-docker/docker/agent-base
 ```
 
-Set as the runtime default in `workforce.yaml`:
+Set as the runtime default in `zooid.yaml`:
 
 ```yaml
 transport: http

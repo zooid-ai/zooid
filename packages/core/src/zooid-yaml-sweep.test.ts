@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { loadWorkforceConfig } from './config.js'
+import { loadZooidConfig } from './config.js'
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..')
 
@@ -36,7 +36,7 @@ container:
 ${baseTransports}
 agents:${matrixAgent()}
 `
-    const cfg = loadWorkforceConfig(yaml)
+    const cfg = loadZooidConfig(yaml)
     expect(cfg.container?.image).toBe('zooid-agent-base:latest')
   })
 
@@ -50,7 +50,7 @@ agents:${matrixAgent(`
     container:
       image: alice:2`)}
 `
-    const cfg = loadWorkforceConfig(yaml)
+    const cfg = loadZooidConfig(yaml)
     expect(cfg.agents.alice!.container?.image).toBe('alice:2')
   })
 
@@ -61,7 +61,7 @@ container: { image: x:1 }
 ${baseTransports}
 agents:${matrixAgent()}
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(
+    expect(() => loadZooidConfig(yaml)).toThrow(
       /container.*only valid when runtime is 'docker' or 'podman'/i,
     )
   })
@@ -74,7 +74,7 @@ agents:${matrixAgent(`
     container:
       image: x:1`)}
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(
+    expect(() => loadZooidConfig(yaml)).toThrow(
       /alice\.container.*only valid when runtime is 'docker' or 'podman'/i,
     )
   })
@@ -99,7 +99,7 @@ agents:${matrixAgent(`
       env:
         LOG_LEVEL: info`)}
 `
-    const cfg = loadWorkforceConfig(yaml)
+    const cfg = loadZooidConfig(yaml)
     expect(cfg.agents.alice!.container?.env).toEqual({ LOG_LEVEL: 'info' })
   })
 
@@ -113,7 +113,7 @@ agents:${matrixAgent(`
       env:
         ANTHROPIC_API_KEY: \${ANTHROPIC_API_KEY}`)}
 `
-    const cfg = loadWorkforceConfig(yaml)
+    const cfg = loadZooidConfig(yaml)
     expect(cfg.agents.alice!.container?.env?.ANTHROPIC_API_KEY).toBe('sk-test')
   })
 
@@ -127,7 +127,7 @@ agents:${matrixAgent(`
       env:
         MODEL: \${MODEL:-claude-opus-4-7}`)}
 `
-    const cfg = loadWorkforceConfig(yaml)
+    const cfg = loadZooidConfig(yaml)
     expect(cfg.agents.alice!.container?.env?.MODEL).toBe('claude-opus-4-7')
   })
 
@@ -141,7 +141,7 @@ agents:${matrixAgent(`
       env:
         K: \${ABSENT}`)}
 `
-    const cfg = loadWorkforceConfig(yaml)
+    const cfg = loadZooidConfig(yaml)
     expect(cfg.agents.alice!.container?.env?.K).toBe('')
   })
 
@@ -155,7 +155,7 @@ agents:${matrixAgent(`
       env:
         TOKEN: \${ZOOID_TOKEN}`)}
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/ZOOID_/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/ZOOID_/i)
   })
 
   it('rejects ${ZOOID_X} reference inside a composed value', () => {
@@ -168,7 +168,7 @@ agents:${matrixAgent(`
       env:
         K: 'prefix-\${ZOOID_INTERNAL}'`)}
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/ZOOID_/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/ZOOID_/i)
   })
 
   it('rejects a key in the ZOOID_* namespace', () => {
@@ -180,7 +180,7 @@ agents:${matrixAgent(`
       env:
         ZOOID_FOO: literal`)}
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/ZOOID_/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/ZOOID_/i)
   })
 
   it('rejects non-string env values (numbers, booleans)', () => {
@@ -192,7 +192,7 @@ agents:${matrixAgent(`
       env:
         PORT: 8080`)}
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/string/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/string/i)
   })
 })
 
@@ -211,7 +211,7 @@ agents:
       rooms: ['!r:localhost']
       trigger: any
 `
-    const cfg = loadWorkforceConfig(yaml)
+    const cfg = loadZooidConfig(yaml)
     expect(cfg.agents.alice!.matrix).toEqual({
       transport: 'm1',
       user_id: '@alice:localhost',
@@ -227,7 +227,7 @@ runtime: docker
 ${baseTransports}
 agents:${matrixAgent()}
 `
-    const cfg = loadWorkforceConfig(yaml)
+    const cfg = loadZooidConfig(yaml)
     expect(cfg.agents.alice!.matrix?.trigger).toBe('mention')
   })
 
@@ -240,7 +240,7 @@ agents:
     workdir: ./alice
     acp: { preset: claude }
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/exactly one transport.*block/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/exactly one transport.*block/i)
   })
 
   it('rejects an agent with two transport-kind blocks', () => {
@@ -260,7 +260,7 @@ agents:
     http:
       transport: h1
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/exactly one transport.*block/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/exactly one transport.*block/i)
   })
 
   it('rejects matrix block whose transport ref points at an http transport', () => {
@@ -277,7 +277,7 @@ agents:
       user_id: '@alice:localhost'
       rooms: ['!r:localhost']
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(
+    expect(() => loadZooidConfig(yaml)).toThrow(
       /matrix.*references transport.*type: http/i,
     )
   })
@@ -295,7 +295,7 @@ agents:
       user_id: '@alice:localhost'
       rooms: ['!r:localhost']
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/transport "nope" is not declared/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/transport "nope" is not declared/i)
   })
 
   it('parses http block', () => {
@@ -310,7 +310,7 @@ agents:
     http:
       transport: h1
 `
-    const cfg = loadWorkforceConfig(yaml)
+    const cfg = loadZooidConfig(yaml)
     expect(cfg.agents.alice!.http).toEqual({ transport: 'h1' })
     expect(cfg.agents.alice!.matrix).toBeUndefined()
   })
@@ -325,7 +325,7 @@ docker:
 ${baseTransports}
 agents:${matrixAgent()}
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/Top-level 'docker'.*ZOD043/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/Top-level 'docker'.*ZOD043/i)
   })
 
   it('rejects per-agent docker: block', () => {
@@ -336,7 +336,7 @@ agents:${matrixAgent(`
     docker:
       image: x:1`)}
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/agents\.alice\.docker.*ZOD043/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/agents\.alice\.docker.*ZOD043/i)
   })
 
   it('rejects flat agent transport: string', () => {
@@ -353,7 +353,7 @@ agents:
       user_id: '@alice:localhost'
       rooms: ['!r:localhost']
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/transport[\s\S]*ZOD043/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/transport[\s\S]*ZOD043/i)
   })
 
   it('rejects flat matrix_user_id / rooms / trigger fields', () => {
@@ -367,23 +367,23 @@ agents:
     matrix_user_id: '@alice:localhost'
     rooms: ['!r:localhost']
 `
-    expect(() => loadWorkforceConfig(yaml)).toThrow(/matrix_user_id.*ZOD043/i)
+    expect(() => loadZooidConfig(yaml)).toThrow(/matrix_user_id.*ZOD043/i)
   })
 })
 
 describe('example fixtures parse cleanly', () => {
   for (const rel of [
-    '../../../examples/zooid-dev/workforce.yaml',
-    '../../../examples/triage-agent/workforce.yaml',
-    '../../../examples/opencode-vertex-gemini/workforce.yaml',
-    '../../../examples/ec2/workspace/workforce.yaml',
+    '../../../examples/zooid-dev/zooid.yaml',
+    '../../../examples/triage-agent/zooid.yaml',
+    '../../../examples/opencode-vertex-gemini/zooid.yaml',
+    '../../../examples/ec2/workspace/zooid.yaml',
   ]) {
     it(`parses ${rel}`, () => {
       const path = resolve(HERE, rel)
       const text = readFileSync(path, 'utf8')
       process.env.MATRIX_AS_TOKEN ??= 'fixture-as'
       process.env.MATRIX_HS_TOKEN ??= 'fixture-hs'
-      expect(() => loadWorkforceConfig(text)).not.toThrow()
+      expect(() => loadZooidConfig(text)).not.toThrow()
     })
   }
 })

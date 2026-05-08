@@ -13,8 +13,8 @@ import type {
   MatrixBinding,
   MatrixTransportConfig,
   TransportConfig,
-  WorkforceConfig,
-  WorkforceContainerConfig,
+  ZooidConfig,
+  ZooidContainerConfig,
 } from './types.js'
 
 const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
@@ -130,12 +130,12 @@ function parseAgentContainer(
   return out
 }
 
-function parseWorkforceContainer(raw: unknown): WorkforceContainerConfig {
+function parseZooidContainer(raw: unknown): ZooidContainerConfig {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw new Error('container must be a mapping')
   }
   const r = raw as Record<string, unknown>
-  const out: WorkforceContainerConfig = {}
+  const out: ZooidContainerConfig = {}
   if (r.env !== undefined) {
     throw new Error(
       "Top-level 'container.env' is not supported (workforce-level env defaults are out of scope; see [ZOD043]). " +
@@ -422,7 +422,7 @@ function parseRuntime(raw: unknown): 'local' | 'docker' | 'podman' {
   return runtime
 }
 
-function workforceHooks(raw: Record<string, unknown>): { pre_turn?: string; post_turn?: string } {
+function zooidHooks(raw: Record<string, unknown>): { pre_turn?: string; post_turn?: string } {
   const out: { pre_turn?: string; post_turn?: string } = {}
   if (raw.hooks && typeof raw.hooks === 'object') {
     const h = raw.hooks as Record<string, unknown>
@@ -432,21 +432,21 @@ function workforceHooks(raw: Record<string, unknown>): { pre_turn?: string; post
   return out
 }
 
-export function loadWorkforceConfig(yamlText: string): WorkforceConfig {
+export function loadZooidConfig(yamlText: string): ZooidConfig {
   const raw = parse(yamlText) ?? {}
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new Error('workforce.yaml must be a YAML object')
+    throw new Error('zooid.yaml must be a YAML object')
   }
   const r = raw as Record<string, unknown>
 
   if (r.transport !== undefined) {
     throw new Error(
-      'workforce.yaml: top-level "transport:" is no longer supported; declare entries under "transports:" instead',
+      'zooid.yaml: top-level "transport:" is no longer supported; declare entries under "transports:" instead',
     )
   }
   if (r.matrix !== undefined) {
     throw new Error(
-      'workforce.yaml: top-level "matrix:" is no longer supported; move it under "transports.<name>: { type: matrix, ... }"',
+      'zooid.yaml: top-level "matrix:" is no longer supported; move it under "transports.<name>: { type: matrix, ... }"',
     )
   }
   if (r.workdir !== undefined) {
@@ -461,16 +461,16 @@ export function loadWorkforceConfig(yamlText: string): WorkforceConfig {
     )
   }
   if (r.agents === undefined) {
-    throw new Error('agents: is required — workforce.yaml must define at least one agent')
+    throw new Error('agents: is required — zooid.yaml must define at least one agent')
   }
 
   const runtime = parseRuntime(r.runtime)
   const processEnv = process.env
   const transports = parseTransports(r.transports, processEnv)
-  const hooks = workforceHooks(r)
+  const hooks = zooidHooks(r)
   const agents = parseAgents(r.agents, runtime, transports, hooks, processEnv)
 
-  const cfg: WorkforceConfig = {
+  const cfg: ZooidConfig = {
     runtime,
     transports,
     agents,
@@ -483,20 +483,20 @@ export function loadWorkforceConfig(yamlText: string): WorkforceConfig {
           'runtime: local does not run agents in containers; image is ignored. See [ZOD043].',
       )
     }
-    cfg.container = parseWorkforceContainer(r.container)
+    cfg.container = parseZooidContainer(r.container)
   }
   return cfg
 }
 
 export function findTransport(
-  cfg: WorkforceConfig,
+  cfg: ZooidConfig,
   name: string,
 ): TransportConfig | undefined {
   return cfg.transports[name]
 }
 
 export function findMatrixTransport(
-  cfg: WorkforceConfig,
+  cfg: ZooidConfig,
 ): { name: string; transport: MatrixTransportConfig } | null {
   const matrices = Object.entries(cfg.transports).filter(
     (e): e is [string, MatrixTransportConfig] => e[1].type === 'matrix',
@@ -514,7 +514,7 @@ export function findMatrixTransport(
 }
 
 export function findHttpTransport(
-  cfg: WorkforceConfig,
+  cfg: ZooidConfig,
 ): { name: string; transport: HttpTransportConfig } | null {
   const https = Object.entries(cfg.transports).filter(
     (e): e is [string, HttpTransportConfig] => e[1].type === 'http',
@@ -536,12 +536,18 @@ export interface FoundConfigFile {
 }
 
 export function findConfigFile(cwd: string): FoundConfigFile | null {
-  const w = join(cwd, 'workforce.yaml')
-  if (existsSync(w)) return { path: w }
+  const z = join(cwd, 'zooid.yaml')
+  if (existsSync(z)) return { path: z }
+  const legacy = join(cwd, 'workforce.yaml')
+  if (existsSync(legacy)) {
+    throw new Error(
+      `workforce.yaml is no longer supported. Rename it to zooid.yaml. See [ZOD045].`,
+    )
+  }
   return null
 }
 
-export function mergeCliFlags(base: WorkforceConfig, flags: CliFlags): WorkforceConfig {
+export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
   const runtimeFlag = flags.runtime as 'local' | 'docker' | 'podman' | undefined
   if (
     runtimeFlag !== undefined &&
@@ -552,7 +558,7 @@ export function mergeCliFlags(base: WorkforceConfig, flags: CliFlags): Workforce
     throw new Error(`runtime must be "local", "docker", or "podman" (got "${flags.runtime}")`)
   }
   const runtime = runtimeFlag ?? base.runtime
-  const merged: WorkforceConfig = {
+  const merged: ZooidConfig = {
     runtime,
     transports: base.transports,
     agents: base.agents,

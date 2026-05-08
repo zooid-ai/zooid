@@ -6,7 +6,7 @@ import {
   findConfigFile,
   findHttpTransport,
   findMatrixTransport,
-  loadWorkforceConfig,
+  loadZooidConfig,
   mergeCliFlags,
   type CliFlags,
   type TapEvent,
@@ -63,8 +63,8 @@ function closeAsync(server: ServerType): Promise<void> {
 export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHandle> {
   const cwd = opts.cwd ?? process.cwd()
   const found = opts.configPath ? { path: opts.configPath } : findConfigFile(cwd)
-  if (!found) throw new Error('workforce.yaml is required')
-  const base = loadWorkforceConfig(readFileSync(found.path, 'utf8'))
+  if (!found) throw new Error('zooid.yaml is required')
+  const base = loadZooidConfig(readFileSync(found.path, 'utf8'))
   const config = mergeCliFlags(base, opts.cliFlags ?? {})
 
   const approvals = new ApprovalCorrelator()
@@ -121,7 +121,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     await transport.bootstrap()
   } else {
     const http = findHttpTransport(config)
-    if (!http) throw new Error('no transport declared in workforce.yaml')
+    if (!http) throw new Error('no transport declared in zooid.yaml')
     const token = process.env.ZOOID_TOKEN
     if (!token) throw new Error('ZOOID_TOKEN is required for http transport')
     const app = createApp({ agents: registry, approvals, token })

@@ -36,7 +36,7 @@ const yaml = [
 
 describe('collectStatus', () => {
   it('reports tuwunel up + daemon up + agents listed', async () => {
-    writeFileSync(join(dir, 'workforce.yaml'), yaml)
+    writeFileSync(join(dir, 'zooid.yaml'), yaml)
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
@@ -55,7 +55,7 @@ describe('collectStatus', () => {
   })
 
   it('reports daemon down when the AS callback port refuses the connection', async () => {
-    writeFileSync(join(dir, 'workforce.yaml'), yaml)
+    writeFileSync(join(dir, 'zooid.yaml'), yaml)
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {

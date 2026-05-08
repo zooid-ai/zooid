@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { findMatrixTransport, findTransport } from './config.js'
-import type { WorkforceConfig } from './types.js'
+import type { ZooidConfig } from './types.js'
 
-const cfg: WorkforceConfig = {
+const cfg: ZooidConfig = {
   runtime: 'docker',
   transports: {
     'matrix-local': {
@@ -34,7 +34,7 @@ describe('findTransport / findMatrixTransport', () => {
   })
 
   it('findMatrixTransport returns null when none exists', () => {
-    const httpOnly: WorkforceConfig = {
+    const httpOnly: ZooidConfig = {
       ...cfg,
       transports: { 'http-only': { type: 'http', port: 8080 } },
     }
@@ -42,7 +42,7 @@ describe('findTransport / findMatrixTransport', () => {
   })
 
   it('findMatrixTransport throws when more than one matrix transport exists', () => {
-    const dual: WorkforceConfig = {
+    const dual: ZooidConfig = {
       ...cfg,
       transports: {
         a: cfg.transports['matrix-local']!,

@@ -55,7 +55,7 @@ export function interpolateEnv(
   // Process each value through interpolateString. Per-key processing avoids
   // dotenv-expand's "processEnv shadows parsed" behaviour, which would let the
   // daemon's `LOG_LEVEL=debug` overwrite a literal `LOG_LEVEL: info` declared in
-  // workforce.yaml. References still resolve against the full processEnv.
+  // zooid.yaml. References still resolve against the full processEnv.
   const out: Record<string, string> = {}
   for (const [key, val] of Object.entries(parsed)) {
     out[key] = interpolateString(val, processEnv)

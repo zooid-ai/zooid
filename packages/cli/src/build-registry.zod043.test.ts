@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildAcpRegistry } from './build-registry.js'
-import type { WorkforceConfig } from '@zooid/core'
+import type { ZooidConfig } from '@zooid/core'
 
 const baseTransports = {
   m1: {
@@ -13,7 +13,7 @@ const baseTransports = {
   },
 }
 
-function makeCfg(over: Partial<WorkforceConfig> = {}): WorkforceConfig {
+function makeCfg(over: Partial<ZooidConfig> = {}): ZooidConfig {
   return {
     runtime: 'docker',
     container: { image: 'workforce-default:1' },
