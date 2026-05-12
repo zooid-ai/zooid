@@ -1,4 +1,5 @@
 import type { ChildProcess } from 'node:child_process'
+import { resolve as pathResolve } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import {
   ClientSideConnection,
@@ -183,7 +184,7 @@ export class AcpClient {
       try {
         await this.connection.loadSession({
           sessionId: persisted,
-          cwd: this.options.agent.cwd ?? process.cwd(),
+          cwd: pathResolve(this.options.agent.cwd ?? process.cwd()),
           mcpServers,
         })
         this.sessions.set(key, { sessionId: persisted, startedAt: Date.now() })
@@ -199,7 +200,7 @@ export class AcpClient {
     }
 
     const { sessionId } = await this.connection.newSession({
-      cwd: this.options.agent.cwd ?? process.cwd(),
+      cwd: pathResolve(this.options.agent.cwd ?? process.cwd()),
       mcpServers,
     })
     this.sessions.set(key, { sessionId, startedAt: Date.now() })
