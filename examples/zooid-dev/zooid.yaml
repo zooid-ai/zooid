@@ -54,7 +54,7 @@ agents:
   ux-consultant:
     workdir: ./agents/ux-consultant
     acp:
-      preset: claude
+      preset: opencode
     matrix:
       transport: matrix
       user_id: '@ux-consultant:localhost'
