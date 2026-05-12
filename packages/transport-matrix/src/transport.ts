@@ -355,7 +355,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     // first reply. sessionKey is always a thread root id, never the room id.
     const threadRoot = inbound ?? evt.event_id
     const sessionKey = threadRoot
-    const sessionId = await agents.ensureSession(agent.name, sessionKey)
+    const sessionId = await agents.ensureSession(agent.name, sessionKey, evt.room_id)
     sessions.set(sessionId, { agent, roomId: evt.room_id, threadRoot })
     buffers.set(sessionId, '')
 
@@ -384,6 +384,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       const promptText = stripMention(rawBody, agent.userId)
       await agents.prompt(agent.name, {
         threadId: sessionKey,
+        channelId: evt.room_id,
         content: [{ type: 'text', text: promptText }],
       })
       const text = buffers.get(sessionId) ?? ''

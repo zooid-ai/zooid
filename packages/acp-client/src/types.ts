@@ -24,6 +24,13 @@ export interface AgentConfig {
 
 export interface PromptInput {
   threadId: string
+  /**
+   * Channel/room id this thread lives in. Optional — when omitted, callers
+   * (transports that don't model a separate channel, e.g. HTTP) treat
+   * `threadId` as both. Matrix passes `evt.room_id` here so the
+   * transport-context provider sees the real room.
+   */
+  channelId?: string
   content: ContentBlock[]
 }
 

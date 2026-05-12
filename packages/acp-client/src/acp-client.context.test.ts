@@ -53,7 +53,7 @@ describe('AcpClient — context MCP wiring', () => {
     })
     injectConnection(client, calls)
     await client.ensureSession('!room:hs')
-    expect(contextSpawn).toHaveBeenCalledWith('!room:hs')
+    expect(contextSpawn).toHaveBeenCalledWith('!room:hs', undefined)
     const params = calls.find((c) => c.method === 'newSession')!.params as {
       mcpServers: Array<{ name: string; args: string[] }>
     }

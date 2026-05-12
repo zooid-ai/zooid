@@ -87,32 +87,38 @@ function buildContextSpawns(
   const registry = opts.contextSpawnRegistry
   const sockPath = opts.daemonSockPath
 
-  const matrixProviders = new Map<string, TransportContextProvider>()
+  // Share one MatrixClient per matrix transport (only state is homeserver +
+  // asToken). Per-agent providers wrap that client with the agent's own
+  // user_id as asUserId — when the AS impersonates the agent (via ?user_id=)
+  // it sees the rooms that bot is a member of. The AS sender_localpart
+  // typically isn't in those rooms, so impersonating it returns empty
+  // chunks.
+  const matrixClients = new Map<string, MatrixClient>()
   const agentBots = new Map<string, string>()
   for (const [name, agent] of Object.entries(cfg.agents)) {
     if (agent.matrix?.user_id) agentBots.set(agent.matrix.user_id, name)
   }
   for (const [tname, tcfg] of Object.entries(cfg.transports)) {
     if (tcfg.type !== 'matrix') continue
-    const client = new MatrixClient({
-      homeserver: tcfg.homeserver,
-      asToken: tcfg.as_token,
-    })
-    const asUserId = `@${tcfg.sender_localpart}:${serverNameOf(tcfg.homeserver)}`
-    matrixProviders.set(
+    matrixClients.set(
       tname,
-      new MatrixContextProvider({ client, asUserId, agentBots }),
+      new MatrixClient({ homeserver: tcfg.homeserver, asToken: tcfg.as_token }),
     )
   }
 
   const result: Record<string, ContextSpawnFactory | undefined> = {}
   for (const [name, agent] of Object.entries(cfg.agents)) {
-    if (agent.matrix && matrixProviders.has(agent.matrix.transport)) {
-      const provider = matrixProviders.get(agent.matrix.transport)!
-      result[name] = async (threadId: string) => {
+    if (agent.matrix && matrixClients.has(agent.matrix.transport)) {
+      const client = matrixClients.get(agent.matrix.transport)!
+      const provider: TransportContextProvider = new MatrixContextProvider({
+        client,
+        asUserId: agent.matrix.user_id,
+        agentBots,
+      })
+      result[name] = async (threadId: string, channelId?: string) => {
         const spawnId = registry.register({
           agentName: name,
-          threadRef: { channelId: threadId, threadId },
+          threadRef: { channelId: channelId ?? threadId, threadId },
           provider,
         })
         return buildContextServerSpec({ spawnId, sockPath })
@@ -122,10 +128,6 @@ function buildContextSpawns(
     }
   }
   return result
-}
-
-function serverNameOf(homeserver: string): string {
-  return homeserver.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/.*$/, '')
 }
 
 function defaultRuntimeFor(cfg: ZooidConfig): AcpRuntime {

@@ -70,7 +70,7 @@ export interface AcpClientOptions {
    * connects to the daemon-side zooid-context MCP server for the session
    * lifetime. Called once per `ensureSession(threadId)`.
    */
-  contextSpawn?: (threadId: string) => Promise<{
+  contextSpawn?: (threadId: string, channelId?: string) => Promise<{
     name: 'zooid-context'
     command: string
     args: string[]
@@ -158,7 +158,7 @@ export class AcpClient {
     this.initialized = false
   }
 
-  async ensureSession(threadId: string): Promise<string> {
+  async ensureSession(threadId: string, channelId?: string): Promise<string> {
     if (!this.connection || !this.initialized) {
       throw new Error('AcpClient.start() must be called before ensureSession()')
     }
@@ -169,7 +169,7 @@ export class AcpClient {
     if (cached) return cached.sessionId
 
     const mcpServers = this.options.contextSpawn
-      ? [await this.options.contextSpawn(threadId)]
+      ? [await this.options.contextSpawn(threadId, channelId)]
       : []
     process.stderr.write(
       `[acp-client:${this.options.agent.id}] ensureSession(${threadId}) mcpServers=${
@@ -253,7 +253,7 @@ export class AcpClient {
   }
 
   async prompt(input: PromptInput): Promise<PromptResult> {
-    const sessionId = await this.ensureSession(input.threadId)
+    const sessionId = await this.ensureSession(input.threadId, input.channelId)
     const promptText = stringifyPromptForLog(input.content)
     this.turns?.startTurn({ sessionId, promptText })
     debugLog(this.options.agent.id, 'prompt →', { sessionId, content: input.content })
