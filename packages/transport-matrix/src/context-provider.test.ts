@@ -130,6 +130,7 @@ describe('MatrixContextProvider', () => {
       asUserId: '@_zooid:hs',
       limit: 25,
       from: 'cursor-1',
+      filter: { types: ['m.room.message'] },
     })
   })
 

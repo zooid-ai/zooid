@@ -261,6 +261,17 @@ export class MatrixClient {
     limit?: number
     /** Opaque pagination token returned in `end` from a previous call. */
     from?: string
+    /**
+     * Server-side RoomEventFilter. Common keys: `types` (whitelist event types),
+     * `not_types`, `not_rel_types` (e.g. `['m.thread']` to exclude thread
+     * replies). Encoded as JSON into the `filter` query param.
+     */
+    filter?: {
+      types?: string[]
+      not_types?: string[]
+      rel_types?: string[]
+      not_rel_types?: string[]
+    }
   }): Promise<{ chunk: Array<Record<string, unknown>>; end?: string }> {
     const params = new URLSearchParams({
       dir: 'b',
@@ -268,6 +279,7 @@ export class MatrixClient {
       user_id: opts.asUserId,
     })
     if (opts.from) params.set('from', opts.from)
+    if (opts.filter) params.set('filter', JSON.stringify(opts.filter))
     const url =
       `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}` +
       `/messages?${params.toString()}`

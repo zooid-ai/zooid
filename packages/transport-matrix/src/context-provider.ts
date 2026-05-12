@@ -42,11 +42,16 @@ export class MatrixContextProvider implements TransportContextProvider {
   constructor(private readonly opts: MatrixContextProviderOpts) {}
 
   async getRoomHistory(channelId: string, hopts: HistoryOptions): Promise<HistoryPage> {
+    // Server-side filter: only `m.room.message` events. Without this we'd
+    // burn the page budget on reactions, `eco.zoon.*` custom events, typing
+    // notifications, etc., and routinely return empty pages with a stale
+    // `has_more` cursor.
     const { chunk, end } = await this.opts.client.fetchRoomMessages({
       roomId: channelId,
       asUserId: this.opts.asUserId,
       limit: hopts.limit,
       from: hopts.before,
+      filter: { types: ['m.room.message'] },
     })
     const messages: Message[] = []
     for (let i = chunk.length - 1; i >= 0; i--) {
@@ -65,11 +70,15 @@ export class MatrixContextProvider implements TransportContextProvider {
     channelId: string,
     hopts: HistoryOptions,
   ): Promise<ThreadOverviewPage> {
+    // Server-side filter: `m.room.message` only, and exclude thread replies
+    // (`not_rel_types: ['m.thread']`) so the overview shows top-level entries
+    // and thread roots, not the reply noise underneath them.
     const { chunk, end } = await this.opts.client.fetchRoomMessages({
       roomId: channelId,
       asUserId: this.opts.asUserId,
       limit: hopts.limit,
       from: hopts.before,
+      filter: { types: ['m.room.message'], not_rel_types: ['m.thread'] },
     })
     // /messages returns newest-first; keep that order for the overview.
     const threads: ThreadOverview[] = []
