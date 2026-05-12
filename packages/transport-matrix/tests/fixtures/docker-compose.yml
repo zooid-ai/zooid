@@ -2,7 +2,7 @@ services:
   tuwunel:
     image: ghcr.io/matrix-construct/tuwunel:latest
     ports:
-      - "8448:8448"
+      - "${TUWUNEL_HOST_PORT:-8448}:8448"
     volumes:
       - ./tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro
       - ./registrations:/var/lib/tuwunel/registrations:ro
