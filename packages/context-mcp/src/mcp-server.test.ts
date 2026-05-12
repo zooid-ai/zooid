@@ -6,6 +6,8 @@ import type { TransportContextProvider } from '@zooid/core'
 
 function makeProvider(over: Partial<TransportContextProvider> = {}): TransportContextProvider {
   return {
+    getRoomHistory: async () => ({ messages: [], has_more: false }),
+    getRecentThreads: async () => ({ threads: [], has_more: false }),
     getThreadHistory: async () => ({ messages: [], has_more: false }),
     getChannelMembers: async () => [],
     getChannelInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
@@ -21,7 +23,7 @@ async function connect(server: ReturnType<typeof buildContextMcpServer>) {
 }
 
 describe('buildContextMcpServer', () => {
-  it('lists exactly three tools with the spec names', async () => {
+  it('lists exactly five tools with the spec names', async () => {
     const server = buildContextMcpServer({ resolve: async () => makeProvider() })
     const client = await connect(server)
     const list = await client.listTools()
@@ -29,13 +31,15 @@ describe('buildContextMcpServer', () => {
       'zooid_get_channel_info',
       'zooid_get_history',
       'zooid_get_members',
+      'zooid_get_recent_threads',
+      'zooid_get_thread_history',
     ])
   })
 
   it('zooid_get_history forwards limit + before and returns the page as text JSON', async () => {
     const calls: Array<{ limit?: number; before?: string }> = []
     const provider = makeProvider({
-      getThreadHistory: async (_t, opts) => {
+      getRoomHistory: async (_c, opts) => {
         calls.push(opts)
         return {
           messages: [
@@ -64,7 +68,7 @@ describe('buildContextMcpServer', () => {
   it('clamps limit to max 200', async () => {
     const calls: Array<{ limit?: number }> = []
     const provider = makeProvider({
-      getThreadHistory: async (_t, opts) => {
+      getRoomHistory: async (_c, opts) => {
         calls.push(opts)
         return { messages: [], has_more: false }
       },
@@ -78,7 +82,7 @@ describe('buildContextMcpServer', () => {
   it('defaults limit to 50 when omitted', async () => {
     const calls: Array<{ limit?: number }> = []
     const provider = makeProvider({
-      getThreadHistory: async (_t, opts) => {
+      getRoomHistory: async (_c, opts) => {
         calls.push(opts)
         return { messages: [], has_more: false }
       },
@@ -87,6 +91,59 @@ describe('buildContextMcpServer', () => {
     const client = await connect(server)
     await client.callTool({ name: 'zooid_get_history', arguments: {} })
     expect(calls[0].limit).toBe(50)
+  })
+
+  it('zooid_get_recent_threads returns the provider payload', async () => {
+    const provider = makeProvider({
+      getRecentThreads: async () => ({
+        threads: [
+          {
+            id: '$root',
+            sender: 'alice',
+            text: 'kickoff',
+            timestamp: 'T',
+            is_agent: false,
+            reply_count: 4,
+            last_activity_at: 'T2',
+          },
+        ],
+        has_more: false,
+      }),
+    })
+    const server = buildContextMcpServer({ resolve: async () => provider })
+    const client = await connect(server)
+    const res = await client.callTool({ name: 'zooid_get_recent_threads', arguments: {} })
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0].text)
+    expect(payload.threads[0]).toMatchObject({ id: '$root', reply_count: 4 })
+  })
+
+  it('zooid_get_thread_history forwards thread_id and limit/before', async () => {
+    const calls: Array<{ threadId: string; opts: { limit?: number; before?: string } }> = []
+    const provider = makeProvider({
+      getThreadHistory: async (_c, threadId, opts) => {
+        calls.push({ threadId, opts })
+        return {
+          messages: [
+            { id: '$root', sender: 'alice', text: 'root', timestamp: 'T', is_agent: false },
+          ],
+          has_more: false,
+        }
+      },
+    })
+    const server = buildContextMcpServer({ resolve: async () => provider })
+    const client = await connect(server)
+    await client.callTool({
+      name: 'zooid_get_thread_history',
+      arguments: { thread_id: '$root', limit: 10 },
+    })
+    expect(calls[0]).toEqual({ threadId: '$root', opts: { limit: 10, before: undefined } })
+  })
+
+  it('zooid_get_thread_history surfaces a validation error when thread_id is missing', async () => {
+    const server = buildContextMcpServer({ resolve: async () => makeProvider() })
+    const client = await connect(server)
+    const res = await client.callTool({ name: 'zooid_get_thread_history', arguments: {} })
+    expect(res.isError).toBe(true)
   })
 
   it('zooid_get_members and zooid_get_channel_info return the provider payload', async () => {

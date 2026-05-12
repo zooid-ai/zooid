@@ -19,18 +19,27 @@ afterEach(async () => {
   cleanup.length = 0
 })
 
+function fakeProvider(over: Partial<TransportContextProvider> = {}): TransportContextProvider {
+  return {
+    getRoomHistory: async () => ({ messages: [], has_more: false }),
+    getRecentThreads: async () => ({ threads: [], has_more: false }),
+    getThreadHistory: async () => ({ messages: [], has_more: false }),
+    getChannelMembers: async () => [],
+    getChannelInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
+    ...over,
+  }
+}
+
 describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', () => {
   it('end-to-end tools/call → daemon socket → provider → tool result', async () => {
-    const provider: TransportContextProvider = {
-      getThreadHistory: async () => ({
+    const provider = fakeProvider({
+      getRoomHistory: async () => ({
         messages: [
           { id: 'e1', sender: 'alice', text: 'hi', timestamp: 'T', is_agent: false },
         ],
         has_more: false,
       }),
-      getChannelMembers: async () => [],
-      getChannelInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
-    }
+    })
     const registry = new SpawnRegistry()
     const spawnId = registry.register({
       agentName: 'architect',
@@ -57,6 +66,8 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
       'zooid_get_channel_info',
       'zooid_get_history',
       'zooid_get_members',
+      'zooid_get_recent_threads',
+      'zooid_get_thread_history',
     ])
 
     const result = await client.callTool({ name: 'zooid_get_history', arguments: {} })
@@ -65,22 +76,20 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
   })
 
   it('two MCP server subprocesses sharing one socket route to their own bindings', async () => {
-    const providerA: TransportContextProvider = {
-      getThreadHistory: async () => ({
+    const providerA = fakeProvider({
+      getRoomHistory: async () => ({
         messages: [{ id: 'A1', sender: 'alice', text: 'from A', timestamp: 'T', is_agent: false }],
         has_more: false,
       }),
-      getChannelMembers: async () => [],
       getChannelInfo: async () => ({ id: '!a:hs', name: 'room-A', transport: 'matrix' }),
-    }
-    const providerB: TransportContextProvider = {
-      getThreadHistory: async () => ({
+    })
+    const providerB = fakeProvider({
+      getRoomHistory: async () => ({
         messages: [{ id: 'B1', sender: 'bob', text: 'from B', timestamp: 'T', is_agent: false }],
         has_more: false,
       }),
-      getChannelMembers: async () => [],
       getChannelInfo: async () => ({ id: '!b:hs', name: 'room-B', transport: 'matrix' }),
-    }
+    })
     const registry = new SpawnRegistry()
     const spawnA = registry.register({
       agentName: 'architect',

@@ -218,26 +218,37 @@ export class MatrixClient {
   }
 
   /**
-   * Fetch all replies to a thread root via the relations endpoint.
-   * Returns events oldest-first.
+   * Fetch replies to a thread root via the relations endpoint, oldest-first.
+   * Pass `limit` and `from` for pagination; `next_batch` echoes back when
+   * there are more replies. Returns `{ chunk: [] }` when the root is unknown.
    */
-  async fetchThreadRelations(
-    roomId: string,
-    rootEventId: string,
-    asUserId: string,
-  ): Promise<Array<Record<string, unknown>>> {
+  async fetchThreadRelations(opts: {
+    roomId: string
+    rootEventId: string
+    asUserId: string
+    limit?: number
+    from?: string
+  }): Promise<{ chunk: Array<Record<string, unknown>>; next_batch?: string }> {
+    const params = new URLSearchParams({
+      dir: 'f',
+      limit: String(opts.limit ?? 100),
+      user_id: opts.asUserId,
+    })
+    if (opts.from) params.set('from', opts.from)
     const url =
-      `${this.homeserver}/_matrix/client/v1/rooms/${encodeURIComponent(roomId)}` +
-      `/relations/${encodeURIComponent(rootEventId)}/m.thread` +
-      `?dir=f&limit=100&user_id=${encodeURIComponent(asUserId)}`
+      `${this.homeserver}/_matrix/client/v1/rooms/${encodeURIComponent(opts.roomId)}` +
+      `/relations/${encodeURIComponent(opts.rootEventId)}/m.thread?${params.toString()}`
     const r = await this.fetch(url, {
       method: 'GET',
       headers: { Authorization: `Bearer ${this.asToken}` },
     })
-    if (r.status === 404) return []
-    if (!r.ok) throw new Error(`fetchThreadRelations(${rootEventId}) failed: ${r.status}`)
-    const body = (await r.json()) as { chunk?: Array<Record<string, unknown>> }
-    return body.chunk ?? []
+    if (r.status === 404) return { chunk: [] }
+    if (!r.ok) throw new Error(`fetchThreadRelations(${opts.rootEventId}) failed: ${r.status}`)
+    const body = (await r.json()) as {
+      chunk?: Array<Record<string, unknown>>
+      next_batch?: string
+    }
+    return { chunk: body.chunk ?? [], next_batch: body.next_batch }
   }
 
   /**
@@ -247,8 +258,6 @@ export class MatrixClient {
   async fetchRoomMessages(opts: {
     roomId: string
     asUserId: string
-    /** If set, server-side filters to events related to this thread root. */
-    threadId?: string
     limit?: number
     /** Opaque pagination token returned in `end` from a previous call. */
     from?: string
@@ -259,12 +268,6 @@ export class MatrixClient {
       user_id: opts.asUserId,
     })
     if (opts.from) params.set('from', opts.from)
-    if (opts.threadId) {
-      params.set(
-        'filter',
-        JSON.stringify({ related_by_rel_types: ['m.thread'], related_by_senders: [] }),
-      )
-    }
     const url =
       `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}` +
       `/messages?${params.toString()}`

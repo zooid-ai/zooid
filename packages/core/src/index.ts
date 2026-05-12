@@ -50,5 +50,7 @@ export type {
   Message,
   Member,
   ChannelInfo,
+  ThreadOverview,
+  ThreadOverviewPage,
   TransportContextProvider,
 } from './transport-context.js'

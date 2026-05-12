@@ -4,7 +4,12 @@ import type { SpawnRegistry } from './spawn-registry.js'
 
 interface DaemonRequest {
   spawnId: string
-  method: 'getThreadHistory' | 'getChannelMembers' | 'getChannelInfo'
+  method:
+    | 'getRoomHistory'
+    | 'getRecentThreads'
+    | 'getThreadHistory'
+    | 'getChannelMembers'
+    | 'getChannelInfo'
   params: Record<string, unknown>
 }
 
@@ -77,12 +82,18 @@ async function handleLine(line: string, socket: Socket, registry: SpawnRegistry)
   }
   try {
     let result: unknown
-    if (req.method === 'getThreadHistory') {
-      result = await binding.provider.getThreadHistory(binding.threadRef, req.params)
+    const channelId = binding.threadRef.channelId
+    if (req.method === 'getRoomHistory') {
+      result = await binding.provider.getRoomHistory(channelId, req.params)
+    } else if (req.method === 'getRecentThreads') {
+      result = await binding.provider.getRecentThreads(channelId, req.params)
+    } else if (req.method === 'getThreadHistory') {
+      const threadId = String(req.params.threadId ?? '')
+      result = await binding.provider.getThreadHistory(channelId, threadId, req.params)
     } else if (req.method === 'getChannelMembers') {
-      result = await binding.provider.getChannelMembers(binding.threadRef)
+      result = await binding.provider.getChannelMembers(channelId)
     } else if (req.method === 'getChannelInfo') {
-      result = await binding.provider.getChannelInfo(binding.threadRef)
+      result = await binding.provider.getChannelInfo(channelId)
     } else {
       socket.write(
         JSON.stringify({

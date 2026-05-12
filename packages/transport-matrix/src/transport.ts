@@ -452,7 +452,11 @@ export async function rebuildThreadState(
     }
   }
 
-  const thread = await client.fetchThreadRelations(roomId, rootEventId, asUser)
+  const { chunk: thread } = await client.fetchThreadRelations({
+    roomId,
+    rootEventId,
+    asUserId: asUser,
+  })
   // Also seed root-mentions from any subsequent agent @mentions in the thread.
   for (const ev of thread) {
     const mentions = new Set(extractMentions(ev as never))

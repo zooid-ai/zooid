@@ -13,11 +13,23 @@ if (!spawnId || !sockPath) {
 }
 
 const remoteProvider: TransportContextProvider = {
-  getThreadHistory: (_t, opts) =>
+  getRoomHistory: (_channelId, opts) =>
+    callDaemon(sockPath, {
+      spawnId,
+      method: 'getRoomHistory',
+      params: (opts ?? {}) as Record<string, unknown>,
+    }) as Promise<Awaited<ReturnType<TransportContextProvider['getRoomHistory']>>>,
+  getRecentThreads: (_channelId, opts) =>
+    callDaemon(sockPath, {
+      spawnId,
+      method: 'getRecentThreads',
+      params: (opts ?? {}) as Record<string, unknown>,
+    }) as Promise<Awaited<ReturnType<TransportContextProvider['getRecentThreads']>>>,
+  getThreadHistory: (_channelId, threadId, opts) =>
     callDaemon(sockPath, {
       spawnId,
       method: 'getThreadHistory',
-      params: (opts ?? {}) as Record<string, unknown>,
+      params: { ...(opts ?? {}), threadId } as Record<string, unknown>,
     }) as Promise<Awaited<ReturnType<TransportContextProvider['getThreadHistory']>>>,
   getChannelMembers: () =>
     callDaemon(sockPath, { spawnId, method: 'getChannelMembers', params: {} }) as Promise<

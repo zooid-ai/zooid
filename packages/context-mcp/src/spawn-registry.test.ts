@@ -3,6 +3,8 @@ import { SpawnRegistry } from './spawn-registry.js'
 import type { TransportContextProvider } from '@zooid/core'
 
 const fakeProvider: TransportContextProvider = {
+  getRoomHistory: async () => ({ messages: [], has_more: false }),
+  getRecentThreads: async () => ({ threads: [], has_more: false }),
   getThreadHistory: async () => ({ messages: [], has_more: false }),
   getChannelMembers: async () => [],
   getChannelInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
