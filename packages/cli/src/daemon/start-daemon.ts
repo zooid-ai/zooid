@@ -27,7 +27,7 @@ import {
   SpawnRegistry,
   startDaemonSocketServer,
   type DaemonSocketHandle,
-} from '@zooid/transport-context'
+} from '@zooid/context-mcp'
 import { buildAcpRegistry } from '../build-registry.js'
 
 export interface StartDaemonOpts {

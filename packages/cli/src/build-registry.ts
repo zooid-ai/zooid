@@ -10,7 +10,7 @@ import {
   type TransportContextProvider,
 } from '@zooid/core'
 import { MatrixClient, MatrixContextProvider } from '@zooid/transport-matrix'
-import { SpawnRegistry, buildContextServerSpec } from '@zooid/transport-context'
+import { SpawnRegistry, buildContextServerSpec } from '@zooid/context-mcp'
 
 export interface BuildAcpRegistryOptions {
   /** Override the runtime selection (tests). */
