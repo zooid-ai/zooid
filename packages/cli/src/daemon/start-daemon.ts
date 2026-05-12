@@ -104,6 +104,14 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   })
   const agentNames = Object.keys(config.agents)
 
+  console.log(
+    `[context] socket=${daemonSockPath} ` +
+      `status=${contextSocket ? 'listening' : 'disabled'} ` +
+      `agents={${agentNames
+        .map((n) => `${n}:${registry.hasContextSpawn(n) ? 'yes' : 'no'}`)
+        .join(', ')}}`,
+  )
+
   let server: ServerType | null = null
   let stopped = false
   let resolveStopped!: () => void

@@ -11,6 +11,9 @@ if (!spawnId || !sockPath) {
   process.stderr.write('zooid-context-mcp: --spawn-id and ZOOID_DAEMON_SOCK are required\n')
   process.exit(2)
 }
+process.stderr.write(
+  `zooid-context-mcp: starting (pid=${process.pid} spawnId=${spawnId} sock=${sockPath})\n`,
+)
 
 const remoteProvider: TransportContextProvider = {
   getRoomHistory: (_channelId, opts) =>
@@ -43,3 +46,4 @@ const remoteProvider: TransportContextProvider = {
 
 const server = buildContextMcpServer({ resolve: async () => remoteProvider })
 await server.connect(new StdioServerTransport())
+process.stderr.write(`zooid-context-mcp: ready (spawnId=${spawnId})\n`)

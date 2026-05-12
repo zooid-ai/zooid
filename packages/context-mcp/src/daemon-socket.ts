@@ -72,6 +72,9 @@ async function handleLine(line: string, socket: Socket, registry: SpawnRegistry)
   }
   const binding = registry.get(req.spawnId)
   if (!binding) {
+    process.stderr.write(
+      `[context-mcp] daemon: unknown spawn-id ${req.spawnId} for method=${req.method}\n`,
+    )
     socket.write(
       JSON.stringify({
         ok: false,
@@ -80,6 +83,9 @@ async function handleLine(line: string, socket: Socket, registry: SpawnRegistry)
     )
     return
   }
+  process.stderr.write(
+    `[context-mcp] daemon: ${req.method} spawn=${req.spawnId.slice(0, 8)} agent=${binding.agentName}\n`,
+  )
   try {
     let result: unknown
     const channelId = binding.threadRef.channelId

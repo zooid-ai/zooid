@@ -170,6 +170,13 @@ export class AcpClient {
     const mcpServers = this.options.contextSpawn
       ? [await this.options.contextSpawn(threadId)]
       : []
+    process.stderr.write(
+      `[acp-client:${this.options.agent.id}] ensureSession(${threadId}) mcpServers=${
+        mcpServers.length === 0
+          ? '[]'
+          : JSON.stringify(mcpServers.map((s) => ({ name: s.name, command: s.command, args: s.args })))
+      }\n`,
+    )
 
     const persisted = this.store?.get(threadId)
     if (persisted && this.agentCapabilities.loadSession) {
