@@ -32,6 +32,8 @@ export type AcpRegistryApprovalHandler = (
  */
 export interface AcpRegistry {
   hasAgent(name: string): boolean
+  /** Whether an agent has a transport-context provider attached. */
+  hasContextSpawn(name: string): boolean
   /** Per-agent approval timeout from zooid.yaml. 0 means no timeout. */
   getApprovalTimeoutMs(name: string): number
   ensureSession(name: string, threadId: string): Promise<string>
@@ -85,7 +87,20 @@ export interface AcpAgentRegistryOptions {
    * session continuity across restarts is disabled.
    */
   agentsDir?: string
+  /**
+   * Per-agent factory that returns a `mcpServers[]` entry for the
+   * `zooid-context` MCP server. Forwarded to each AcpClient. Agents bound to
+   * transports without a context provider (e.g. HTTP) have no entry here.
+   */
+  contextSpawns?: Record<string, ContextSpawnFactory | undefined>
 }
+
+export type ContextSpawnFactory = (threadId: string) => Promise<{
+  name: 'zooid-context'
+  command: string
+  args: string[]
+  env: Array<{ name: string; value: string }>
+}>
 
 export class AcpAgentRegistry implements AcpRegistry {
   readonly opts: AcpAgentRegistryOptions
@@ -116,6 +131,10 @@ export class AcpAgentRegistry implements AcpRegistry {
 
   hasAgent(name: string): boolean {
     return Object.prototype.hasOwnProperty.call(this.opts.agents, name)
+  }
+
+  hasContextSpawn(name: string): boolean {
+    return Boolean(this.opts.contextSpawns?.[name])
   }
 
   resolveSpawnEnv(name: string): Record<string, string> {
@@ -191,6 +210,7 @@ export class AcpAgentRegistry implements AcpRegistry {
       onEvent: (e) => this.onEvent(name, e),
       onApprovalRequest: (req) => this.onApprovalRequest(name, req),
       onTap: this.opts.onTap ? (e) => this.opts.onTap!(name, e) : undefined,
+      contextSpawn: this.opts.contextSpawns?.[name],
     })
     await client.start()
     this.clients.set(name, client)

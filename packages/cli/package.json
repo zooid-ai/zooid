@@ -39,6 +39,7 @@
     "@zooid/core": "workspace:^",
     "@zooid/runtime-docker": "workspace:^",
     "@zooid/runtime-local": "workspace:^",
+    "@zooid/transport-context": "workspace:^",
     "@zooid/transport-http": "workspace:^",
     "@zooid/transport-matrix": "workspace:^",
     "cac": "^6.7.14",

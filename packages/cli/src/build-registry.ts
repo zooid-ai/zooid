@@ -4,9 +4,13 @@ import {
   AcpAgentRegistry,
   type AcpRuntime,
   type ApprovalCorrelator,
+  type ContextSpawnFactory,
   type TapEvent,
   type ZooidConfig,
+  type TransportContextProvider,
 } from '@zooid/core'
+import { MatrixClient, MatrixContextProvider } from '@zooid/transport-matrix'
+import { SpawnRegistry, buildContextServerSpec } from '@zooid/transport-context'
 
 export interface BuildAcpRegistryOptions {
   /** Override the runtime selection (tests). */
@@ -21,6 +25,15 @@ export interface BuildAcpRegistryOptions {
    * `<agentsDir>/<agentName>/sessions.json` so threads survive daemon restarts.
    */
   agentsDir?: string
+  /**
+   * Per-spawn binding store for the zooid-context MCP server. When set
+   * together with `daemonSockPath`, agents bound to a transport that owns
+   * conversation context get a `contextSpawn` factory threaded into their
+   * AcpClient so `session/new mcpServers` includes the zooid-context entry.
+   */
+  contextSpawnRegistry?: SpawnRegistry
+  /** Path to the daemon's context Unix socket. Passed to the MCP server bin. */
+  daemonSockPath?: string
 }
 
 /**
@@ -51,6 +64,9 @@ export function buildAcpRegistry(
     env[name] = agent.container?.env ?? {}
     image[name] = agent.container?.image ?? cfg.container?.image
   }
+
+  const contextSpawns = buildContextSpawns(cfg, opts)
+
   return new AcpAgentRegistry({
     runtime,
     agents: cfg.agents,
@@ -59,7 +75,57 @@ export function buildAcpRegistry(
     approvals: opts.approvals,
     onTap: opts.onTap,
     agentsDir: opts.agentsDir,
+    contextSpawns,
   })
+}
+
+function buildContextSpawns(
+  cfg: ZooidConfig,
+  opts: BuildAcpRegistryOptions,
+): Record<string, ContextSpawnFactory | undefined> | undefined {
+  if (!opts.contextSpawnRegistry || !opts.daemonSockPath) return undefined
+  const registry = opts.contextSpawnRegistry
+  const sockPath = opts.daemonSockPath
+
+  const matrixProviders = new Map<string, TransportContextProvider>()
+  const agentBots = new Map<string, string>()
+  for (const [name, agent] of Object.entries(cfg.agents)) {
+    if (agent.matrix?.user_id) agentBots.set(agent.matrix.user_id, name)
+  }
+  for (const [tname, tcfg] of Object.entries(cfg.transports)) {
+    if (tcfg.type !== 'matrix') continue
+    const client = new MatrixClient({
+      homeserver: tcfg.homeserver,
+      asToken: tcfg.as_token,
+    })
+    const asUserId = `@${tcfg.sender_localpart}:${serverNameOf(tcfg.homeserver)}`
+    matrixProviders.set(
+      tname,
+      new MatrixContextProvider({ client, asUserId, agentBots }),
+    )
+  }
+
+  const result: Record<string, ContextSpawnFactory | undefined> = {}
+  for (const [name, agent] of Object.entries(cfg.agents)) {
+    if (agent.matrix && matrixProviders.has(agent.matrix.transport)) {
+      const provider = matrixProviders.get(agent.matrix.transport)!
+      result[name] = async (threadId: string) => {
+        const spawnId = registry.register({
+          agentName: name,
+          threadRef: { channelId: threadId, threadId },
+          provider,
+        })
+        return buildContextServerSpec({ spawnId, sockPath })
+      }
+    } else {
+      result[name] = undefined
+    }
+  }
+  return result
+}
+
+function serverNameOf(homeserver: string): string {
+  return homeserver.replace(/^https?:\/\//, '').replace(/:\d+$/, '').replace(/\/.*$/, '')
 }
 
 function defaultRuntimeFor(cfg: ZooidConfig): AcpRuntime {

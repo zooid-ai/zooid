@@ -20,6 +20,7 @@ export type {
   AcpAgentRegistryOptions,
   AcpRegistryEventHandler,
   AcpRegistryApprovalHandler,
+  ContextSpawnFactory,
 } from './acp-registry.js'
 export type { TapEvent } from '@zooid/acp-client'
 export type {
@@ -43,3 +44,11 @@ export type {
   InboundMessage,
   ThreadRef,
 } from './types.js'
+export type {
+  HistoryOptions,
+  HistoryPage,
+  Message,
+  Member,
+  ChannelInfo,
+  TransportContextProvider,
+} from './transport-context.js'

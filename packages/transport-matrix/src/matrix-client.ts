@@ -240,6 +240,71 @@ export class MatrixClient {
     return body.chunk ?? []
   }
 
+  /**
+   * Paginate the room timeline. Returns events newest-first (dir=b) per Matrix
+   * spec. The caller is responsible for reversing if it wants oldest-first.
+   */
+  async fetchRoomMessages(opts: {
+    roomId: string
+    asUserId: string
+    /** If set, server-side filters to events related to this thread root. */
+    threadId?: string
+    limit?: number
+    /** Opaque pagination token returned in `end` from a previous call. */
+    from?: string
+  }): Promise<{ chunk: Array<Record<string, unknown>>; end?: string }> {
+    const params = new URLSearchParams({
+      dir: 'b',
+      limit: String(opts.limit ?? 50),
+      user_id: opts.asUserId,
+    })
+    if (opts.from) params.set('from', opts.from)
+    if (opts.threadId) {
+      params.set(
+        'filter',
+        JSON.stringify({ related_by_rel_types: ['m.thread'], related_by_senders: [] }),
+      )
+    }
+    const url =
+      `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}` +
+      `/messages?${params.toString()}`
+    const r = await this.fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${this.asToken}` },
+    })
+    if (!r.ok) throw new Error(`fetchRoomMessages(${opts.roomId}) failed: ${r.status}`)
+    return (await r.json()) as { chunk: Array<Record<string, unknown>>; end?: string }
+  }
+
+  async getJoinedMembers(
+    roomId: string,
+    asUserId: string,
+  ): Promise<{ joined: Record<string, { display_name?: string }> }> {
+    const url =
+      `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}` +
+      `/joined_members?user_id=${encodeURIComponent(asUserId)}`
+    const r = await this.fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${this.asToken}` },
+    })
+    if (!r.ok) throw new Error(`getJoinedMembers(${roomId}) failed: ${r.status}`)
+    return (await r.json()) as { joined: Record<string, { display_name?: string }> }
+  }
+
+  async fetchRoomName(roomId: string, asUserId: string): Promise<string | null> {
+    const url =
+      `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}` +
+      `/state/m.room.name/?user_id=${encodeURIComponent(asUserId)}`
+    const r = await this.fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${this.asToken}` },
+    })
+    if (r.status === 404) return null
+    if (!r.ok) throw new Error(`fetchRoomName(${roomId}) failed: ${r.status}`)
+    const body = (await r.json()) as { name?: string }
+    return body.name ?? null
+  }
+
   private async sendEvent(
     roomId: string,
     asUserId: string,

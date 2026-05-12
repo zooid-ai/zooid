@@ -1,5 +1,7 @@
 export { MatrixClient } from './matrix-client.js'
 export type { MatrixClientOptions, SendMessageInput, SendCustomEventInput } from './matrix-client.js'
+export { MatrixContextProvider } from './context-provider.js'
+export type { MatrixContextProviderOpts } from './context-provider.js'
 export { renderRegistration } from './registration.js'
 export type { MatrixTransportConfig } from './registration.js'
 export { extractMentions } from './mentions.js'

@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs'
+import { mkdir, unlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
 import {
@@ -20,6 +23,11 @@ import {
   type AgentBinding,
   type PublisherHandle,
 } from '@zooid/transport-matrix'
+import {
+  SpawnRegistry,
+  startDaemonSocketServer,
+  type DaemonSocketHandle,
+} from '@zooid/transport-context'
 import { buildAcpRegistry } from '../build-registry.js'
 
 export interface StartDaemonOpts {
@@ -71,10 +79,28 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   const config = mergeCliFlags(base, opts.cliFlags ?? {})
 
   const approvals = new ApprovalCorrelator()
+
+  const daemonSockPath = opts.agentsDir
+    ? join(opts.agentsDir, '..', 'run', 'context.sock')
+    : join(tmpdir(), `zooid-context-${process.pid}.sock`)
+  await mkdir(dirname(daemonSockPath), { recursive: true }).catch(() => {})
+  const contextSpawnRegistry = new SpawnRegistry()
+  let contextSocket: DaemonSocketHandle | null = null
+  try {
+    contextSocket = await startDaemonSocketServer({
+      sockPath: daemonSockPath,
+      registry: contextSpawnRegistry,
+    })
+  } catch (err) {
+    console.warn('[context] daemon socket startup failed; zooid-context MCP disabled:', err)
+  }
+
   const registry = buildAcpRegistry(config, {
     approvals,
     onTap: opts.onTap,
     agentsDir: opts.agentsDir,
+    contextSpawnRegistry: contextSocket ? contextSpawnRegistry : undefined,
+    daemonSockPath: contextSocket ? daemonSockPath : undefined,
   })
   const agentNames = Object.keys(config.agents)
 
@@ -184,6 +210,12 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       await registry.stopAll()
     } catch (err) {
       console.error('stopAll:', err)
+    }
+    try {
+      if (contextSocket) await contextSocket.close()
+      await unlink(daemonSockPath).catch(() => {})
+    } catch {
+      // swallow
     }
     resolveStopped()
   }

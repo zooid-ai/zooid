@@ -63,6 +63,18 @@ export interface AcpClientOptions {
    * when omitted the client behaves as before.
    */
   onTap?: (e: TapEvent) => void
+  /**
+   * Optional per-spawn factory. When set, the returned spec is included in
+   * `session/new mcpServers` (and `session/load mcpServers`) so the shim
+   * connects to the daemon-side zooid-context MCP server for the session
+   * lifetime. Called once per `ensureSession(threadId)`.
+   */
+  contextSpawn?: (threadId: string) => Promise<{
+    name: 'zooid-context'
+    command: string
+    args: string[]
+    env: Array<{ name: string; value: string }>
+  }>
 }
 
 export class AcpClient {
@@ -155,13 +167,17 @@ export class AcpClient {
     const cached = this.sessions.get(key)
     if (cached) return cached.sessionId
 
+    const mcpServers = this.options.contextSpawn
+      ? [await this.options.contextSpawn(threadId)]
+      : []
+
     const persisted = this.store?.get(threadId)
     if (persisted && this.agentCapabilities.loadSession) {
       try {
         await this.connection.loadSession({
           sessionId: persisted,
           cwd: this.options.agent.cwd ?? process.cwd(),
-          mcpServers: [],
+          mcpServers,
         })
         this.sessions.set(key, { sessionId: persisted, startedAt: Date.now() })
         return persisted
@@ -177,7 +193,7 @@ export class AcpClient {
 
     const { sessionId } = await this.connection.newSession({
       cwd: this.options.agent.cwd ?? process.cwd(),
-      mcpServers: [],
+      mcpServers,
     })
     this.sessions.set(key, { sessionId, startedAt: Date.now() })
     await this.store?.set(threadId, sessionId)
