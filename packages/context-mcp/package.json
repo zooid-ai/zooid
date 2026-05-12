@@ -13,7 +13,9 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
-    }
+    },
+    "./bin": "./dist/bin.js",
+    "./package.json": "./package.json"
   },
   "files": ["dist", "src", "README.md"],
   "publishConfig": {
