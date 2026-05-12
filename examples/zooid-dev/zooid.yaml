@@ -50,3 +50,14 @@ agents:
       rooms:
         - '#docs:localhost'
       trigger: mention
+
+  ux-consultant:
+    workdir: ./agents/ux-consultant
+    acp:
+      preset: claude
+    matrix:
+      transport: matrix
+      user_id: '@ux-consultant:localhost'
+      rooms:
+        - '#ux-consultant:localhost'
+      trigger: mention

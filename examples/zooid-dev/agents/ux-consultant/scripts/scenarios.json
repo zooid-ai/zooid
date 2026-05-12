@@ -1,0 +1,14 @@
+{
+  "$schema": "./scenarios.schema.json",
+  "viewports": {
+    "desktop": { "width": 1440, "height": 900 },
+    "mobile": { "width": 375, "height": 812 }
+  },
+  "scenarios": [
+    { "name": "home", "path": "/" },
+    { "name": "login", "path": "/login" },
+    { "name": "welcome-room", "roomAlias": "#welcome:localhost" },
+    { "name": "docs-room", "roomAlias": "#docs:localhost" },
+    { "name": "ux-consultant-room", "roomAlias": "#ux-consultant:localhost" }
+  ]
+}
