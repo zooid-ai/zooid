@@ -141,6 +141,43 @@ describe('MatrixClient', () => {
     expect(id).toBe('!new:localhost')
   })
 
+  it('createRoom passes optional name as m.room.name when supplied', async () => {
+    const fetch = fakeFetch(async ({ init }) => {
+      const body = JSON.parse(init.body as string)
+      expect(body.name).toBe('Welcome Aboard')
+      return new Response(JSON.stringify({ room_id: '!new:localhost' }), { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await client.createRoom({
+      roomAliasName: 'welcome',
+      invite: [],
+      senderUserId: '@admin:localhost',
+      name: 'Welcome Aboard',
+    })
+  })
+
+  it('setDisplayName PUTs the displayname endpoint impersonating the user', async () => {
+    const fetch = fakeFetch(async ({ url, init }) => {
+      expect(url).toBe(
+        'https://hs.example.com/_matrix/client/v3/profile/%40docs%3Alocalhost/displayname' +
+          '?user_id=%40docs%3Alocalhost',
+      )
+      expect(init.method).toBe('PUT')
+      expect(JSON.parse(init.body as string)).toEqual({ displayname: 'Docs Agent' })
+      return new Response('{}', { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await client.setDisplayName('@docs:localhost', 'Docs Agent')
+  })
+
   describe('MatrixClient.setTyping', () => {
     it('PUTs typing=true with timeout to the typing endpoint, impersonating the asUserId', async () => {
       const fetch = fakeFetch(async ({ url, init }) => {

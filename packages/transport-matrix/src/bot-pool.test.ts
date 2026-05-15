@@ -10,6 +10,7 @@ function fakeClient() {
     createRoom: vi.fn(async () => '!new:example.com'),
     sendMessage: vi.fn(async () => ({ event_id: '$x' })),
     sendCustomEvent: vi.fn(async () => ({ event_id: '$x' })),
+    setDisplayName: vi.fn(async () => undefined),
   }
 }
 
@@ -71,6 +72,7 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
     const calls: string[] = []
     const client = {
       registerBot: async () => {},
+      setDisplayName: async () => {},
       resolveAlias: async (a: string) => {
         calls.push(`resolve:${a}`)
         return null
@@ -103,6 +105,7 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
     const calls: string[] = []
     const client = {
       registerBot: async () => {},
+      setDisplayName: async () => {},
       resolveAlias: async () => '!existing:localhost',
       createRoom: async () => {
         throw new Error('should not be called')
@@ -121,6 +124,7 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
   it('rewrites the binding\'s rooms array with resolved IDs so the router can match', async () => {
     const client = {
       registerBot: async () => {},
+      setDisplayName: async () => {},
       resolveAlias: async () => '!resolved:localhost',
       createRoom: async () => '!unused:localhost',
       joinRoom: async () => {},
@@ -140,6 +144,7 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
     const calls: string[] = []
     const client = {
       registerBot: async () => {},
+      setDisplayName: async () => {},
       resolveAlias: async () => {
         throw new Error('should not be called for !roomId')
       },
@@ -175,6 +180,7 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
         resolveAlias,
         createRoom,
         sendStateEvent,
+        setDisplayName: vi.fn(async () => undefined),
       } as never,
       [
         {
@@ -212,6 +218,7 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
         resolveAlias: vi.fn(async () => '!r:zoon.local'),
         createRoom: vi.fn(async () => '!r:zoon.local'),
         sendStateEvent,
+        setDisplayName: vi.fn(async () => undefined),
       } as never,
       [
         {
@@ -235,6 +242,7 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
         resolveAlias: vi.fn(async () => '!shared:zoon.local'),
         createRoom: vi.fn(async () => '!shared:zoon.local'),
         sendStateEvent,
+        setDisplayName: vi.fn(async () => undefined),
       } as never,
       [
         { name: 'a', userId: '@a:zoon.local', rooms: ['#shared:zoon.local'], trigger: 'any' },
@@ -246,5 +254,54 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
       ([opts]) => (opts as { eventType: string }).eventType === 'm.space.child',
     )
     expect(childWrites).toHaveLength(1)
+  })
+})
+
+describe('BotPool.bootstrap — display name', () => {
+  it('falls back to the user_id localpart when no displayName is supplied', async () => {
+    const client = fakeClient()
+    const pool = new BotPool(client, [
+      {
+        name: 'docs',
+        userId: '@docs:example.com',
+        rooms: [],
+        trigger: 'mention',
+      },
+    ])
+    await pool.bootstrap()
+    expect(client.setDisplayName).toHaveBeenCalledWith('@docs:example.com', 'docs')
+  })
+
+  it('writes the supplied displayName when present', async () => {
+    const client = fakeClient()
+    const pool = new BotPool(client, [
+      {
+        name: 'docs',
+        userId: '@docs:example.com',
+        displayName: 'Docs Agent',
+        rooms: [],
+        trigger: 'mention',
+      },
+    ])
+    await pool.bootstrap()
+    expect(client.setDisplayName).toHaveBeenCalledWith('@docs:example.com', 'Docs Agent')
+  })
+
+  it('passes the alias localpart as m.room.name when creating a room', async () => {
+    const createRoom = vi.fn(async () => '!new:localhost')
+    const client = {
+      registerBot: vi.fn(async () => undefined),
+      resolveAlias: vi.fn(async () => null),
+      createRoom,
+      joinRoom: vi.fn(async () => undefined),
+      setDisplayName: vi.fn(async () => undefined),
+    }
+    const pool = new BotPool(client as never, [
+      { name: 'echo', userId: '@echo:localhost', rooms: ['#welcome:localhost'], trigger: 'mention' },
+    ])
+    await pool.bootstrap({ adminUserId: '@admin:localhost' })
+    expect(createRoom).toHaveBeenCalledWith(
+      expect.objectContaining({ roomAliasName: 'welcome', name: 'welcome' }),
+    )
   })
 })

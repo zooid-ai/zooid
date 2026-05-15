@@ -3,6 +3,8 @@ import { extractMentions } from './mentions.js'
 export interface AgentBinding {
   name: string
   userId: string
+  /** Optional human-readable display name. Falls back to the user_id localpart. */
+  displayName?: string
   rooms: string[]
   trigger: 'mention' | 'any'
 }

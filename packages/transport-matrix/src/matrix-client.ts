@@ -77,7 +77,16 @@ export class MatrixClient {
     invite: string[]
     senderUserId: string
     preset?: 'public_chat' | 'private_chat' | 'trusted_private_chat'
+    /** Optional `m.room.name`. When set, sent in the createRoom body so the
+     *  room has a display name from the moment it exists. */
+    name?: string
   }): Promise<string> {
+    const body: Record<string, unknown> = {
+      room_alias_name: opts.roomAliasName,
+      invite: opts.invite,
+      preset: opts.preset ?? 'public_chat',
+    }
+    if (opts.name !== undefined) body.name = opts.name
     const r = await this.fetch(
       `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.senderUserId)}`,
       {
@@ -86,11 +95,7 @@ export class MatrixClient {
           Authorization: `Bearer ${this.asToken}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({
-          room_alias_name: opts.roomAliasName,
-          invite: opts.invite,
-          preset: opts.preset ?? 'public_chat',
-        }),
+        body: JSON.stringify(body),
       },
     )
     if (!r.ok) {
@@ -179,6 +184,21 @@ export class MatrixClient {
       body: JSON.stringify(body),
     })
     if (!r.ok) throw new Error(`setTyping(${input.roomId}, ${input.asUserId}) failed: ${r.status}`)
+  }
+
+  async setDisplayName(asUserId: string, displayName: string): Promise<void> {
+    const url =
+      `${this.homeserver}/_matrix/client/v3/profile/${encodeURIComponent(asUserId)}/displayname` +
+      `?user_id=${encodeURIComponent(asUserId)}`
+    const r = await this.fetch(url, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${this.asToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ displayname: displayName }),
+    })
+    if (!r.ok) throw new Error(`setDisplayName(${asUserId}) failed: ${r.status}`)
   }
 
   async setPresence(input: SetPresenceInput): Promise<void> {

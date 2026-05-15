@@ -19,6 +19,17 @@ import type {
 
 const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
 const MATRIX_USER_ID_RE = /^@[A-Za-z0-9._\-=/+]+:[A-Za-z0-9.\-]+$/
+const MATRIX_USER_LOCALPART_RE = /^@[a-z0-9._=/+\-]+$/
+const MATRIX_ROOM_IDENT_RE = /^[#!]/
+
+function deriveServerName(userNamespace: string): string {
+  // user_namespace is a regex like `@.*:localhost`. The part after the first
+  // `:` is the server_name (strip a trailing `)` left over from a wrapped
+  // group like `@(.*):localhost)`).
+  const tail = userNamespace.split(':').slice(1).join(':').replace(/\\?\)?$/, '')
+  if (!tail) throw new Error(`user_namespace missing server_name: ${userNamespace}`)
+  return tail
+}
 
 const TRANSPORT_KINDS = ['matrix', 'http'] as const
 type TransportKind = (typeof TRANSPORT_KINDS)[number]
@@ -276,11 +287,24 @@ function parseTransportBinding(
   }
 
   if (kind === 'matrix') {
-    if (typeof block.user_id !== 'string' || !MATRIX_USER_ID_RE.test(block.user_id)) {
+    if (refTransport.type !== 'matrix') {
+      throw new Error(`agents.${name}.matrix: transport must be matrix`)
+    }
+    const serverName = deriveServerName(refTransport.user_namespace)
+
+    let userId: string | undefined
+    if (typeof block.user_id === 'string') {
+      userId = block.user_id
+      if (!userId.includes(':') && MATRIX_USER_LOCALPART_RE.test(userId)) {
+        userId = `${userId}:${serverName}`
+      }
+    }
+    if (userId === undefined || !MATRIX_USER_ID_RE.test(userId)) {
       throw new Error(
         `agents.${name}.matrix.user_id must look like @localpart:server (got ${JSON.stringify(block.user_id)})`,
       )
     }
+
     if (!Array.isArray(block.rooms) || block.rooms.length === 0) {
       throw new Error(`agents.${name}.matrix.rooms is required and must be a non-empty array`)
     }
@@ -289,22 +313,45 @@ function parseTransportBinding(
       if (typeof r !== 'string' || r.length === 0) {
         throw new Error(`agents.${name}.matrix.rooms[] must be a non-empty string`)
       }
-      rooms.push(r)
+      if (!MATRIX_ROOM_IDENT_RE.test(r)) {
+        throw new Error(
+          `agents.${name}.matrix.rooms[] must start with '#' or '!' (got ${JSON.stringify(r)})`,
+        )
+      }
+      rooms.push(r.includes(':') ? r : `${r}:${serverName}`)
     }
+
+    let displayName: string | undefined
+    if (block.display_name !== undefined) {
+      if (typeof block.display_name !== 'string') {
+        throw new Error(
+          `agents.${name}.matrix.display_name must be a string (got ${JSON.stringify(block.display_name)})`,
+        )
+      }
+      const trimmed = block.display_name.trim()
+      if (trimmed.length === 0) {
+        throw new Error(`agents.${name}.matrix.display_name must be non-empty after trim`)
+      }
+      if (trimmed.length > 256) {
+        throw new Error(`agents.${name}.matrix.display_name must be 256 characters or fewer`)
+      }
+      displayName = trimmed
+    }
+
     const tr = block.trigger ?? 'mention'
     if (tr !== 'mention' && tr !== 'any') {
       throw new Error(
         `agents.${name}.matrix.trigger must be "mention" or "any" (got ${JSON.stringify(tr)})`,
       )
     }
-    return {
-      matrix: {
-        transport: refName,
-        user_id: block.user_id,
-        rooms,
-        trigger: tr,
-      },
+    const matrix: MatrixBinding = {
+      transport: refName,
+      user_id: userId,
+      rooms,
+      trigger: tr,
     }
+    if (displayName !== undefined) matrix.display_name = displayName
+    return { matrix }
   }
   // kind === 'http'
   return { http: { transport: refName } }

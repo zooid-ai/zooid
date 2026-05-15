@@ -130,12 +130,14 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     const bindings: AgentBinding[] = []
     for (const a of Object.values(config.agents)) {
       if (a.matrix?.transport !== matrix.name) continue
-      bindings.push({
+      const binding: AgentBinding = {
         name: a.name,
         userId: a.matrix.user_id,
         rooms: a.matrix.rooms,
         trigger: a.matrix.trigger,
-      })
+      }
+      if (a.matrix.display_name !== undefined) binding.displayName = a.matrix.display_name
+      bindings.push(binding)
     }
     const transport = createMatrixTransport({
       agents: registry,

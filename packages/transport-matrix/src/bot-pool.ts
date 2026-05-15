@@ -15,7 +15,7 @@ export class BotPool {
   constructor(
     private readonly client: Pick<
       MatrixClient,
-      'registerBot' | 'joinRoom' | 'resolveAlias' | 'createRoom' | 'sendStateEvent'
+      'registerBot' | 'joinRoom' | 'resolveAlias' | 'createRoom' | 'sendStateEvent' | 'setDisplayName'
     >,
     private readonly agents: AgentBinding[],
   ) {}
@@ -24,10 +24,16 @@ export class BotPool {
     const aliasToId = new Map<string, string>()
     const attachedToSpace = new Set<string>()
     for (const a of this.agents) {
+      const lp = localpart(a.userId)
       try {
-        await this.client.registerBot(localpart(a.userId))
+        await this.client.registerBot(lp)
       } catch (err) {
         console.warn(`[matrix] register failed for ${a.userId}: ${(err as Error).message}`)
+      }
+      try {
+        await this.client.setDisplayName(a.userId, a.displayName ?? lp)
+      } catch (err) {
+        console.warn(`[matrix] setDisplayName(${a.userId}) failed: ${(err as Error).message}`)
       }
       for (let i = 0; i < a.rooms.length; i++) {
         const room = a.rooms[i]
@@ -49,6 +55,7 @@ export class BotPool {
                   roomAliasName: aliasLocalpart,
                   invite: opts.adminUserId ? [opts.adminUserId] : [],
                   senderUserId: sender,
+                  name: aliasLocalpart,
                 })
               }
               aliasToId.set(room, resolved)

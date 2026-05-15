@@ -62,6 +62,9 @@ export interface MatrixBinding {
   transport: string
   /** Full Matrix user ID for this agent's bot, e.g. `@architect:example.com`. */
   user_id: string
+  /** Optional human-readable display name. Written to the agent's Matrix
+   *  profile on bootstrap. Falls back to the user_id localpart when absent. */
+  display_name?: string
   /** Room IDs / aliases this agent watches. */
   rooms: string[]
   /** Routing rule. `mention` requires the bot to be tagged; `any` triggers on every message. */

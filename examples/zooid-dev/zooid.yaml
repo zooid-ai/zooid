@@ -2,13 +2,17 @@
 #   pnpm zooid dev
 #
 # This boots Tuwunel + the daemon + the bundled @zoon/web UI in one foreground
-# process, registers an `admin:admin` Matrix user, and joins two agents to
-# the #welcome room:
+# process, registers an `admin:admin` Matrix user, and joins the agents to
+# their #welcome / per-agent rooms.
 #
 #   - @echo:localhost — a tiny ACP shim that just echoes your text. No deps.
 #   - @docs:localhost — opencode-driven docs agent that keeps
 #     agents/docs/code/README.md in sync with the throttle source. Requires
 #     `opencode` on PATH and a Vertex Express API key in the environment.
+#
+# Identifiers can use a short form (`@echo`, `#welcome`) — the daemon expands
+# them against the matrix transport's server_name. `display_name` (optional)
+# sets the agent's profile name; absent, the localpart is used.
 #
 # @-mention either bot in #welcome to drive a turn.
 
@@ -35,9 +39,9 @@ agents:
       args: ['--import', 'tsx', './echo-agent.ts']
     matrix:
       transport: matrix
-      user_id: '@echo:localhost'
+      user_id: '@echo'
       rooms:
-        - '#welcome:localhost'
+        - '#welcome'
       trigger: mention
 
   docs:
@@ -46,9 +50,10 @@ agents:
       preset: opencode
     matrix:
       transport: matrix
-      user_id: '@docs:localhost'
+      user_id: '@docs'
+      display_name: 'Docs Agent'
       rooms:
-        - '#docs:localhost'
+        - '#docs'
       trigger: mention
 
   ux-consultant:
@@ -57,7 +62,7 @@ agents:
       preset: opencode
     matrix:
       transport: matrix
-      user_id: '@ux-consultant:localhost'
+      user_id: '@ux-consultant'
       rooms:
-        - '#ux-consultant:localhost'
+        - '#ux-consultant'
       trigger: mention
