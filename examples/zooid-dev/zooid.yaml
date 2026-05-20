@@ -50,7 +50,7 @@ agents:
       preset: opencode
     matrix:
       transport: matrix
-      user_id: '@docs'
+      user_id: '@docs-agent'
       display_name: 'Docs Agent'
       rooms:
         - '#docs'
@@ -64,5 +64,5 @@ agents:
       transport: matrix
       user_id: '@ux-consultant'
       rooms:
-        - '#ux-consultant'
+        - '#product'
       trigger: mention
