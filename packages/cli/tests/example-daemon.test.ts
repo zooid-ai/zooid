@@ -15,7 +15,7 @@ describe('examples/zooid-dev/zooid.yaml', () => {
     const transports = cfg.transports ?? {}
     const matrixEntries = Object.entries(transports).filter(([, t]) => t.type === 'matrix')
     expect(matrixEntries).toHaveLength(1)
-    expect(Object.keys(cfg.agents).sort()).toEqual(['docs', 'echo'])
+    expect(Object.keys(cfg.agents).sort()).toEqual(['docs', 'echo', 'ux-consultant'])
 
     const echo = cfg.agents.echo!
     expect(echo.matrix?.user_id).toBe('@echo:localhost')

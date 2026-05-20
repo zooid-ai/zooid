@@ -95,8 +95,21 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
   // and real shell vars override both (loadEnvFile never overwrites existing
   // process.env entries). Spawned agents inherit these via runtime-local.
   loadEnvFiles(cwd)
-  // Use the unparsed text so that env-var expansion happens inside
-  // loadZooidConfig once tokens are exported.
+
+  // Resolve data paths up front — they only depend on cwd/flags, not the
+  // parsed config — so we can ensure tokens before any loadZooidConfig call.
+  const dataRoot = resolve(cwd, flags.dataDir)
+  const layout = resolveDataLayout(dataRoot)
+  const paths = resolvePaths(layout.matrixDir)
+  const logPaths = resolveLogPaths({ dataDir: layout.dataRoot })
+
+  // Bootstrap AS tokens and export to env BEFORE parsing zooid.yaml. The
+  // parser's MATRIX_AS_TOKEN / MATRIX_HS_TOKEN defaults (see [ZOD048]) and
+  // any explicit `${MATRIX_AS_TOKEN}` interpolations both need the vars set.
+  const tokens = ensureTokens(paths.envPath)
+  process.env.MATRIX_AS_TOKEN = tokens.asToken
+  process.env.MATRIX_HS_TOKEN = tokens.hsToken
+
   const rawYaml = readFileSync(found.path, 'utf8')
   const preview = loadZooidConfig(rawYaml)
   const matrix = findMatrixTransport(preview)
@@ -110,23 +123,13 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
   const port = flags.hostPort ?? shape.port
   const homeserver = `http://localhost:${port}`
 
-  const dataRoot = resolve(cwd, flags.dataDir)
-  const layout = resolveDataLayout(dataRoot)
-  const paths = resolvePaths(layout.matrixDir)
-  const logPaths = resolveLogPaths({ dataDir: layout.dataRoot })
   await ensureDayFolder(logPaths)
   await pruneOldDays({ dataDir: layout.dataRoot, retainDays: 14 })
 
-  const ctx: DevCtx = { logPaths }
+  const ctx: DevCtx = { logPaths, tokens }
 
   const tasks = new Listr<DevCtx>(
     [
-      {
-        title: 'Generate AS tokens',
-        task: () => {
-          ctx.tokens = ensureTokens(paths.envPath)
-        },
-      },
       {
         title: 'Write tuwunel.toml + appservice.yaml',
         task: () => {
@@ -177,11 +180,6 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
       {
         title: 'Start daemon',
         task: async () => {
-          if (!ctx.tokens) throw new Error('tokens not ready')
-          // Export tokens so loadZooidConfig's env interpolation can fill
-          // the ${MATRIX_AS_TOKEN}/${MATRIX_HS_TOKEN} placeholders.
-          process.env.MATRIX_AS_TOKEN = ctx.tokens.asToken
-          process.env.MATRIX_HS_TOKEN = ctx.tokens.hsToken
           const captures: Record<string, AgentCapture> = {}
           for (const name of Object.keys(preview.agents)) {
             captures[name] = wireAgentCapture({
