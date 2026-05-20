@@ -16,6 +16,7 @@ describe('generateZooidYaml', () => {
     })
     expect(out).toContain('runtime: local')
     expect(out).toContain('homeserver: http://localhost:8448')
+    expect(out).toContain('port: 9099')
     expect(out).toContain('zooid-assistant:')
     expect(out).toContain('preset: claude')
     expect(out).toContain('model: claude-sonnet-4-6')

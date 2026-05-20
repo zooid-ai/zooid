@@ -14,6 +14,7 @@ export function generateZooidYaml(opts: ZooidYamlOpts): string {
 transports:
   matrix:
     homeserver: http://localhost:8448
+    port: 9099
 
 agents:
   zooid-assistant:
