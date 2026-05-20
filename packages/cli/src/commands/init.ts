@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import {
   generateAgentsMd,
+  generateClaudeMd,
   generateClaudeSettings,
   generateEnv,
   generateGitignore,
@@ -78,6 +79,10 @@ export async function runInit(opts: InitOptions): Promise<void> {
     writes.push({ path: 'agents/zooid-assistant/AGENTS.md', content: generateAgentsMd() })
 
     if (opts.preset === 'claude') {
+      writes.push({
+        path: 'agents/zooid-assistant/CLAUDE.md',
+        content: generateClaudeMd(),
+      })
       writes.push({
         path: 'agents/zooid-assistant/.claude/settings.json',
         content: generateClaudeSettings(),

@@ -43,6 +43,15 @@ You are the zooid setup assistant. Your job is to help the operator get a workfo
 `
 }
 
+/**
+ * Claude Code auto-loads `CLAUDE.md`, not `AGENTS.md`. We keep `AGENTS.md`
+ * as the canonical content (codex / opencode read it directly) and ship a
+ * one-line `CLAUDE.md` that pulls it in via Claude Code's `@<path>` import.
+ */
+export function generateClaudeMd(): string {
+  return `@AGENTS.md\n`
+}
+
 export function generateClaudeSettings(): string {
   return (
     JSON.stringify(

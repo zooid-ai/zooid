@@ -34,6 +34,13 @@ describe('generateZooidYaml', () => {
   })
 })
 
+describe('generateClaudeMd', () => {
+  it('imports AGENTS.md via the @<path> directive Claude Code auto-loads', async () => {
+    const { generateClaudeMd } = await import('./generators.js')
+    expect(generateClaudeMd().trim()).toBe('@AGENTS.md')
+  })
+})
+
 describe('generateAgentsMd', () => {
   it('names the assistant and points at the docs URL', () => {
     const out = generateAgentsMd()

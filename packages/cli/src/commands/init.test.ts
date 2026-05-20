@@ -29,6 +29,7 @@ describe('runInit — claude subscription path', () => {
 
     expect(existsSync(join(dir, 'zooid.yaml'))).toBe(true)
     expect(existsSync(join(dir, 'agents/zooid-assistant/AGENTS.md'))).toBe(true)
+    expect(existsSync(join(dir, 'agents/zooid-assistant/CLAUDE.md'))).toBe(true)
     expect(existsSync(join(dir, 'agents/zooid-assistant/.claude/settings.json'))).toBe(true)
     expect(existsSync(join(dir, '.gitignore'))).toBe(true)
     expect(existsSync(join(dir, '.env'))).toBe(false)
