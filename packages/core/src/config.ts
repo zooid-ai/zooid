@@ -60,7 +60,14 @@ function parseAcpBlock(name: string, raw: unknown): AcpAgentSpec {
         `agents.${name}.acp.preset: unknown preset "${a.preset}"`,
       )
     }
-    return { preset: a.preset } as AcpAgentSpec
+    const out: { preset: string; model?: string } = { preset: a.preset }
+    if (a.model !== undefined) {
+      if (typeof a.model !== 'string' || a.model.trim().length === 0) {
+        throw new Error(`agents.${name}.acp.model: must be a non-empty string`)
+      }
+      out.model = a.model.trim()
+    }
+    return out as AcpAgentSpec
   }
   if (typeof a.command !== 'string' || a.command.length === 0) {
     throw new Error(`agents.${name}.acp.command: must be a non-empty string`)

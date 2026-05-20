@@ -51,6 +51,37 @@ describe('resolvePreset', () => {
     a.args.push('mutated')
     expect(b.args).toEqual(['-y', '@agentclientprotocol/claude-agent-acp'])
   })
+
+  it('appends --model <id> to claude when opts.model is set', () => {
+    const spec = resolvePreset('claude', { model: 'claude-sonnet-4-6' })
+    expect(spec.args).toEqual([
+      '-y',
+      '@agentclientprotocol/claude-agent-acp',
+      '--model',
+      'claude-sonnet-4-6',
+    ])
+  })
+
+  it('appends --model <id> to codex when opts.model is set', () => {
+    const spec = resolvePreset('codex', { model: 'gpt-5.5' })
+    expect(spec.args).toEqual([
+      '-y',
+      '@zed-industries/codex-acp',
+      '--model',
+      'gpt-5.5',
+    ])
+  })
+
+  it('ignores opts.model for opencode (model lives in opencode.json)', () => {
+    const spec = resolvePreset('opencode', { model: 'opencode-go/kimi-k2.6' })
+    expect(spec.args).toEqual(['acp'])
+  })
+
+  it('returns the bare preset spec when no opts are given', () => {
+    const spec = resolvePreset('claude')
+    expect(spec.command).toBe('npx')
+    expect(spec.args).toEqual(['-y', '@agentclientprotocol/claude-agent-acp'])
+  })
 })
 
 describe('isPreset', () => {

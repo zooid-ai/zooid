@@ -272,12 +272,12 @@ export class AcpClient {
   }
 
   private resolveSpawn(): { command: string; args: string[] } {
-    const { preset, command, args } = this.options.agent
+    const { preset, command, args, model } = this.options.agent
     if (command) {
       return { command, args: args ?? [] }
     }
     if (preset) {
-      return resolvePreset(preset)
+      return resolvePreset(preset, { model })
     }
     throw new Error('AcpClient: agent must specify either `preset` or `command`')
   }

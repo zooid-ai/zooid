@@ -5,8 +5,8 @@ import type { ChildProcess } from 'node:child_process'
  * explicit command. The schema parser rejects both/neither.
  */
 export type AcpAgentSpec =
-  | { preset: string; command?: never; args?: never }
-  | { preset?: never; command: string; args?: string[] }
+  | { preset: string; model?: string; command?: never; args?: never }
+  | { preset?: never; model?: never; command: string; args?: string[] }
 
 /**
  * A single bind mount the runtime should set up for the spawned agent

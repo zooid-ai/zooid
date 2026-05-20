@@ -36,11 +36,29 @@ export function isPreset(name: string): name is PresetName {
   return Object.prototype.hasOwnProperty.call(PRESETS_INTERNAL, name)
 }
 
-export function resolvePreset(name: string): PresetSpec {
+export interface ResolvePresetOpts {
+  /** Optional model string. Forwarded to the underlying shim as a `--model`
+   * flag where supported. Ignored for `opencode` (model lives in opencode.json). */
+  model?: string
+}
+
+// null = preset has its own model channel (opencode reads opencode.json); undefined = not implemented yet.
+const MODEL_FLAG_PER_PRESET: Partial<Record<PresetName, string | null>> = {
+  claude: '--model',
+  codex: '--model',
+  opencode: null,
+}
+
+export function resolvePreset(name: string, opts: ResolvePresetOpts = {}): PresetSpec {
   if (!isPreset(name)) {
     const known = Object.keys(PRESETS_INTERNAL).sort().join(', ')
     throw new Error(`unknown ACP preset "${name}". Known presets: ${known}`)
   }
   const entry = PRESETS_INTERNAL[name]
-  return { command: entry.command, args: [...entry.args] }
+  const args: string[] = [...entry.args]
+  if (opts.model !== undefined) {
+    const flag = MODEL_FLAG_PER_PRESET[name]
+    if (flag) args.push(flag, opts.model)
+  }
+  return { command: entry.command, args }
 }

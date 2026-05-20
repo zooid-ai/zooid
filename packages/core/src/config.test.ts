@@ -570,6 +570,49 @@ agents:
     expect(config.agents.docs!.matrix).toBeDefined()
     expect('display_name' in (config.agents.docs!.matrix as object)).toBe(false)
   })
+
+  it('accepts an optional acp.model string', () => {
+    const config = loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  docs:
+    acp:
+      preset: claude
+      model: claude-sonnet-4-6
+    matrix:
+      rooms: ['#docs']
+`)
+    expect(config.agents.docs!.acp).toEqual({
+      preset: 'claude',
+      model: 'claude-sonnet-4-6',
+    })
+  })
+
+  it('rejects acp.model when not a non-empty string', () => {
+    expect(() =>
+      loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  docs:
+    acp: { preset: claude, model: '' }
+    matrix: { rooms: ['#docs'] }
+`),
+    ).toThrow(/acp\.model.*non-empty string/i)
+  })
+
+  it('omits model from the parsed acp block when absent', () => {
+    const config = loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  docs:
+    acp: { preset: claude }
+    matrix: { rooms: ['#docs'] }
+`)
+    expect('model' in (config.agents.docs!.acp as object)).toBe(false)
+  })
 })
 
 describe('loadZooidConfig (matrix transport — implicit server)', () => {

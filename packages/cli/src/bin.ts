@@ -1,6 +1,8 @@
 import { resolve } from 'node:path'
 import { cac } from 'cac'
 import { runDev } from './commands/dev.js'
+import { runInit } from './commands/init.js'
+import { resolveOptions } from './commands/init/prompts.js'
 import { runLogs } from './commands/logs.js'
 import { runStart } from './commands/start.js'
 import { runStatus } from './commands/status.js'
@@ -78,6 +80,31 @@ cli
       dataDir: flags.data,
       port: flags.port !== undefined ? Number(flags.port) : undefined,
     })
+  })
+
+cli
+  .command('init [dir]', 'Scaffold a new zooid workforce in the current (or named) directory')
+  .option('--preset <name>', 'claude | codex | opencode')
+  .option('--auth <mode>', 'subscription | api-key (claude/codex only)')
+  .option('--model <id>', 'Model identifier')
+  .option('--provider <id>', 'opencode provider: opencode-go | opencode | anthropic | openrouter | custom')
+  .option('--api-key <value>', 'API key (api-key path; opencode always)')
+  .option('--force', 'Allow scaffolding into a non-empty directory')
+  .option('--overwrite', 'With --force, overwrite existing files')
+  .option('--no-interactive', 'Disable prompts; require all flags up front')
+  .action(async (dir: string | undefined, flags) => {
+    const resolved = await resolveOptions({
+      dir: dir ?? process.cwd(),
+      preset: flags.preset,
+      auth: flags.auth,
+      model: flags.model,
+      provider: flags.provider,
+      apiKey: flags.apiKey,
+      force: Boolean(flags.force),
+      overwrite: Boolean(flags.overwrite),
+      interactive: flags.interactive,
+    })
+    await runInit(resolved)
   })
 
 cli.help()

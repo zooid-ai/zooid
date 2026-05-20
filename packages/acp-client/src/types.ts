@@ -12,6 +12,8 @@ export interface AgentConfig {
   id: string
   /** Short-hand for a known ACP harness. Resolves to command/args via the preset registry. */
   preset?: PresetName
+  /** Optional model id, forwarded to the preset as `--model <id>` where supported. */
+  model?: string
   /** Explicit command. Overrides whatever the preset would set. */
   command?: string
   /** Explicit args. Overrides whatever the preset would set. */

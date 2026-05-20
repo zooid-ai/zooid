@@ -226,7 +226,7 @@ export function resolveAcpAgentSpec(spec: AcpAgentSpec): {
   args: string[]
 } {
   if ('preset' in spec && spec.preset) {
-    return resolvePreset(spec.preset)
+    return resolvePreset(spec.preset, { model: spec.model })
   }
   if ('command' in spec && spec.command) {
     return { command: spec.command, args: spec.args ?? [] }
