@@ -37,15 +37,29 @@ interface WriteSpec {
   content: string
 }
 
+// Pre-existing entries that don't count toward "non-empty". Lets operators
+// run `pnpm install` before `zooid init` without tripping the guard.
+const IGNORED_PREEXISTING = new Set([
+  '.',
+  '..',
+  '.git',
+  '.DS_Store',
+  'node_modules',
+  'package.json',
+  'package-lock.json',
+  'pnpm-lock.yaml',
+  'yarn.lock',
+])
+
 export async function runInit(opts: InitOptions): Promise<void> {
   const dir = resolve(opts.dir)
   mkdirSync(dir, { recursive: true })
 
   if (!opts.force) {
-    const entries = readdirSync(dir).filter((n) => n !== '.' && n !== '..')
-    if (entries.length > 0) {
+    const blocking = readdirSync(dir).filter((n) => !IGNORED_PREEXISTING.has(n))
+    if (blocking.length > 0) {
       throw new Error(
-        `${dir} is non-empty (use --force to allow scaffolding into it)`,
+        `${dir} is non-empty (use --force to allow scaffolding into it). Conflicting entries: ${blocking.join(', ')}`,
       )
     }
   }

@@ -93,6 +93,15 @@ describe('runInit — idempotency', () => {
     ).rejects.toThrow(/non-empty/i)
   })
 
+  it('ignores package-manager files (node_modules, package.json, lockfiles, .git)', async () => {
+    writeFileSync(join(dir, 'package.json'), '{"name":"x"}')
+    writeFileSync(join(dir, 'pnpm-lock.yaml'), 'lockfileVersion: 9')
+    require('node:fs').mkdirSync(join(dir, 'node_modules'))
+    require('node:fs').mkdirSync(join(dir, '.git'))
+    await runInit({ dir, preset: 'claude', auth: 'subscription', model: 'claude-sonnet-4-6' })
+    expect(existsSync(join(dir, 'zooid.yaml'))).toBe(true)
+  })
+
   it('preserves existing files under --force (additive create only)', async () => {
     writeFileSync(join(dir, 'zooid.yaml'), 'preexisting: true')
     await runInit({
