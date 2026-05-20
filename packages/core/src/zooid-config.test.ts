@@ -129,28 +129,6 @@ agents:
     ).toThrow(/http.*references transport.*type: matrix/i)
   })
 
-  it('errors when a matrix block omits user_id', () => {
-    expect(() =>
-      loadZooidConfig(`
-transports:
-  matrix-local:
-    type: matrix
-    homeserver: http://localhost:8448
-    as_token: as-x
-    hs_token: hs-x
-    sender_localpart: zooid
-    user_namespace: '@.*:localhost'
-agents:
-  oops:
-    workdir: .
-    acp: { preset: claude }
-    matrix:
-      transport: matrix-local
-      rooms: ['!r:localhost']
-`),
-    ).toThrow(/agents\.oops\.matrix\.user_id.*@localpart:server/i)
-  })
-
   it('allows multiple transports of mixed types', () => {
     const yaml = `
 transports:

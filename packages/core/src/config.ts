@@ -178,6 +178,41 @@ function parseTransports(
   for (const name of names) {
     out[name] = parseTransport(name, r[name], processEnv)
   }
+  const matrixEntries = Object.entries(out).filter(
+    (e): e is [string, MatrixTransportConfig] => e[1].type === 'matrix',
+  )
+  if (matrixEntries.length === 1) {
+    const [, mt] = matrixEntries[0]!
+    if (mt.as_token === '__INFER__') {
+      const v = interpolateString('${MATRIX_AS_TOKEN}', processEnv)
+      if (v.length === 0) {
+        throw new Error(
+          'transports.matrix.as_token: env var MATRIX_AS_TOKEN is not set ' +
+            '(set it in your shell or .env, or declare as_token explicitly in zooid.yaml)',
+        )
+      }
+      mt.as_token = v
+    }
+    if (mt.hs_token === '__INFER__') {
+      const v = interpolateString('${MATRIX_HS_TOKEN}', processEnv)
+      if (v.length === 0) {
+        throw new Error(
+          'transports.matrix.hs_token: env var MATRIX_HS_TOKEN is not set ' +
+            '(set it in your shell or .env, or declare hs_token explicitly in zooid.yaml)',
+        )
+      }
+      mt.hs_token = v
+    }
+  } else if (matrixEntries.length > 1) {
+    for (const [tname, mt] of matrixEntries) {
+      if (mt.as_token === '__INFER__' || mt.hs_token === '__INFER__') {
+        throw new Error(
+          `transports.${tname}: as_token / hs_token must be set explicitly when more than one matrix transport is declared ` +
+            `(no sensible default env var across multiple transports)`,
+        )
+      }
+    }
+  }
   return out
 }
 
@@ -190,12 +225,29 @@ function parseTransport(
     throw new Error(`transports.${name}: must be a mapping`)
   }
   const r = raw as Record<string, unknown>
-  if (r.type !== 'matrix' && r.type !== 'http') {
+  const inferredType =
+    r.type ?? (name === 'matrix' || name === 'http' ? name : undefined)
+  if (inferredType !== 'matrix' && inferredType !== 'http') {
     throw new Error(
       `transports.${name}.type must be "matrix" or "http" (got ${JSON.stringify(r.type)})`,
     )
   }
-  if (r.type === 'matrix') {
+  if (inferredType === 'matrix') {
+    if (r.sender_localpart === undefined) r.sender_localpart = 'zooid'
+    if (r.user_namespace === undefined && typeof r.homeserver === 'string') {
+      try {
+        const host = new URL(
+          interpolateString(r.homeserver as string, processEnv),
+        ).hostname
+        if (host) r.user_namespace = `@.*:${host}`
+      } catch {
+        // Fall through: the required-fields loop will fire its "must be a
+        // non-empty string" error, which is the same message today's parser
+        // would emit for a bad homeserver URL.
+      }
+    }
+    if (r.as_token === undefined) r.as_token = '__INFER__'
+    if (r.hs_token === undefined) r.hs_token = '__INFER__'
     const fields = [
       'homeserver',
       'as_token',
@@ -269,10 +321,26 @@ function parseTransportBinding(
     throw new Error(`agents.${name}.${kind}: must be a mapping`)
   }
   const block = blockRaw as Record<string, unknown>
-  if (typeof block.transport !== 'string' || block.transport.length === 0) {
-    throw new Error(`agents.${name}.${kind}.transport (string) is required`)
+  let refName: string
+  if (typeof block.transport === 'string' && block.transport.length > 0) {
+    refName = block.transport
+  } else {
+    const matches = Object.entries(transports).filter(
+      ([, t]) => t.type === kind,
+    )
+    if (matches.length === 0) {
+      throw new Error(
+        `agents.${name}.${kind}: no transport of type ${kind} declared (add one under transports:)`,
+      )
+    }
+    if (matches.length > 1) {
+      throw new Error(
+        `agents.${name}.${kind}.transport is required when more than one ${kind} transport is declared ` +
+          `(saw: ${matches.map(([n]) => n).join(', ')})`,
+      )
+    }
+    refName = matches[0]![0]
   }
-  const refName = block.transport
   const refTransport = transports[refName]
   if (!refTransport) {
     throw new Error(
@@ -292,14 +360,15 @@ function parseTransportBinding(
     }
     const serverName = deriveServerName(refTransport.user_namespace)
 
-    let userId: string | undefined
-    if (typeof block.user_id === 'string') {
-      userId = block.user_id
-      if (!userId.includes(':') && MATRIX_USER_LOCALPART_RE.test(userId)) {
-        userId = `${userId}:${serverName}`
-      }
+    const rawUserId =
+      typeof block.user_id === 'string' && block.user_id.length > 0
+        ? block.user_id
+        : `@${name}`
+    let userId = rawUserId
+    if (!userId.includes(':') && MATRIX_USER_LOCALPART_RE.test(userId)) {
+      userId = `${userId}:${serverName}`
     }
-    if (userId === undefined || !MATRIX_USER_ID_RE.test(userId)) {
+    if (!MATRIX_USER_ID_RE.test(userId)) {
       throw new Error(
         `agents.${name}.matrix.user_id must look like @localpart:server (got ${JSON.stringify(block.user_id)})`,
       )
@@ -380,8 +449,13 @@ function parseAgents(
       throw new Error(`agents.${name} must be a mapping`)
     }
     const entry = val as Record<string, unknown>
-    if (typeof entry.workdir !== 'string' || entry.workdir.length === 0) {
-      throw new Error(`agents.${name}.workdir is required`)
+    let workdir: string
+    if (entry.workdir === undefined) {
+      workdir = `./agents/${name}`
+    } else if (typeof entry.workdir !== 'string' || entry.workdir.length === 0) {
+      throw new Error(`agents.${name}.workdir must be a non-empty string`)
+    } else {
+      workdir = entry.workdir
     }
 
     if (entry.adapter !== undefined) {
@@ -456,7 +530,7 @@ function parseAgents(
 
     const agentCfg: AgentConfig = {
       name,
-      workdir: entry.workdir,
+      workdir,
       hooks: agentHooks,
       acp,
       approval_timeout_ms,
