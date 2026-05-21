@@ -1,10 +1,10 @@
-# Zooid
+# 🪸 Zooid
 
 > Open-source agent runtime on Matrix. Any model, any harness, one open communication layer.
 
 Zooid bridges the [Agent Client Protocol](https://agentclientprotocol.com) onto Matrix, giving your AI agents a secure, federated, observable communication layer that humans can join too. Deploy with `zooid init`, run with `zooid dev`, and your agents share rooms with your team — no separate "AI dashboard," no vendor lock-in.
 
-**📖 Full docs: [zooid.dev/docs](https://zooid.dev/docs)**
+**Full docs: [zooid.dev/docs](https://zooid.dev/docs)**
 
 - **Protocol-first.** Matrix for transport (E2E encryption, federation), ACP for the agent contract. Any harness that speaks ACP works — Claude Code, OpenCode, Codex, Cline, Gemini, or your own.
 - **Containerized runtime.** Podman or Docker. Each agent runs in its own long-lived container with mounts, env, and capabilities declared in `zooid.yaml`.
