@@ -1,4 +1,4 @@
-# zooid-agent-base
+# agent-base
 
 Container base image for `DockerAcpRuntime`. Contains node 22, git, and
 CA certificates — nothing else. Each agent's ACP shim is invoked via
@@ -8,7 +8,7 @@ hard-code which CLI it hosts.
 Build locally:
 
 ```sh
-docker build -t ghcr.io/zooid-ai/zooid-agent-base:local \
+docker build -t ghcr.io/zooid-ai/agent-base:local \
   -f packages/runtime-docker/docker/agent-base/Dockerfile \
   packages/runtime-docker/docker/agent-base
 ```
@@ -19,7 +19,7 @@ Set as the runtime default in `zooid.yaml`:
 transport: http
 runtime: docker
 docker:
-  image: ghcr.io/zooid-ai/zooid-agent-base:local
+  image: ghcr.io/zooid-ai/agent-base:local
 ```
 
 Per-agent overrides are still possible via `agents.<name>.docker.image`.

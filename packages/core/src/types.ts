@@ -58,16 +58,29 @@ export interface ZooidContainerConfig {
  * discriminator: `transports[transport].type` must equal `"matrix"`.
  */
 export interface MatrixBinding {
-  /** Ref into `ZooidConfig.transports`. Resolved transport must have type: 'matrix'. */
+  /**
+   * Ref into `ZooidConfig.transports`. Resolved transport must have type: 'matrix'.
+   * @default if exactly one matrix transport is declared, that transport's key
+   */
   transport: string
-  /** Full Matrix user ID for this agent's bot, e.g. `@architect:example.com`. */
+  /**
+   * Full Matrix user ID for this agent's bot, e.g. `@architect:example.com`.
+   * @default `@<agent name>:<server>` — server is derived from the resolved
+   *          transport's `user_namespace`
+   */
   user_id: string
-  /** Optional human-readable display name. Written to the agent's Matrix
-   *  profile on bootstrap. Falls back to the user_id localpart when absent. */
+  /**
+   * Optional human-readable display name. Written to the agent's Matrix
+   * profile on bootstrap. Falls back to the user_id localpart when absent.
+   */
   display_name?: string
   /** Room IDs / aliases this agent watches. */
   rooms: string[]
-  /** Routing rule. `mention` requires the bot to be tagged; `any` triggers on every message. */
+  /**
+   * Routing rule. `mention` requires the bot to be tagged; `any` triggers
+   * on every message.
+   * @default 'mention'
+   */
   trigger: 'mention' | 'any'
 }
 
@@ -86,9 +99,16 @@ export interface HttpBinding {
  * exactly one transport-kind block (`matrix` or `http`).
  */
 export interface AgentConfig {
-  /** Routing name. Must match /^[a-z][a-z0-9-]{0,31}$/ */
+  /**
+   * Routing name. Always the agent's key in `ZooidConfig.agents` — cannot
+   * be overridden, and a `name:` field under an agent is silently ignored.
+   * The key must match /^[a-z][a-z0-9-]{0,31}$/.
+   */
   name: string
-  /** Host directory for the agent's workspace. */
+  /**
+   * Host directory for the agent's workspace.
+   * @default `./agents/<name>`
+   */
   workdir: string
   /** Per-agent hooks. Workforce-wide hooks are merged in at load time. */
   hooks: {
@@ -99,10 +119,11 @@ export interface AgentConfig {
   acp: AcpAgentSpec
   /**
    * Wall-clock timeout for pending permission requests, in milliseconds.
-   * 0 = no timeout (default). The paused agent's idle cost is negligible,
-   * so opt-in is the right shape — set this only if you're running in a
+   * 0 = no timeout. The paused agent's idle cost is negligible, so opt-in
+   * is the right shape — set this only if you're running in a
    * scale-to-zero / serverless context where unbounded waits would hold
    * resources.
+   * @default 0
    */
   approval_timeout_ms: number
   /** Container config. Rejected at parse time when runtime: local. */
@@ -119,14 +140,35 @@ export interface AgentConfig {
 export interface MatrixTransportConfig {
   type: 'matrix'
   homeserver: string
+  /**
+   * Application-service token. Sent on every Client-Server API call.
+   * @default value of `$MATRIX_AS_TOKEN` in the daemon's env
+   */
   as_token: string
+  /**
+   * Homeserver-to-AS token. The homeserver presents this on push.
+   * @default value of `$MATRIX_HS_TOKEN` in the daemon's env
+   */
   hs_token: string
+  /**
+   * Localpart of the AS sender user (the bridge bot).
+   * @default 'zooid'
+   */
   sender_localpart: string
-  /** Regex covering all bot users, e.g. `@.*:example.com` */
+  /**
+   * Regex covering all bot users, e.g. `@.*:example.com`.
+   * @default `@.*:<host>` — host derived from `homeserver`
+   */
   user_namespace: string
-  /** AS HTTP listener port. Defaults to 8080. */
+  /**
+   * AS HTTP listener port.
+   * @default 8080
+   */
   port?: number
-  /** Workforce space localpart. Resolves to alias `#<space>:<server>`. Defaults to `dev`. */
+  /**
+   * Workforce space localpart. Resolves to alias `#<space>:<server>`.
+   * @default 'dev'
+   */
   space?: string
 }
 
@@ -135,6 +177,10 @@ export interface MatrixTransportConfig {
  */
 export interface HttpTransportConfig {
   type: 'http'
+  /**
+   * HTTP listener port.
+   * @default 8080
+   */
   port: number
 }
 
