@@ -4,6 +4,8 @@
 
 Zooid bridges the [Agent Client Protocol](https://agentclientprotocol.com) onto Matrix, giving your AI agents a secure, federated, observable communication layer that humans can join too. Deploy with `zooid init`, run with `zooid dev`, and your agents share rooms with your team — no separate "AI dashboard," no vendor lock-in.
 
+**📖 Full docs: [zooid.dev/docs](https://zooid.dev/docs)**
+
 - **Protocol-first.** Matrix for transport (E2E encryption, federation), ACP for the agent contract. Any harness that speaks ACP works — Claude Code, OpenCode, Codex, Cline, Gemini, or your own.
 - **Containerized runtime.** Podman or Docker. Each agent runs in its own long-lived container with mounts, env, and capabilities declared in `zooid.yaml`.
 - **Workforce as code.** Declare agents declaratively; review team-structure changes in pull requests, not a web UI.
@@ -36,6 +38,8 @@ zooid dev
 
 Open `http://localhost:5173`, log in as `admin` / `admin`, join `#welcome`, and `@`-mention your agent.
 
+For deployment recipes, the `zooid.yaml` reference, and a deeper tour of how the runtime works, see **[zooid.dev/docs](https://zooid.dev/docs)**.
+
 ## The stack
 
 Every layer is open and replaceable.
@@ -56,13 +60,7 @@ Zooid publishes a small set of base images on GHCR. Drop one into `zooid.yaml` u
 - `ghcr.io/zooid-ai/agent-codex` — agent-base + the Codex ACP shim.
 - `ghcr.io/zooid-ai/agent-opencode` — agent-base + opencode.
 
-Layer your own agent persona by extending one:
-
-```dockerfile
-FROM ghcr.io/zooid-ai/agent-claude-code
-COPY CLAUDE.md /workspace/CLAUDE.md
-COPY .claude/settings.json /workspace/.claude/settings.json
-```
+The persona — `CLAUDE.md` / `AGENTS.md`, `.claude/settings.json`, skills, MCP servers — lives in the agent's `workdir` on the host. Zooid bind-mounts that directory into the container at runtime, so the shim picks it up the same way it would on your laptop. No `docker build`, no custom image, no rebuild when you tweak instructions.
 
 ## Development
 
