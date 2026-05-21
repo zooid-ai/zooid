@@ -50,7 +50,7 @@ describe('AcpClient end-to-end with echo fixture', () => {
     const result = await promptPromise
     expect(result.stopReason).toBe('end_turn')
 
-    expect(events.some((e) => e.type === 'message_chunk')).toBe(true)
+    expect(events.some((e) => e.type === 'agent_message_chunk')).toBe(true)
 
     await client.stop()
   }, 15_000)

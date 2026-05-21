@@ -22,7 +22,7 @@ const echo = {
     p: { threadId: string; content: { type: 'text'; text: string }[] },
   ) => {
     inner.emit('agentEvent', 'dev', {
-      type: 'message_chunk',
+      type: 'agent_message_chunk',
       sessionId: `sess-${p.threadId}`,
       content: { type: 'text', text: `echo: ${p.content[0]?.text ?? ''}` },
     })

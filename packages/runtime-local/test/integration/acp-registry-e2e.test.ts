@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
-import { LocalAcpRuntime } from '@zooid/runtime-local'
-import { AcpAgentRegistry } from '../../src/acp-registry.js'
+import { AcpAgentRegistry } from '@zooid/core'
 import type { AgentEvent } from '@zooid/acp-client'
+import { LocalAcpRuntime } from '../../src/index.js'
 
 const fixturePath = fileURLToPath(
   new URL('../../../acp-client/test/fixtures/echo-agent.ts', import.meta.url),
 )
 
 describe('AcpAgentRegistry + LocalAcpRuntime against echo fixture', () => {
-  it('drives a prompt end-to-end, surfaces a message_chunk, resolves an approval', async () => {
+  it('drives a prompt end-to-end, surfaces an agent_message_chunk, resolves an approval', async () => {
     const events: AgentEvent[] = []
     let approvalSeen = false
     const reg = new AcpAgentRegistry({
@@ -39,7 +39,7 @@ describe('AcpAgentRegistry + LocalAcpRuntime against echo fixture', () => {
       })
       expect(result.stopReason).toBe('end_turn')
       expect(approvalSeen).toBe(true)
-      expect(events.some((e) => e.type === 'message_chunk')).toBe(true)
+      expect(events.some((e) => e.type === 'agent_message_chunk')).toBe(true)
     } finally {
       await reg.stopAll()
     }

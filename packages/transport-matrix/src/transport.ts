@@ -70,7 +70,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       return
     }
 
-    if (event.type === 'message_chunk') {
+    if (event.type === 'agent_message_chunk') {
       const block = event.content as { type?: string; text?: string }
       if (block.type === 'text' && typeof block.text === 'string') {
         buffers.set(event.sessionId, (buffers.get(event.sessionId) ?? '') + block.text)

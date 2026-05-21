@@ -12,7 +12,7 @@ export type {
   AgentEvent,
   ApprovalDecision,
   ApprovalRequest,
-  MessageChunkEvent,
+  AgentMessageChunkEvent,
   PlanEvent,
   PromptInput,
   PromptResult,

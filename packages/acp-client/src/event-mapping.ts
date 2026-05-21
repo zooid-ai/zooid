@@ -14,7 +14,7 @@ export function acpUpdateToAgentEvent(
   switch (update.sessionUpdate) {
     case 'agent_message_chunk':
       return {
-        type: 'message_chunk',
+        type: 'agent_message_chunk',
         sessionId,
         content: update.content,
       }

@@ -41,13 +41,13 @@ export interface PromptResult {
 }
 
 export type AgentEvent =
-  | MessageChunkEvent
+  | AgentMessageChunkEvent
   | ToolCallEvent
   | ToolCallUpdateEvent
   | PlanEvent
 
-export interface MessageChunkEvent {
-  type: 'message_chunk'
+export interface AgentMessageChunkEvent {
+  type: 'agent_message_chunk'
   sessionId: string
   content: ContentBlock
 }

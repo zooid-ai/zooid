@@ -50,7 +50,7 @@ async function readFrames(child: ReturnType<typeof spawn>, n: number): Promise<F
 }
 
 describe('echo-agent ACP shim', () => {
-  it('responds to initialize, newSession, and prompt with a message_chunk', async () => {
+  it('responds to initialize, newSession, and prompt with an agent_message_chunk', async () => {
     const child = spawn('node', ['--import', 'tsx', SHIM], { stdio: ['pipe', 'pipe', 'inherit'] })
 
     send(child, { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: 1 } })

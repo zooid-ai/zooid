@@ -157,7 +157,7 @@ describe('POST /agents/:name/sessions', () => {
 
   it('happy path: SSE stream — session.start → turn.start → ACP events → turn.end', async () => {
     const events: AgentEvent[] = [
-      { type: 'message_chunk', sessionId: SID, content: { type: 'text', text: 'hi' } },
+      { type: 'agent_message_chunk', sessionId: SID, content: { type: 'text', text: 'hi' } },
       { type: 'plan', sessionId: SID, entries: [] },
     ]
     const app = createApp({
@@ -171,7 +171,7 @@ describe('POST /agents/:name/sessions', () => {
     const frames = parseFrames(await res.text()) as Array<Record<string, unknown>>
     expect(frames[0]).toEqual({ type: 'session.start', session_id: SID })
     expect(frames[1]).toEqual({ type: 'turn.start' })
-    expect(frames.slice(2, -1).map((f) => f.type)).toEqual(['message_chunk', 'plan'])
+    expect(frames.slice(2, -1).map((f) => f.type)).toEqual(['agent_message_chunk', 'plan'])
     const last = frames[frames.length - 1]
     expect(last.type).toBe('turn.end')
     expect(last.stop_reason).toBe('end_turn')

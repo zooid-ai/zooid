@@ -120,7 +120,7 @@ describe('matrix transport /transactions', () => {
     ]
     agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
       agents.onEvent('architect', {
-        type: 'message_chunk',
+        type: 'agent_message_chunk',
         sessionId: 'sess-' + p.threadId,
         content: { type: 'text', text: 'hello back' },
       })
@@ -161,7 +161,7 @@ describe('matrix transport /transactions', () => {
     ]
     agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
       agents.onEvent('architect', {
-        type: 'message_chunk',
+        type: 'agent_message_chunk',
         sessionId: 'sess-' + p.threadId,
         content: { type: 'text', text: 'reply' },
       })
@@ -241,7 +241,7 @@ describe('thread implicit triggers', () => {
     // $root the thread root and architect a thread participant.
     agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
       agents.onEvent('architect', {
-        type: 'message_chunk',
+        type: 'agent_message_chunk',
         sessionId: 'sess-' + p.threadId,
         content: { type: 'text', text: 'hi' },
       })
@@ -351,7 +351,7 @@ describe('thread implicit triggers', () => {
     const { transport, agents } = makeTransport()
     agents.prompt.mockImplementationOnce(async (_n: string, p: { threadId: string }) => {
       agents.onEvent('architect', {
-        type: 'message_chunk',
+        type: 'agent_message_chunk',
         sessionId: 'sess-' + p.threadId,
         content: { type: 'text', text: 'hi' },
       })
@@ -436,7 +436,7 @@ describe('eco.zoon.session_reset', () => {
     // Turn 1: user @mentions architect — architect becomes a participant.
     agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
       agents.onEvent('architect', {
-        type: 'message_chunk',
+        type: 'agent_message_chunk',
         sessionId: 'sess-' + p.threadId,
         content: { type: 'text', text: 'ok' },
       })
@@ -672,7 +672,7 @@ describe('presence lifecycle', () => {
     })
     await settleTurn()
     await (agents.onEvent as (n: string, e: unknown) => unknown)('architect', {
-      type: 'message_chunk',
+      type: 'agent_message_chunk',
       sessionId: 'sess-$e5',
       content: { type: 'text', text: 'reply' },
     })
@@ -821,7 +821,7 @@ describe('tool-call and plan event bridging', () => {
     await settleTurn()
   })
 
-  it('still buffers message_chunk into the final m.room.message', async () => {
+  it('still buffers agent_message_chunk into the final m.room.message', async () => {
     const { transport, agents, client, finishPrompt } = makeTransport()
     await postTxn(transport.app, {
       events: [
@@ -842,7 +842,7 @@ describe('tool-call and plan event bridging', () => {
     await settleTurn()
     const sessionId = 'sess-$e8'
     await (agents.onEvent as (n: string, e: unknown) => unknown)('architect', {
-      type: 'message_chunk',
+      type: 'agent_message_chunk',
       sessionId,
       content: { type: 'text', text: 'hello world' },
     })
@@ -1036,7 +1036,7 @@ describe('full loop integration', () => {
     const { transport, agents, client } = makeTransport()
     agents.prompt.mockImplementation(async (_n: string, p: { threadId: string }) => {
       agents.onEvent('architect', {
-        type: 'message_chunk',
+        type: 'agent_message_chunk',
         sessionId: 'sess-' + p.threadId,
         content: { type: 'text', text: 'reply ' + p.threadId.slice(0, 6) },
       })

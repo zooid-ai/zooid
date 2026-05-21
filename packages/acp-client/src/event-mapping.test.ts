@@ -6,7 +6,7 @@ import {
 import type { AgentEvent } from './types.js'
 
 describe('acpUpdateToAgentEvent', () => {
-  it('maps agent_message_chunk to message_chunk event', () => {
+  it('maps agent_message_chunk to agent_message_chunk event', () => {
     const event = acpUpdateToAgentEvent({
       sessionId: 's-1',
       update: {
@@ -15,7 +15,7 @@ describe('acpUpdateToAgentEvent', () => {
       },
     })
     expect(event).toEqual<AgentEvent>({
-      type: 'message_chunk',
+      type: 'agent_message_chunk',
       sessionId: 's-1',
       content: { type: 'text', text: 'hello' },
     })

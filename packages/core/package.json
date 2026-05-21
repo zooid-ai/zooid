@@ -36,7 +36,6 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@zooid/runtime-local": "workspace:^",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.5.0",
