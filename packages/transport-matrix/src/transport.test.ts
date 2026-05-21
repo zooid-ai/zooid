@@ -175,6 +175,87 @@ describe('matrix transport /transactions', () => {
     )
   })
 
+  it('attaches formatted_body when agent text contains markdown', async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: {
+          type: 'text',
+          text: '**bold** _italic_\n\n```ts\nconst x = 1\n```',
+        },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$root',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    expect(client.sendMessage).toHaveBeenCalledTimes(1)
+    const call = client.sendMessage.mock.calls[0]![0] as {
+      content: {
+        msgtype: string
+        body: string
+        format?: string
+        formatted_body?: string
+      }
+    }
+    expect(call.content.msgtype).toBe('m.text')
+    expect(call.content.body).toBe('**bold** _italic_\n\n```ts\nconst x = 1\n```')
+    expect(call.content.format).toBe('org.matrix.custom.html')
+    expect(typeof call.content.formatted_body).toBe('string')
+    expect(call.content.formatted_body).toContain('<strong>bold</strong>')
+    expect(call.content.formatted_body).toContain('<code class="language-ts">')
+  })
+
+  it('omits formatted_body when agent text has no markdown features', async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: { type: 'text', text: 'just plain text' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$root',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    expect(client.sendMessage).toHaveBeenCalledTimes(1)
+    const call = client.sendMessage.mock.calls[0]![0] as {
+      content: Record<string, unknown>
+    }
+    expect(call.content.body).toBe('just plain text')
+    expect(call.content).not.toHaveProperty('formatted_body')
+    expect(call.content).not.toHaveProperty('format')
+  })
+
   it('emits eco.zoon.approval_request when an approval is registered', async () => {
     const { transport, approvals, client } = makeTransport()
     await postTxn(transport.app, {

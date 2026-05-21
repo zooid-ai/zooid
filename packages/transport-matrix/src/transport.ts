@@ -7,6 +7,7 @@ import { BotPool } from './bot-pool.js'
 import { route, type AgentBinding, type ThreadState } from './router.js'
 import { stripMention, extractMentions } from './mentions.js'
 import { toToolCallBody, toUpdateBody, toPlanBody } from './event-encoders.js'
+import { toMatrixHtml } from './markdown-to-matrix-html.js'
 
 export interface CreateMatrixTransportOptions {
   agents: AcpRegistry
@@ -389,10 +390,33 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       })
       const text = buffers.get(sessionId) ?? ''
       if (text.length > 0) {
+        const html = toMatrixHtml(text)
+        const content: { msgtype: string; body: string; [k: string]: unknown } = {
+          msgtype: 'm.text',
+          body: text,
+        }
+        // Only attach formatted_body when it adds rich-text the plain body
+        // can't carry. marked wraps plain prose in <p>…</p>; if that's all
+        // we'd add, skip — most clients render `body` better than a stripped
+        // re-encode.
+        if (html) {
+          const escapedPlain =
+            '<p>' +
+            text
+              .replace(/&/g, '&amp;')
+              .replace(/</g, '&lt;')
+              .replace(/>/g, '&gt;') +
+            '</p>'
+          const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
+          if (norm(html) !== norm(escapedPlain)) {
+            content.format = 'org.matrix.custom.html'
+            content.formatted_body = html
+          }
+        }
         await client.sendMessage({
           roomId: evt.room_id,
           asUserId: agent.userId,
-          content: { msgtype: 'm.text', body: text },
+          content,
           threadRoot,                  // every reply threads, full stop
         })
       } else {
