@@ -1,7 +1,7 @@
 {
   "name": "zooid",
   "version": "0.7.0",
-  "description": "zooid — dockerized daemon for running CLI coding agents (Claude Code, Codex, ...) behind a simple API.",
+  "description": "Open-source tool for defining and running AI agents alongside you and your team. Any model, any CLI.",
   "type": "module",
   "license": "MIT",
   "private": false,

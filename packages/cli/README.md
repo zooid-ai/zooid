@@ -62,15 +62,10 @@ Zooid publishes a small set of base images on GHCR. Drop one into `zooid.yaml` u
 
 The persona — `CLAUDE.md` / `AGENTS.md`, `.claude/settings.json`, skills, MCP servers — lives in the agent's `workdir` on the host. Zooid bind-mounts that directory into the container at runtime, so the shim picks it up the same way it would on your laptop. No `docker build`, no custom image, no rebuild when you tweak instructions.
 
-## Development
+## Contributing
 
-```bash
-pnpm install
-pnpm -r build
-pnpm -r test
-pnpm -r typecheck
-```
+Source and contribution guidelines: [github.com/zooid-ai/zooid](https://github.com/zooid-ai/zooid).
 
 ## License
 
-[MIT](./LICENSE)
+[MIT](https://github.com/zooid-ai/zooid/blob/main/LICENSE)
