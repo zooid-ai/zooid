@@ -62,13 +62,13 @@ describe('resolvePreset', () => {
     ])
   })
 
-  it('appends --model <id> to codex when opts.model is set', () => {
+  it('passes model to codex via `-c model="..."` (codex-acp uses TOML config overrides)', () => {
     const spec = resolvePreset('codex', { model: 'gpt-5.5' })
     expect(spec.args).toEqual([
       '-y',
       '@zed-industries/codex-acp',
-      '--model',
-      'gpt-5.5',
+      '-c',
+      'model="gpt-5.5"',
     ])
   })
 

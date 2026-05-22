@@ -43,9 +43,10 @@ export interface ResolvePresetOpts {
 }
 
 // null = preset has its own model channel (opencode reads opencode.json); undefined = not implemented yet.
-const MODEL_FLAG_PER_PRESET: Partial<Record<PresetName, string | null>> = {
-  claude: '--model',
-  codex: '--model',
+// codex-acp doesn't accept --model; it takes config overrides via `-c key=value` (TOML).
+const MODEL_ARGS_PER_PRESET: Partial<Record<PresetName, ((model: string) => string[]) | null>> = {
+  claude: (m) => ['--model', m],
+  codex: (m) => ['-c', `model="${m.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`],
   opencode: null,
 }
 
@@ -57,8 +58,8 @@ export function resolvePreset(name: string, opts: ResolvePresetOpts = {}): Prese
   const entry = PRESETS_INTERNAL[name]
   const args: string[] = [...entry.args]
   if (opts.model !== undefined) {
-    const flag = MODEL_FLAG_PER_PRESET[name]
-    if (flag) args.push(flag, opts.model)
+    const builder = MODEL_ARGS_PER_PRESET[name]
+    if (builder) args.push(...builder(opts.model))
   }
   return { command: entry.command, args }
 }
