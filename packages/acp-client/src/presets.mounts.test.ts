@@ -69,7 +69,7 @@ describe('preset mount declarations — home / data / config', () => {
 
 describe('preset default images (unchanged from cycle 1)', () => {
   it('claude, codex, opencode declare a default ghcr image', () => {
-    expect(PRESETS.claude.image).toBe('ghcr.io/zooid-ai/agent-claude:latest')
+    expect(PRESETS.claude.image).toBe('ghcr.io/zooid-ai/agent-claude-code:latest')
     expect(PRESETS.codex.image).toBe('ghcr.io/zooid-ai/agent-codex:latest')
     expect(PRESETS.opencode.image).toBe('ghcr.io/zooid-ai/agent-opencode:latest')
   })

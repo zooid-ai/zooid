@@ -50,6 +50,13 @@ export interface StartDaemonOpts {
   noPrepull?: boolean
   /** Force a re-pull of every resolved image at startup (no inspect check). */
   refreshImages?: boolean
+  /**
+   * Per-line progress hook for the image-prepull pass. Called once per
+   * top-level summary plus once per image (start + completion). Used by
+   * `zooid dev` to surface pull progress under the "Start daemon" listr
+   * task instead of leaving the user staring at an unmoving spinner.
+   */
+  prepullLog?: (line: string) => void
 }
 
 export interface DaemonHandle {
@@ -120,6 +127,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       runtime: config.runtime,
       skip: opts.noPrepull ?? process.env.ZOOID_NO_PREPULL === '1',
       refresh: opts.refreshImages ?? process.env.ZOOID_REFRESH_IMAGES === '1',
+      log: opts.prepullLog,
     })
   }
 

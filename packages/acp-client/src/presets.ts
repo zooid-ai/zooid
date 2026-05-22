@@ -75,7 +75,7 @@ const PRESETS_INTERNAL = {
   claude: {
     command: 'npx',
     args: ['-y', '@agentclientprotocol/claude-agent-acp'],
-    image: 'ghcr.io/zooid-ai/agent-claude:latest',
+    image: 'ghcr.io/zooid-ai/agent-claude-code:latest',
     mounts: (ctx: PresetMountContext): PresetMount[] => [
       {
         id: 'home',

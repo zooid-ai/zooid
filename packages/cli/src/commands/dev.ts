@@ -179,7 +179,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
       },
       {
         title: 'Start daemon',
-        task: async () => {
+        task: async (_ctx, t) => {
           const captures: Record<string, AgentCapture> = {}
           for (const name of Object.keys(preview.agents)) {
             captures[name] = wireAgentCapture({
@@ -199,6 +199,9 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
             adminUserId: `@${flags.adminUser}:${shape.serverName}`,
             agentsDir: layout.agentsDir,
             onTap: (agentName, event) => captures[agentName]?.onTap(event),
+            prepullLog: (line) => {
+              t.output = line.replace(/^\[zooid\]\s+/, '').trim()
+            },
           })
         },
       },
