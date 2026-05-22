@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { loadZooidConfig } from '@zooid/core'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const EXAMPLE = join(HERE, '..', '..', '..', 'examples', 'zooid-dev', 'zooid.yaml')
+const EXAMPLE = join(HERE, '__fixtures__', 'zooid-dev.yaml')
 
 describe('examples/zooid-dev/zooid.yaml', () => {
   it('parses and declares one matrix transport with echo + docs agents', () => {

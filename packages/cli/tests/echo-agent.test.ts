@@ -4,11 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const SHIM = join(
-  HERE,
-  '..', '..', '..',
-  'examples', 'zooid-dev', 'agents', 'echo', 'echo-agent.ts',
-)
+const SHIM = join(HERE, '__fixtures__', 'echo-agent.ts')
 
 interface Frame {
   jsonrpc: '2.0'
