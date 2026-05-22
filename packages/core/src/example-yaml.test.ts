@@ -15,15 +15,7 @@ describe('zooid/examples/zooid-dev/zooid.yaml', () => {
     process.env.MATRIX_AS_TOKEN = 'as-tok'
     process.env.MATRIX_HS_TOKEN = 'hs-tok'
     try {
-      const path = join(
-        __dirname,
-        '..',
-        '..',
-        '..',
-        'examples',
-        'zooid-dev',
-        'zooid.yaml',
-      )
+      const path = join(__dirname, '__fixtures__', 'zooid-dev.yaml')
       const yamlText = readFileSync(path, 'utf8')
       const cfg = loadZooidConfig(yamlText)
       expect(cfg.runtime).toBe('local')

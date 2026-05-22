@@ -7,8 +7,8 @@
     "publishArgs": ["--access public"]
   },
   "git": {
-    "commitMessage": "chore: release budd v${version}",
-    "tagName": "budd-v${version}",
+    "commitMessage": "chore: release zooid v${version}",
+    "tagName": "zooid-v${version}",
     "push": false,
     "requireCleanWorkingDir": false
   },

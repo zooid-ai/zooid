@@ -1,0 +1,40 @@
+# Triage agent — zooid configuration.
+#
+# Single-agent zooid setup. The `default` agent name has no special meaning
+# — every agent must be named, and that name appears in the HTTP path
+# (POST /agents/default/sessions).
+
+runtime: local
+
+transports:
+  http-local:
+    type: http
+    port: 8080
+
+agents:
+  default:
+    workdir: ./agents/default
+    acp:
+      preset: claude
+    http:
+      transport: http-local
+    # Under `runtime: local` the host's env is inherited directly, so no
+    # forwarding is needed. Switch to `runtime: docker` and add a
+    # container.env block to control what env vars cross into the container:
+    #
+    # container:
+    #   env:
+    #     ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+
+# No hooks for the triage agent — it's a read-only workflow that writes a
+# single ticket file. If you want to e.g. open a real GitHub issue from each
+# ticket, add a per-agent post_turn hook here:
+#
+# agents:
+#   default:
+#     workdir: .
+#     acp: { preset: claude }
+#     http:
+#       transport: http-local
+#     hooks:
+#       post_turn: "scripts/open-github-issue.sh tickets/$(ls -t tickets | head -1)"

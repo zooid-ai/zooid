@@ -9,7 +9,9 @@ function fakeRegistry() {
   })
   const reg = {
     hasAgent: vi.fn(() => true),
-    ensureSession: vi.fn(async (_name: string, threadId: string) => `sess-${threadId}`),
+    ensureSession: vi.fn(
+      async (_name: string, threadId: string, _roomId: string) => `sess-${threadId}`,
+    ),
     endSession: vi.fn(),
     cancelSession: vi.fn(async () => {}),
     prompt: vi.fn(async () => {
@@ -131,7 +133,7 @@ describe('matrix transport /transactions', () => {
     expect(res.status).toBe(200)
     await settleTurn()
     // Agent-promotion: sessionKey is the inbound event_id, NOT the room.
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
     // The reply threads against the user's message.
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -169,7 +171,7 @@ describe('matrix transport /transactions', () => {
     })
     await postTxn(transport.app, { events })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ threadRoot: '$root' }),
     )
@@ -365,7 +367,7 @@ describe('thread implicit triggers', () => {
     await settleTurn()
 
     // architect should be triggered implicitly because they posted in the thread.
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
   })
 
   it("inherits the thread root's @mentions when no agent has posted yet", async () => {
@@ -408,7 +410,7 @@ describe('thread implicit triggers', () => {
     })
     await settleTurn()
     // Inherits the root's @mention of architect.
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
   })
 
   it('does not trigger any agent for a bare top-level message', async () => {
@@ -473,7 +475,7 @@ describe('thread implicit triggers', () => {
       ],
     })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
   })
 })
 
@@ -574,7 +576,7 @@ describe('eco.zoon.session_reset', () => {
       ],
     })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
   })
 })
 
@@ -1154,7 +1156,7 @@ describe('full loop integration', () => {
       }],
     })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ threadRoot: '$root' }),
     )

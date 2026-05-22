@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execSync, spawn, type ChildProcess } from 'node:child_process'
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
+import { startTuwunel, type TuwunelHandle } from './fixtures/tuwunel-fixture.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const fixtureDir = resolve(here, 'fixtures')
@@ -18,21 +19,21 @@ function dockerAvailable() {
   }
 }
 
-const HS = 'http://localhost:8448'
+let HS = ''
 const AS_PORT = 9099
 const AS_TOKEN = 'as-' + randomUUID()
 const HS_TOKEN = 'hs-' + randomUUID()
 
 let daemon: ChildProcess | undefined
+let tuwunel: TuwunelHandle | undefined
 
 describe.skipIf(!dockerAvailable())('matrix transport against tuwunel', () => {
   beforeAll(async () => {
-    rmSync(regDir, { recursive: true, force: true })
     mkdirSync(regDir, { recursive: true })
     writeFileSync(
-      resolve(regDir, 'zooid.yaml'),
+      resolve(regDir, 'zooid-smoke.yaml'),
       [
-        'id: zooid',
+        'id: zooid-smoke',
         `url: http://host.docker.internal:${AS_PORT}`,
         `as_token: ${AS_TOKEN}`,
         `hs_token: ${HS_TOKEN}`,
@@ -46,13 +47,13 @@ describe.skipIf(!dockerAvailable())('matrix transport against tuwunel', () => {
         '  rooms: []',
       ].join('\n'),
     )
-    execSync(`docker compose -f ${fixtureDir}/docker-compose.yml up -d`, { stdio: 'inherit' })
-    await waitFor(`${HS}/_matrix/client/versions`, 60_000)
-  }, 90_000)
+    tuwunel = await startTuwunel()
+    HS = tuwunel.homeserver
+  }, 120_000)
 
   afterAll(() => {
     daemon?.kill('SIGTERM')
-    execSync(`docker compose -f ${fixtureDir}/docker-compose.yml down -v`, { stdio: 'inherit' })
+    tuwunel?.down()
   }, 30_000)
 
   it('smoke: single agent, single room, trigger=any — message produces a reply', async () => {

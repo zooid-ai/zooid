@@ -12,7 +12,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { execSync } from 'node:child_process'
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { randomUUID } from 'node:crypto'
@@ -42,12 +42,11 @@ let tuwunel: TuwunelHandle | undefined
 
 describe.skipIf(!dockerAvailable())('MatrixContextProvider against tuwunel', () => {
   beforeAll(async () => {
-    rmSync(regDir, { recursive: true, force: true })
     mkdirSync(regDir, { recursive: true })
     writeFileSync(
-      resolve(regDir, 'zooid.yaml'),
+      resolve(regDir, 'zooid-ctx.yaml'),
       [
-        'id: zooid',
+        'id: zooid-ctx',
         // No AS HTTP listener required for these tests — set a port that
         // won't conflict if other AS daemons happen to be alive too.
         `url: http://host.docker.internal:9999`,

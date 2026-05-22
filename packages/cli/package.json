@@ -1,6 +1,6 @@
 {
   "name": "zooid",
-  "version": "0.0.1",
+  "version": "0.7.0",
   "description": "zooid — dockerized daemon for running CLI coding agents (Claude Code, Codex, ...) behind a simple API.",
   "type": "module",
   "license": "MIT",
@@ -52,6 +52,7 @@
     "yaml": "^2.5.0"
   },
   "devDependencies": {
+    "@agentclientprotocol/sdk": "^0.21.0",
     "@playwright/test": "^1.49.0",
     "@types/node": "^22.0.0",
     "release-it": "^19.2.4",

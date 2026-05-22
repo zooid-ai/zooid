@@ -373,10 +373,10 @@ agents:
 
 describe('example fixtures parse cleanly', () => {
   for (const rel of [
-    '../../../examples/zooid-dev/zooid.yaml',
-    '../../../examples/triage-agent/zooid.yaml',
-    '../../../examples/opencode-vertex-gemini/zooid.yaml',
-    '../../../examples/ec2/workspace/zooid.yaml',
+    './__fixtures__/zooid-dev.yaml',
+    './__fixtures__/triage-agent.yaml',
+    './__fixtures__/opencode-vertex-gemini.yaml',
+    './__fixtures__/ec2-workspace.yaml',
   ]) {
     it(`parses ${rel}`, () => {
       const path = resolve(HERE, rel)
