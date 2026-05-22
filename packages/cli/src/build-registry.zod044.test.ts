@@ -40,7 +40,11 @@ function mkCfg(over: Partial<ZooidConfig['agents']['alice']> = {}): ZooidConfig 
 describe('buildAcpRegistry — mounts (ZOD044)', () => {
   it('auto-injects the workspace mount with id "workspace"', () => {
     const cfg = mkCfg()
-    const reg = buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' })
+    const reg = buildAcpRegistry(cfg, {
+      configDir: '/example',
+      dataDir: '/data',
+      daemonHome: '/home/zooid',
+    })
     const mounts = reg.resolveSpawnMounts('alice')
     const ws = mounts.find((m) => m.target === '/workspace')
     expect(ws).toMatchObject({
@@ -52,7 +56,11 @@ describe('buildAcpRegistry — mounts (ZOD044)', () => {
 
   it('overrides cwd to /workspace when workspace mount is active', () => {
     const cfg = mkCfg()
-    const reg = buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' })
+    const reg = buildAcpRegistry(cfg, {
+      configDir: '/example',
+      dataDir: '/data',
+      daemonHome: '/home/zooid',
+    })
     expect(reg.resolveSpawnCwd('alice')).toBe('/workspace')
   })
 
@@ -61,21 +69,42 @@ describe('buildAcpRegistry — mounts (ZOD044)', () => {
       workdir: '/baked/workspace',
       container: { disable_mounts: ['workspace'] },
     })
-    const reg = buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' })
+    const reg = buildAcpRegistry(cfg, {
+      configDir: '/example',
+      dataDir: '/data',
+      daemonHome: '/home/zooid',
+    })
     const mounts = reg.resolveSpawnMounts('alice')
     expect(mounts.find((m) => m.target === '/workspace')).toBeUndefined()
     expect(reg.resolveSpawnCwd('alice')).toBe('/baked/workspace')
   })
 
   it('layers preset mounts after workspace, filtered by disable_mounts', () => {
-    const cfg = mkCfg({ container: { disable_mounts: ['memory'] } })
-    const reg = buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' })
+    const cfg = mkCfg({ container: { disable_mounts: ['home'] } })
+    const reg = buildAcpRegistry(cfg, {
+      configDir: '/example',
+      dataDir: '/data',
+      daemonHome: '/home/zooid',
+    })
     const mounts = reg.resolveSpawnMounts('alice')
-    // claude declares memory + history; memory is disabled; workspace is auto.
+    // claude declares one `home` mount; with home disabled, only workspace remains.
     const targets = mounts.map((m) => m.target)
     expect(targets).toContain('/workspace')
-    expect(targets).toContain('/root/.claude/projects')
-    expect(targets).not.toContain('/root/.claude/memory')
+    expect(targets).not.toContain('/root/.claude')
+  })
+
+  it('preset `home` mount points at the daemon user host home, not <dataDir>/agents/<name>', () => {
+    const cfg = mkCfg()
+    const reg = buildAcpRegistry(cfg, {
+      configDir: '/example',
+      dataDir: '/data',
+      daemonHome: '/home/zooid',
+    })
+    const mounts = reg.resolveSpawnMounts('alice')
+    const home = mounts.find((m) => m.target === '/root/.claude')
+    expect(home).toBeDefined()
+    expect(home!.path).toBe('/home/zooid/.claude')
+    expect(home!.path).not.toContain('/data/agents/alice')
   })
 
   it('user-declared mounts append after preset mounts', () => {
@@ -84,7 +113,11 @@ describe('buildAcpRegistry — mounts (ZOD044)', () => {
         mounts: [{ host: '/srv/shared', target: '/shared', mode: 'rw' }],
       },
     })
-    const reg = buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' })
+    const reg = buildAcpRegistry(cfg, {
+      configDir: '/example',
+      dataDir: '/data',
+      daemonHome: '/home/zooid',
+    })
     const mounts = reg.resolveSpawnMounts('alice')
     expect(mounts[mounts.length - 1]).toMatchObject({
       path: '/srv/shared',
@@ -95,14 +128,22 @@ describe('buildAcpRegistry — mounts (ZOD044)', () => {
   it('throws on unknown disable_mounts id', () => {
     const cfg = mkCfg({ container: { disable_mounts: ['nope'] } })
     expect(() =>
-      buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' }),
+      buildAcpRegistry(cfg, {
+        configDir: '/example',
+        dataDir: '/data',
+        daemonHome: '/home/zooid',
+      }),
     ).toThrow(/disable_mounts.*unknown id.*"nope"/i)
   })
 
   it('runtime: local — no mounts emitted, cwd is workdir verbatim', () => {
     const cfg = mkCfg()
     cfg.runtime = 'local'
-    const reg = buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' })
+    const reg = buildAcpRegistry(cfg, {
+      configDir: '/example',
+      dataDir: '/data',
+      daemonHome: '/home/zooid',
+    })
     expect(reg.resolveSpawnMounts('alice')).toEqual([])
     expect(reg.resolveSpawnCwd('alice')).toBe('./agents/alice')
   })

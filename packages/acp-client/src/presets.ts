@@ -9,10 +9,16 @@
 
 export interface PresetMountContext {
   agentName: string
-  /** `<dataDir>/agents/<agentName>` — the per-agent host-side state root. */
+  /** Per-agent host state root (`<dataDir>/agents/<agentName>`). Kept on the
+   *  context for forward compatibility — v1 default declarations don't use
+   *  it, but presets that opt into per-agent isolation can. */
   agentDataDir: string
   /** Resolved container working directory, e.g. `/workspace`. */
   containerWorkdir: string
+  /** Daemon user's `$HOME`. Source of `~/.<preset>` for the v1 `home` /
+   *  `data` / `config` defaults. Threaded from `buildAcpRegistry` so tests
+   *  can inject without mutating `process.env.HOME`. */
+  daemonHome: string
 }
 
 export interface PresetMount {
@@ -48,18 +54,18 @@ const PRESETS_INTERNAL = {
     image: 'ghcr.io/zooid-ai/agent-opencode:latest',
     mounts: (ctx: PresetMountContext): PresetMount[] => [
       {
-        id: 'history',
-        host: `${ctx.agentDataDir}/.local/share/opencode`,
+        id: 'data',
+        host: `${ctx.daemonHome}/.local/share/opencode`,
         target: '/root/.local/share/opencode',
         mode: 'rw',
-        create: true,
+        create: false,
       },
       {
         id: 'config',
-        host: `${ctx.agentDataDir}/.config/opencode`,
+        host: `${ctx.daemonHome}/.config/opencode`,
         target: '/root/.config/opencode',
         mode: 'rw',
-        create: true,
+        create: false,
       },
     ],
   },
@@ -72,18 +78,11 @@ const PRESETS_INTERNAL = {
     image: 'ghcr.io/zooid-ai/agent-claude:latest',
     mounts: (ctx: PresetMountContext): PresetMount[] => [
       {
-        id: 'memory',
-        host: `${ctx.agentDataDir}/.claude/memory`,
-        target: '/root/.claude/memory',
+        id: 'home',
+        host: `${ctx.daemonHome}/.claude`,
+        target: '/root/.claude',
         mode: 'rw',
-        create: true,
-      },
-      {
-        id: 'history',
-        host: `${ctx.agentDataDir}/.claude/projects`,
-        target: '/root/.claude/projects',
-        mode: 'rw',
-        create: true,
+        create: false,
       },
     ],
   },
@@ -95,18 +94,11 @@ const PRESETS_INTERNAL = {
     image: 'ghcr.io/zooid-ai/agent-codex:latest',
     mounts: (ctx: PresetMountContext): PresetMount[] => [
       {
-        id: 'memory',
-        host: `${ctx.agentDataDir}/.codex/memory`,
-        target: '/root/.codex/memory',
+        id: 'home',
+        host: `${ctx.daemonHome}/.codex`,
+        target: '/root/.codex',
         mode: 'rw',
-        create: true,
-      },
-      {
-        id: 'history',
-        host: `${ctx.agentDataDir}/.codex/sessions`,
-        target: '/root/.codex/sessions',
-        mode: 'rw',
-        create: true,
+        create: false,
       },
     ],
   },

@@ -51,6 +51,12 @@ export interface BuildAcpRegistryOptions {
    */
   dataDir?: string
   /**
+   * Daemon user's `$HOME`. Sourced by the v1 preset `home` / `data` /
+   * `config` mounts. Tests inject a stub; production threads
+   * `process.env.HOME` from `start-daemon`.
+   */
+  daemonHome?: string
+  /**
    * Sink for the per-agent "resolved image + mounts" startup log lines.
    * Defaults to `console.log`. Tests pass a capture array.
    */
@@ -141,6 +147,7 @@ function composeAgentMounts(
       agentName: name,
       agentDataDir: pathResolve(dataDir, 'agents', name),
       containerWorkdir: CONTAINER_WORKDIR,
+      daemonHome: opts.daemonHome ?? process.env.HOME ?? '',
     }
     const presetMounts = PRESETS[preset].mounts!(ctx)
     for (const m of presetMounts) {

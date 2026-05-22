@@ -110,6 +110,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     daemonSockPath: contextSocket ? daemonSockPath : undefined,
     configDir,
     dataDir,
+    daemonHome: process.env.HOME,
   })
   const agentNames = Object.keys(config.agents)
 
