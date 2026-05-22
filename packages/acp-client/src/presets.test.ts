@@ -3,20 +3,20 @@ import { PRESETS, resolvePreset, isPreset } from './presets.js'
 
 describe('PRESETS registry', () => {
   it('includes the ACP-native harnesses from SPEC.md', () => {
-    expect(PRESETS.opencode).toEqual({ command: 'opencode', args: ['acp'] })
-    expect(PRESETS.cline).toEqual({ command: 'cline', args: ['--acp'] })
-    expect(PRESETS.kiro).toEqual({ command: 'kiro', args: ['--acp'] })
-    expect(PRESETS.gemini).toEqual({ command: 'gemini', args: ['--acp'] })
+    expect(PRESETS.opencode).toMatchObject({ command: 'opencode', args: ['acp'] })
+    expect(PRESETS.cline).toMatchObject({ command: 'cline', args: ['--acp'] })
+    expect(PRESETS.kiro).toMatchObject({ command: 'kiro', args: ['--acp'] })
+    expect(PRESETS.gemini).toMatchObject({ command: 'gemini', args: ['--acp'] })
   })
 
   it('includes the vendored-shim harnesses', () => {
-    expect(PRESETS.claude).toEqual({
+    expect(PRESETS.claude).toMatchObject({
       command: 'npx',
       args: ['-y', '@agentclientprotocol/claude-agent-acp'],
     })
-    expect(PRESETS.codex).toEqual({
+    expect(PRESETS.codex).toMatchObject({
       command: 'npx',
-      args: ['-y', '@zed-industries/codex-acp'],
+      args: ['-y', '@zed-industries/codex-acp', '-c', 'web_search="live"'],
     })
   })
 })
@@ -67,6 +67,8 @@ describe('resolvePreset', () => {
     expect(spec.args).toEqual([
       '-y',
       '@zed-industries/codex-acp',
+      '-c',
+      'web_search="live"',
       '-c',
       'model="gpt-5.5"',
     ])

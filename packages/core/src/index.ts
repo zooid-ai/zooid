@@ -6,6 +6,7 @@ export {
   findHttpTransport,
   findConfigFile,
 } from './config.js'
+export type { LoadZooidConfigOptions } from './config.js'
 export {
   AcpAgentRegistry,
   resolveAcpAgentSpec,
@@ -32,6 +33,7 @@ export type {
 export type {
   AgentConfig,
   ContainerConfig,
+  MountConfig,
   ZooidContainerConfig,
   MatrixBinding,
   HttpBinding,

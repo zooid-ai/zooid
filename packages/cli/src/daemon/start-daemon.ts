@@ -29,6 +29,7 @@ import {
   type DaemonSocketHandle,
 } from '@zooid/context-mcp'
 import { buildAcpRegistry } from '../build-registry.js'
+import { prepullImages } from '../prepull-images.js'
 
 export interface StartDaemonOpts {
   configPath?: string
@@ -45,6 +46,10 @@ export interface StartDaemonOpts {
    * daemon restarts.
    */
   agentsDir?: string
+  /** Skip the startup image-prepull pass entirely. */
+  noPrepull?: boolean
+  /** Force a re-pull of every resolved image at startup (no inspect check). */
+  refreshImages?: boolean
 }
 
 export interface DaemonHandle {
@@ -75,7 +80,8 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   const cwd = opts.cwd ?? process.cwd()
   const found = opts.configPath ? { path: opts.configPath } : findConfigFile(cwd)
   if (!found) throw new Error('zooid.yaml is required')
-  const base = loadZooidConfig(readFileSync(found.path, 'utf8'))
+  const configDir = dirname(found.path)
+  const base = loadZooidConfig(readFileSync(found.path, 'utf8'), { configDir })
   const config = mergeCliFlags(base, opts.cliFlags ?? {})
 
   const approvals = new ApprovalCorrelator()
@@ -95,14 +101,26 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     console.warn('[context] daemon socket startup failed; zooid-context MCP disabled:', err)
   }
 
+  const dataDir = opts.agentsDir ? dirname(opts.agentsDir) : undefined
   const registry = buildAcpRegistry(config, {
     approvals,
     onTap: opts.onTap,
     agentsDir: opts.agentsDir,
     contextSpawnRegistry: contextSocket ? contextSpawnRegistry : undefined,
     daemonSockPath: contextSocket ? daemonSockPath : undefined,
+    configDir,
+    dataDir,
   })
   const agentNames = Object.keys(config.agents)
+
+  if (config.runtime !== 'local') {
+    await prepullImages(registry, {
+      engine: config.runtime === 'podman' ? 'podman' : 'docker',
+      runtime: config.runtime,
+      skip: opts.noPrepull ?? process.env.ZOOID_NO_PREPULL === '1',
+      refresh: opts.refreshImages ?? process.env.ZOOID_REFRESH_IMAGES === '1',
+    })
+  }
 
   console.log(
     `[context] socket=${daemonSockPath} ` +

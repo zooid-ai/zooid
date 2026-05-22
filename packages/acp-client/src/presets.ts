@@ -7,28 +7,124 @@
 //
 // See epics/002-ZOD019-acp-runtime/SPEC.md §"Agent compatibility matrix".
 
+export interface PresetMountContext {
+  agentName: string
+  /** `<dataDir>/agents/<agentName>` — the per-agent host-side state root. */
+  agentDataDir: string
+  /** Resolved container working directory, e.g. `/workspace`. */
+  containerWorkdir: string
+}
+
+export interface PresetMount {
+  id: string
+  host: string
+  target: string
+  mode: 'ro' | 'rw'
+  create?: boolean
+}
+
 export interface PresetSpec {
   command: string
   args: string[]
+  /**
+   * Default container image for this preset. Last fallback in the
+   * `buildAcpRegistry` image-resolution chain (agent > workforce > preset).
+   * Omit when no first-party image is published yet.
+   */
+  image?: string
+  /**
+   * Canonical-id mounts this preset wants set up. Called once per agent
+   * during registry construction with `{ agentName, agentDataDir, containerWorkdir }`.
+   */
+  mounts?: (ctx: PresetMountContext) => PresetMount[]
 }
 
+type PresetInternal = PresetSpec
+
 const PRESETS_INTERNAL = {
-  opencode: { command: 'opencode', args: ['acp'] },
+  opencode: {
+    command: 'opencode',
+    args: ['acp'],
+    image: 'ghcr.io/zooid-ai/agent-opencode:latest',
+    mounts: (ctx: PresetMountContext): PresetMount[] => [
+      {
+        id: 'history',
+        host: `${ctx.agentDataDir}/.local/share/opencode`,
+        target: '/root/.local/share/opencode',
+        mode: 'rw',
+        create: true,
+      },
+      {
+        id: 'config',
+        host: `${ctx.agentDataDir}/.config/opencode`,
+        target: '/root/.config/opencode',
+        mode: 'rw',
+        create: true,
+      },
+    ],
+  },
   cline: { command: 'cline', args: ['--acp'] },
   kiro: { command: 'kiro', args: ['--acp'] },
   gemini: { command: 'gemini', args: ['--acp'] },
-  claude: { command: 'npx', args: ['-y', '@agentclientprotocol/claude-agent-acp'] },
-  codex: { command: 'npx', args: ['-y', '@zed-industries/codex-acp'] },
-} as const satisfies Record<string, PresetSpec>
+  claude: {
+    command: 'npx',
+    args: ['-y', '@agentclientprotocol/claude-agent-acp'],
+    image: 'ghcr.io/zooid-ai/agent-claude:latest',
+    mounts: (ctx: PresetMountContext): PresetMount[] => [
+      {
+        id: 'memory',
+        host: `${ctx.agentDataDir}/.claude/memory`,
+        target: '/root/.claude/memory',
+        mode: 'rw',
+        create: true,
+      },
+      {
+        id: 'history',
+        host: `${ctx.agentDataDir}/.claude/projects`,
+        target: '/root/.claude/projects',
+        mode: 'rw',
+        create: true,
+      },
+    ],
+  },
+  codex: {
+    command: 'npx',
+    // web_search="live" forces live web fetches instead of codex's cached snippet
+    // index, which doesn't know about recently-launched sites (e.g. zooid.dev).
+    args: ['-y', '@zed-industries/codex-acp', '-c', 'web_search="live"'],
+    image: 'ghcr.io/zooid-ai/agent-codex:latest',
+    mounts: (ctx: PresetMountContext): PresetMount[] => [
+      {
+        id: 'memory',
+        host: `${ctx.agentDataDir}/.codex/memory`,
+        target: '/root/.codex/memory',
+        mode: 'rw',
+        create: true,
+      },
+      {
+        id: 'history',
+        host: `${ctx.agentDataDir}/.codex/sessions`,
+        target: '/root/.codex/sessions',
+        mode: 'rw',
+        create: true,
+      },
+    ],
+  },
+} as const satisfies Record<string, PresetInternal>
 
 export type PresetName = keyof typeof PRESETS_INTERNAL
 
 export const PRESETS: Record<PresetName, PresetSpec> = Object.freeze(
   Object.fromEntries(
-    (Object.keys(PRESETS_INTERNAL) as PresetName[]).map((k) => [
-      k,
-      { command: PRESETS_INTERNAL[k].command, args: [...PRESETS_INTERNAL[k].args] },
-    ]),
+    (Object.keys(PRESETS_INTERNAL) as PresetName[]).map((k) => {
+      const e = PRESETS_INTERNAL[k]
+      const copy: PresetSpec = { command: e.command, args: [...e.args] }
+      if ('image' in e && e.image) copy.image = e.image
+      if ('mounts' in e && typeof e.mounts === 'function') {
+        copy.mounts = e.mounts as PresetSpec['mounts']
+      }
+      return [k, copy]
+    }),
   ),
 ) as Record<PresetName, PresetSpec>
 

@@ -37,6 +37,7 @@
   "dependencies": {
     "@hono/node-server": "^1.13.0",
     "@inquirer/prompts": "^8.4.3",
+    "@zooid/acp-client": "workspace:^",
     "@zooid/context-mcp": "workspace:^",
     "@zooid/core": "workspace:^",
     "@zooid/runtime-docker": "workspace:^",

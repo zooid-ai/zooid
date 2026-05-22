@@ -8,6 +8,17 @@ import type {
 } from '@agentclientprotocol/sdk'
 import type { PresetName } from './presets.js'
 
+/**
+ * Structural copy of `@zooid/core`'s `AcpMount` shape. Kept here to avoid a
+ * back-edge to core; both files describe the same `{ path, target, mode }`
+ * tuple the docker runtime consumes.
+ */
+export interface AcpMountSpec {
+  path: string
+  target: string
+  mode: 'ro' | 'rw'
+}
+
 export interface AgentConfig {
   id: string
   /** Short-hand for a known ACP harness. Resolves to command/args via the preset registry. */
@@ -22,6 +33,8 @@ export interface AgentConfig {
   cwd?: string
   /** Container image. Forwarded to the spawn runtime; ignored by host-spawn paths. */
   image?: string
+  /** Bind mounts. Forwarded to the spawn runtime; ignored by host-spawn paths. */
+  mounts?: AcpMountSpec[]
 }
 
 export interface PromptInput {

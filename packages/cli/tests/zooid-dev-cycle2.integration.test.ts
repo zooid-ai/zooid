@@ -53,6 +53,9 @@ describe.skipIf(!dockerAvailable())(
       execSync(`mkdir -p "${stubDist}"`)
       writeFileSync(join(stubDist, 'index.html'), '<!doctype html><div id=root></div>')
       process.env.ZOOID_DEV_WEB_ROOT_OVERRIDE = stubDist
+      // This test exercises daemon+UI+cascade — the agent never spawns, so the
+      // preset-default ghcr image doesn't need to actually exist.
+      process.env.ZOOID_NO_PREPULL = '1'
 
       const handle = await runDev({
         cwd: workDir,
@@ -72,6 +75,7 @@ describe.skipIf(!dockerAvailable())(
       await stopDev?.().catch(() => {})
       rmSync(workDir, { recursive: true, force: true })
       delete process.env.ZOOID_DEV_WEB_ROOT_OVERRIDE
+      delete process.env.ZOOID_NO_PREPULL
     })
 
     it('daemon AS callback port answers HTTP', async () => {

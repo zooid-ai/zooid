@@ -30,8 +30,25 @@ export interface Transport {
 }
 
 /**
+ * One bind mount. `id` is the handle used by `disable_mounts` to subtract
+ * a zooid- or preset-declared entry; user-declared entries that omit `id`
+ * are auto-assigned `user-N`. The reserved id `workspace` is rejected on
+ * user entries.
+ */
+export interface MountConfig {
+  id?: string
+  host: string
+  target: string
+  mode: 'ro' | 'rw'
+  /** mkdir -p the host path before bind-mounting. Default false. */
+  create?: boolean
+}
+
+/**
  * Per-agent container configuration. Holds runtime-neutral container
- * concerns — image, env. Rejected at parse time when `runtime: local`.
+ * concerns — image, env, mounts. `image` / `env` are rejected at parse time
+ * when `runtime: local`; `mounts` / `disable_mounts` are accepted under
+ * `runtime: local` but ignored at compose time.
  */
 export interface ContainerConfig {
   image?: string
@@ -42,6 +59,13 @@ export interface ContainerConfig {
    * `ZOOID_*` references and `ZOOID_*` keys are rejected.
    */
   env?: Record<string, string>
+  /** User-declared mounts, layered on top of workspace + preset. */
+  mounts?: MountConfig[]
+  /**
+   * Subtractive override by mount id. Built-in ids: `workspace` plus
+   * whatever each preset declares (canonical: `memory`, `history`, `config`).
+   */
+  disable_mounts?: string[]
 }
 
 /**

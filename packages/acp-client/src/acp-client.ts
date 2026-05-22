@@ -37,6 +37,8 @@ export interface SpawnRuntime {
     cwd?: string
     /** Container image. Honoured by container runtimes; ignored by local spawners. */
     image?: string
+    /** Bind mounts. Honoured by container runtimes; ignored by local spawners. */
+    mounts?: Array<{ path: string; target: string; mode: 'ro' | 'rw' }>
   }): ChildProcess
 }
 
@@ -108,6 +110,7 @@ export class AcpClient {
         env: this.options.agent.env,
         cwd: this.options.agent.cwd,
         image: this.options.agent.image,
+        mounts: this.options.agent.mounts,
       })
       this.runtimeChild = child
       if (!child.stdout || !child.stdin) {

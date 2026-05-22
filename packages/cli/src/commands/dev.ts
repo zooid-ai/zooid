@@ -111,7 +111,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
   process.env.MATRIX_HS_TOKEN = tokens.hsToken
 
   const rawYaml = readFileSync(found.path, 'utf8')
-  const preview = loadZooidConfig(rawYaml)
+  const preview = loadZooidConfig(rawYaml, { configDir: dirname(found.path) })
   const matrix = findMatrixTransport(preview)
   if (!matrix) {
     throw new Error('zooid.yaml: zooid dev requires at least one matrix transport')

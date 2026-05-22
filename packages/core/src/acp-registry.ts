@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   AcpClient,
@@ -9,7 +10,7 @@ import {
   type PromptResult,
   type TapEvent,
 } from '@zooid/acp-client'
-import type { AcpAgentSpec, AcpRuntime } from './acp-types.js'
+import type { AcpAgentSpec, AcpMount, AcpRuntime } from './acp-types.js'
 import type { AgentConfig } from './types.js'
 import type {
   ApprovalCorrelator,
@@ -93,6 +94,21 @@ export interface AcpAgentRegistryOptions {
    * transports without a context provider (e.g. HTTP) have no entry here.
    */
   contextSpawns?: Record<string, ContextSpawnFactory | undefined>
+  /**
+   * Per-agent resolved bind-mount list. Threaded into the AcpClient's spawn
+   * spec; honoured by the docker runtime, ignored by the local runtime.
+   */
+  mounts?: Record<string, AcpMount[]>
+  /**
+   * Per-agent list of host directories to `mkdir -p` before the first
+   * `runtime.spawn` for that agent. Subset of mount entries with `create: true`.
+   */
+  mkdirOnSpawn?: Record<string, string[]>
+  /**
+   * Per-agent override for the spawn-spec `cwd`. Set to e.g. `/workspace`
+   * when the workspace mount is active; falls back to `agent.workdir`.
+   */
+  cwd?: Record<string, string>
 }
 
 export type ContextSpawnFactory = (
@@ -148,6 +164,22 @@ export class AcpAgentRegistry implements AcpRegistry {
     return this.opts.image?.[name]
   }
 
+  resolveSpawnMounts(name: string): AcpMount[] {
+    return this.opts.mounts?.[name] ?? []
+  }
+
+  resolveSpawnCwd(name: string): string {
+    return (
+      this.opts.cwd?.[name] ??
+      this.opts.agents[name]?.workdir ??
+      process.cwd()
+    )
+  }
+
+  agentNames(): string[] {
+    return Object.keys(this.opts.agents)
+  }
+
   getApprovalTimeoutMs(name: string): number {
     return this.opts.agents[name]?.approval_timeout_ms ?? 0
   }
@@ -199,14 +231,18 @@ export class AcpAgentRegistry implements AcpRegistry {
     const cfg = this.opts.agents[name]
     if (!cfg.acp) throw new Error(`agents.${name}: missing acp block`)
     const spawn = resolveAcpAgentSpec(cfg.acp)
+    for (const dir of this.opts.mkdirOnSpawn?.[name] ?? []) {
+      mkdirSync(dir, { recursive: true })
+    }
     const client = new AcpClient({
       agent: {
         id: name,
         command: spawn.command,
         args: spawn.args,
         env: this.opts.env?.[name],
-        cwd: cfg.workdir,
+        cwd: this.resolveSpawnCwd(name),
         image: this.opts.image?.[name],
+        mounts: this.resolveSpawnMounts(name),
       },
       agentDataDir: this.opts.agentsDir ? join(this.opts.agentsDir, name) : undefined,
       runtime: this.opts.runtime,
