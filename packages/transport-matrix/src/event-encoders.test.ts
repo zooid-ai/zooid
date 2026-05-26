@@ -143,6 +143,8 @@ describe('toErrorBody', () => {
       threadRoot,
     )
     expect(body).toMatchObject({
+      msgtype: 'm.notice',
+      body: '⚠ [auth_missing] Authentication required',
       session_id: 'sess-1',
       turn_id: 'turn-1',
       code: 'auth_missing',

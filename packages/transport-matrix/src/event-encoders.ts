@@ -76,9 +76,12 @@ const RECOVERY_URLS: Partial<Record<string, string>> = {
 type ErrorTap = Extract<TapEvent, { kind: 'error' }>
 
 export function toErrorBody(evt: ErrorTap, threadRoot: string): Record<string, unknown> {
+  const msg = evt.message.slice(0, 250)
   const out: Record<string, unknown> = {
+    msgtype: 'm.notice',
+    body: `⚠ [${evt.code}] ${msg}`,
     code: evt.code,
-    message: evt.message.slice(0, 250),
+    message: msg,
     transient: evt.transient,
     'm.relates_to': { rel_type: 'm.thread', event_id: threadRoot },
   }
