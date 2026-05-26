@@ -6,7 +6,8 @@ import { MatrixClient } from './matrix-client.js'
 import { BotPool } from './bot-pool.js'
 import { route, type AgentBinding, type ThreadState } from './router.js'
 import { stripMention, extractMentions } from './mentions.js'
-import { toToolCallBody, toUpdateBody, toPlanBody } from './event-encoders.js'
+import { toToolCallBody, toUpdateBody, toPlanBody, toErrorBody } from './event-encoders.js'
+import { classify } from '@zooid/acp-client'
 import { toMatrixHtml } from './markdown-to-matrix-html.js'
 
 export interface CreateMatrixTransportOptions {
@@ -323,6 +324,31 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           })
           .catch((err) => {
             console.error(`[matrix] runTurn failed for ${a.name}:`, err)
+            const c = classify(err)
+            const threadRoot = inboundThreadRoot(evt) ?? evt.event_id
+            if (!threadRoot || !evt.room_id) return
+            const body = toErrorBody(
+              {
+                kind: 'error',
+                agentId: a.name,
+                sessionId: null,
+                turnId: null,
+                code: c.code,
+                message: err instanceof Error ? err.message : String(err),
+                detail: err instanceof Error && err.stack ? err.stack.slice(0, 2000) : undefined,
+                transient: c.transient,
+                acp_error: c.acp_error,
+              },
+              threadRoot,
+            )
+            void client
+              .sendCustomEvent({
+                roomId: evt.room_id,
+                asUserId: a.userId,
+                eventType: 'eco.zoon.error',
+                content: body,
+              })
+              .catch((e) => console.warn(`[matrix:${a.name}] eco.zoon.error send failed:`, e))
           })
       }
     }

@@ -1,4 +1,5 @@
 import type { SessionNotification } from '@agentclientprotocol/sdk'
+import type { ErrorCode } from './errors.js'
 
 export type SessionUpdate = SessionNotification['update']
 
@@ -23,6 +24,17 @@ export type TapEvent =
       sessionId: string
       turnId: string
       stopReason: string
+    }
+  | {
+      kind: 'error'
+      agentId: string
+      sessionId: string | null
+      turnId: string | null
+      code: ErrorCode
+      message: string
+      detail?: string
+      transient: boolean
+      acp_error?: { code: number; message: string; data?: unknown }
     }
 
 export interface TurnTrackerOpts {

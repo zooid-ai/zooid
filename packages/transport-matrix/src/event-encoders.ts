@@ -1,5 +1,6 @@
 import type {
   PlanEvent,
+  TapEvent,
   ToolCallEvent,
   ToolCallUpdateEvent,
 } from '@zooid/acp-client'
@@ -63,4 +64,29 @@ export function toPlanBody(evt: PlanEvent): Record<string, unknown> {
     session_id: evt.sessionId,
     entries: evt.entries,
   }
+}
+
+const RECOVERY_URLS: Partial<Record<string, string>> = {
+  auth_missing: 'https://zooid.dev/docs/guides/run-in-container#authentication-that-carries-over',
+  auth_invalid: 'https://zooid.dev/docs/guides/run-in-container#authentication-that-carries-over',
+  mount_failed: 'https://zooid.dev/docs/guides/run-in-container#what-you-get-for-free',
+  image_pull_failed: 'https://zooid.dev/docs/guides/run-in-container#skipping-the-image-prepull',
+}
+
+type ErrorTap = Extract<TapEvent, { kind: 'error' }>
+
+export function toErrorBody(evt: ErrorTap, threadRoot: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    code: evt.code,
+    message: evt.message.slice(0, 250),
+    transient: evt.transient,
+    'm.relates_to': { rel_type: 'm.thread', event_id: threadRoot },
+  }
+  if (evt.sessionId) out.session_id = evt.sessionId
+  if (evt.turnId) out.turn_id = evt.turnId
+  if (evt.detail) out.detail = evt.detail.slice(0, 2000)
+  if (evt.acp_error) out.acp_error = evt.acp_error
+  const recovery = RECOVERY_URLS[evt.code]
+  if (recovery) out.recovery = recovery
+  return out
 }

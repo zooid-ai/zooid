@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { TurnTracker, type TapEvent } from './turn-tracker.js'
+import type { ErrorCode } from './errors.js'
 
 describe('TurnTracker', () => {
   it('emits turn_started → session_update* → turn_completed in order', () => {
@@ -66,5 +67,35 @@ describe('TurnTracker', () => {
     const t = new TurnTracker({ agentId: 'x', onTap, newTurnId: () => 't' })
     expect(() => t.endTurn({ sessionId: 'nope', stopReason: 'end_turn' })).not.toThrow()
     expect(onTap).not.toHaveBeenCalled()
+  })
+})
+
+describe('TapEvent error variant (ZOD055)', () => {
+  it('is a discriminated union member with the expected fields', () => {
+    const e: TapEvent = {
+      kind: 'error',
+      agentId: 'alice',
+      sessionId: 'sess-1',
+      turnId: 'turn-1',
+      code: 'auth_missing' as ErrorCode,
+      message: 'Authentication required',
+      detail: 'classified from RequestError',
+      transient: false,
+      acp_error: { code: -32000, message: 'Authentication required', data: undefined },
+    }
+    expect(e.kind).toBe('error')
+  })
+
+  it('sessionId and turnId may be null (failure preceded session/new)', () => {
+    const e: TapEvent = {
+      kind: 'error',
+      agentId: 'alice',
+      sessionId: null,
+      turnId: null,
+      code: 'container_exit' as ErrorCode,
+      message: 'Agent container exited',
+      transient: true,
+    }
+    expect(e.sessionId).toBeNull()
   })
 })

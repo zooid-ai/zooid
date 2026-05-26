@@ -16,6 +16,7 @@ import {
   approvalDecisionToPermissionResponse,
 } from './event-mapping.js'
 import { TurnTracker, type TapEvent } from './turn-tracker.js'
+import { classify } from './errors.js'
 import type {
   AgentConfig,
   AgentEvent,
@@ -256,11 +257,13 @@ export class AcpClient {
   }
 
   async prompt(input: PromptInput): Promise<PromptResult> {
-    const sessionId = await this.ensureSession(input.threadId, input.channelId)
-    const promptText = stringifyPromptForLog(input.content)
-    this.turns?.startTurn({ sessionId, promptText })
-    debugLog(this.options.agent.id, 'prompt →', { sessionId, content: input.content })
+    let sessionId: string | null = null
+    let turnId: string | null = null
     try {
+      sessionId = await this.ensureSession(input.threadId, input.channelId)
+      const promptText = stringifyPromptForLog(input.content)
+      turnId = this.turns?.startTurn({ sessionId, promptText }) ?? null
+      debugLog(this.options.agent.id, 'prompt →', { sessionId, content: input.content })
       const result = await this.connection!.prompt({
         sessionId,
         prompt: input.content,
@@ -269,7 +272,19 @@ export class AcpClient {
       debugLog(this.options.agent.id, 'prompt ←', { sessionId, stopReason: result.stopReason })
       return { stopReason: result.stopReason }
     } catch (err) {
-      this.turns?.endTurn({ sessionId, stopReason: 'error' })
+      const c = classify(err)
+      this.options.onTap?.({
+        kind: 'error',
+        agentId: this.options.agent.id,
+        sessionId,
+        turnId,
+        code: c.code,
+        message: err instanceof Error ? err.message : String(err),
+        detail: err instanceof Error && err.stack ? err.stack.slice(0, 2000) : undefined,
+        transient: c.transient,
+        acp_error: c.acp_error,
+      })
+      if (sessionId) this.turns?.endTurn({ sessionId, stopReason: 'error' })
       throw err
     }
   }

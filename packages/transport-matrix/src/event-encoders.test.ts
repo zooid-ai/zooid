@@ -8,6 +8,7 @@ import {
   toToolCallBody,
   toUpdateBody,
   toPlanBody,
+  toErrorBody,
 } from './event-encoders.js'
 
 describe('toToolCallBody', () => {
@@ -120,5 +121,88 @@ describe('toPlanBody', () => {
       session_id: 'sess-1',
       entries: evt.entries,
     })
+  })
+})
+
+describe('toErrorBody', () => {
+  const threadRoot = '$root-event-id'
+
+  it('encodes a full error TapEvent including acp_error and recovery URL', () => {
+    const body = toErrorBody(
+      {
+        kind: 'error',
+        agentId: 'alice',
+        sessionId: 'sess-1',
+        turnId: 'turn-1',
+        code: 'auth_missing',
+        message: 'Authentication required',
+        detail: 'claude-agent-acp returned RequestError on session/prompt',
+        transient: false,
+        acp_error: { code: -32000, message: 'Authentication required' },
+      },
+      threadRoot,
+    )
+    expect(body).toMatchObject({
+      session_id: 'sess-1',
+      turn_id: 'turn-1',
+      code: 'auth_missing',
+      message: 'Authentication required',
+      detail: 'claude-agent-acp returned RequestError on session/prompt',
+      transient: false,
+      acp_error: { code: -32000, message: 'Authentication required' },
+      'm.relates_to': { rel_type: 'm.thread', event_id: '$root-event-id' },
+    })
+    expect(body.recovery).toMatch(/^https:\/\/zooid\.dev\/docs\//)
+  })
+
+  it('truncates message to 250 chars and detail to 2000 chars', () => {
+    const body = toErrorBody(
+      {
+        kind: 'error',
+        agentId: 'a',
+        sessionId: 's',
+        turnId: 't',
+        code: 'internal',
+        message: 'x'.repeat(500),
+        detail: 'y'.repeat(5000),
+        transient: false,
+      },
+      threadRoot,
+    )
+    expect((body.message as string).length).toBe(250)
+    expect((body.detail as string).length).toBe(2000)
+  })
+
+  it('omits turn_id when null and omits acp_error when undefined', () => {
+    const body = toErrorBody(
+      {
+        kind: 'error',
+        agentId: 'a',
+        sessionId: 's',
+        turnId: null,
+        code: 'container_exit',
+        message: 'Container exited',
+        transient: true,
+      },
+      threadRoot,
+    )
+    expect(body.turn_id).toBeUndefined()
+    expect(body.acp_error).toBeUndefined()
+  })
+
+  it('omits session_id when null (failure preceded session/new)', () => {
+    const body = toErrorBody(
+      {
+        kind: 'error',
+        agentId: 'a',
+        sessionId: null,
+        turnId: null,
+        code: 'image_pull_failed',
+        message: 'pull failed',
+        transient: true,
+      },
+      threadRoot,
+    )
+    expect(body.session_id).toBeUndefined()
   })
 })
