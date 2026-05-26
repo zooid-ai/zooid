@@ -18,6 +18,12 @@ export interface CreateMatrixTransportOptions {
   hsToken: string
   /** Admin Matrix user ID. When set, BotPool.bootstrap invites this user into rooms it creates. */
   adminUserId?: string
+  /** Post-turn drain: keep collecting trailing `agent_message_chunk`s until the
+   *  buffer is quiet for this long before flushing. Defaults to `DRAIN_QUIET_MS`.
+   *  Set to 0 to disable the drain (e.g. in tests). */
+  drainQuietMs?: number
+  /** Hard cap on the post-turn drain. Defaults to `DRAIN_MAX_MS`. */
+  drainMaxMs?: number
 }
 
 interface SessionContext {
@@ -43,6 +49,19 @@ interface MatrixEvent {
 const STARTUP_GRACE_MS = 5_000
 const SEEN_EVENT_CAP = 5_000
 
+// ACP only guarantees that an agent flushes pending `session/update`
+// notifications before the `session/prompt` response in the *cancellation*
+// path; for a normal turn the ordering is unspecified. Some agents (e.g.
+// opencode) emit trailing `agent_message_chunk`s a few ms after the stopReason
+// response, so finalizing the moment `prompt()` resolves truncates the reply.
+// After the turn resolves we wait for the buffer to stay unchanged for
+// DRAIN_QUIET_MS (debounce — re-arms on each late chunk) before flushing,
+// capped at DRAIN_MAX_MS so a misbehaving stream can't hang the turn.
+const DRAIN_QUIET_MS = 300
+const DRAIN_MAX_MS = 3_000
+
+const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
 function inboundThreadRoot(evt: MatrixEvent): string | undefined {
   const r = evt.content?.['m.relates_to']
   return r?.rel_type === 'm.thread' && r.event_id ? r.event_id : undefined
@@ -50,6 +69,8 @@ function inboundThreadRoot(evt: MatrixEvent): string | undefined {
 
 export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const { agents, approvals, client, bindings, hsToken, adminUserId } = opts
+  const drainQuietMs = opts.drainQuietMs ?? DRAIN_QUIET_MS
+  const drainMaxMs = opts.drainMaxMs ?? DRAIN_MAX_MS
   const pool = new BotPool(client, bindings)
   const sessions = new Map<string, SessionContext>()
   const buffers = new Map<string, string>()
@@ -418,6 +439,17 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         channelId: evt.room_id,
         content: [{ type: 'text', text: promptText }],
       })
+      // Drain: the prompt promise resolves on the stopReason response, but
+      // trailing chunks may still arrive (see DRAIN_* above). Wait until the
+      // buffer is quiet for DRAIN_QUIET_MS, re-arming on each new chunk.
+      const drainStart = Date.now()
+      let drained = buffers.get(sessionId) ?? ''
+      while (drainQuietMs > 0 && Date.now() - drainStart < drainMaxMs) {
+        await delay(drainQuietMs)
+        const next = buffers.get(sessionId) ?? ''
+        if (next === drained) break
+        drained = next
+      }
       const text = buffers.get(sessionId) ?? ''
       if (text.length > 0) {
         const html = toMatrixHtml(text)

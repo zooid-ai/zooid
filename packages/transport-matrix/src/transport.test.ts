@@ -56,7 +56,7 @@ const baseAgents = [
   },
 ]
 
-function makeTransport() {
+function makeTransport(drain?: { drainQuietMs?: number; drainMaxMs?: number }) {
   const { reg, finishPrompt } = fakeRegistry()
   const approvals = fakeApprovals()
   const client = fakeClient()
@@ -66,6 +66,10 @@ function makeTransport() {
     client: client as never,
     bindings: baseAgents,
     hsToken: 'hs-secret',
+    // Disable post-turn drain by default so settleTurn (microtasks) suffices.
+    // Tests covering trailing-chunk behavior pass an explicit window.
+    drainQuietMs: drain?.drainQuietMs ?? 0,
+    drainMaxMs: drain?.drainMaxMs,
   })
   return { transport, agents: reg, approvals, client, finishPrompt }
 }
@@ -141,6 +145,58 @@ describe('matrix transport /transactions', () => {
         asUserId: '@architect:example.com',
         threadRoot: '$root',
         content: expect.objectContaining({ msgtype: 'm.text', body: 'hello back' }),
+      }),
+    )
+  })
+
+  it('drains trailing agent_message_chunks that arrive after prompt() resolves', async () => {
+    // ACP doesn't guarantee all session/update chunks precede the prompt
+    // response for a normal turn; opencode flushes a trailing chunk just after
+    // the stopReason. The post-turn drain must wait for it instead of sending
+    // the truncated buffer.
+    const { transport, agents, client } = makeTransport({ drainQuietMs: 20, drainMaxMs: 500 })
+    const events = [
+      {
+        type: 'm.room.message',
+        event_id: '$root',
+        room_id: '!r:example.com',
+        sender: '@alice:example.com',
+        content: {
+          msgtype: 'm.text',
+          body: 'hi',
+          'm.mentions': { user_ids: ['@architect:example.com'] },
+        },
+      },
+    ]
+    agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
+      const sessionId = 'sess-' + p.threadId
+      // First chunk arrives during the turn…
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId,
+        content: { type: 'text', text: 'Hi.' },
+      })
+      // …a second chunk lands shortly AFTER the prompt response resolves.
+      setTimeout(() => {
+        agents.onEvent('architect', {
+          type: 'agent_message_chunk',
+          sessionId,
+          content: { type: 'text', text: ' How can I help?' },
+        })
+      }, 5)
+      return { stopReason: 'end_turn' as const }
+    })
+
+    const res = await postTxn(transport.app, { events })
+    expect(res.status).toBe(200)
+    // Wait past the drain window for the turn to finalize.
+    await new Promise((r) => setTimeout(r, 150))
+
+    // Exactly one message, containing BOTH the early and the late chunk.
+    expect(client.sendMessage).toHaveBeenCalledTimes(1)
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.objectContaining({ body: 'Hi. How can I help?' }),
       }),
     )
   })
