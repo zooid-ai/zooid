@@ -31,7 +31,10 @@ cli
   .option('--ui-port <n>', 'UI HTTP port', { default: 5173 })
   .option('--admin-user <name>', 'Admin username', { default: 'admin' })
   .option('--admin-password <pw>', 'Admin password', { default: 'admin' })
-  .option('--watch-web', 'Run vite build --watch on @zoon/web (monorepo source only)')
+  .option(
+    '--watch-web [path]',
+    'Run vite build --watch on @zoon/web. Path defaults to sibling ../zoon/packages/web.',
+  )
   .action(async (flags) => {
     await runDev({
       dataDir: flags.data,
@@ -39,7 +42,7 @@ cli
       uiPort: Number(flags.uiPort),
       adminUser: flags.adminUser,
       adminPassword: flags.adminPassword,
-      watchWeb: Boolean(flags.watchWeb),
+      watchWeb: flags.watchWeb as string | boolean | undefined,
     })
   })
 

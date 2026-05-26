@@ -75,7 +75,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     if (event.type === 'agent_message_chunk') {
       const block = event.content as { type?: string; text?: string }
       if (block.type === 'text' && typeof block.text === 'string') {
-        buffers.set(event.sessionId, (buffers.get(event.sessionId) ?? '') + block.text)
+        const current = buffers.get(event.sessionId) ?? ''
+        // An empty chunk signals a new text block starting (e.g. after a tool call).
+        // Insert a paragraph break so consecutive blocks don't run together.
+        const prefix = block.text === '' && current.length > 0 ? '\n\n' : ''
+        buffers.set(event.sessionId, current + prefix + block.text)
       } else {
         console.warn(`[matrix:${name}] dropped chunk block type=${block.type}`, block)
       }

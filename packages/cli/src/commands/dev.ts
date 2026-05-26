@@ -66,9 +66,9 @@ export interface DevFlags {
   adminPassword: string
   installSignalHandlers?: boolean
   foreground?: boolean
-  // When true, run `vite build --watch` against the in-tree @zoon/web package
-  // and serve its dist directly. Requires running from the monorepo source.
-  watchWeb?: boolean
+  // Run `vite build --watch` against a @zoon/web package and serve its dist.
+  // true = auto-detect (sibling ../zoon/packages/web or in-monorepo); string = explicit path.
+  watchWeb?: string | boolean
 }
 
 export interface DevHandle {
@@ -210,10 +210,15 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
             {
               title: 'Start @zoon/web watcher (vite build --watch)',
               task: async (): Promise<void> => {
-                const pkgDir = webSourcePackage(CLI_ROOT)
+                const pkgDir =
+                  typeof flags.watchWeb === 'string'
+                    ? resolve(flags.watchWeb)
+                    : webSourcePackage(CLI_ROOT)
                 if (!pkgDir) {
+                  const defaultPath = dirname(dirname(dirname(CLI_ROOT))) + '/zoon/packages/web'
                   throw new Error(
-                    '--watch-web requires running from the monorepo source (no zoon/packages/web found).',
+                    `--watch-web: @zoon/web not found at ${defaultPath}.\n` +
+                      `Pass an explicit path: --watch-web=/path/to/zoon/packages/web`,
                   )
                 }
                 ctx.webWatch = await startWebWatch({ webPackageDir: pkgDir })
