@@ -20,6 +20,7 @@
     "tuwunel:shell": "docker exec -it zooid-tuwunel /bin/sh"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.31.0",
     "@types/node": "^22.0.0",
     "tsup": "^8.5.1",
     "typescript": "^5.5.0",

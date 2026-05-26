@@ -167,7 +167,7 @@ describe('buildAcpRegistry — image resolution (ZOD044)', () => {
   it('falls back to preset.image (claude → ghcr default)', () => {
     const cfg = mkCfg() // preset: claude, no container.image anywhere
     const reg = buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' })
-    expect(reg.resolveSpawnImage('alice')).toBe('ghcr.io/zooid-ai/agent-claude:latest')
+    expect(reg.resolveSpawnImage('alice')).toBe('ghcr.io/zooid-ai/agent-claude-code:latest')
   })
 
   it('runtime: docker — throws when an agent has no resolvable image (preset has none)', () => {
@@ -231,7 +231,7 @@ describe('buildAcpRegistry — startup discoverability (ZOD044)', () => {
     })
     expect(
       lines.some((l) =>
-        /agent alice.*image=ghcr\.io\/zooid-ai\/agent-claude.*source=preset:claude/.test(l),
+        /agent alice.*image=ghcr\.io\/zooid-ai\/agent-claude-code.*source=preset:claude/.test(l),
       ),
     ).toBe(true)
   })
