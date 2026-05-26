@@ -1,6 +1,6 @@
 {
   "name": "zooid",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Open-source tool for defining and running AI agents alongside you and your team. Any model, any CLI.",
   "type": "module",
   "license": "MIT",
