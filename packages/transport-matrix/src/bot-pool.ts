@@ -21,7 +21,13 @@ export class BotPool {
   constructor(
     private readonly client: Pick<
       MatrixClient,
-      'registerBot' | 'joinRoom' | 'resolveAlias' | 'createRoom' | 'sendStateEvent' | 'setDisplayName'
+      | 'registerBot'
+      | 'invite'
+      | 'joinRoom'
+      | 'resolveAlias'
+      | 'createRoom'
+      | 'sendStateEvent'
+      | 'setDisplayName'
     >,
     private readonly agents: AgentBinding[],
   ) {}
@@ -40,6 +46,25 @@ export class BotPool {
         await this.client.setDisplayName(a.userId, a.displayName ?? lp)
       } catch (err) {
         console.warn(`[matrix] setDisplayName(${a.userId}) failed: ${(err as Error).message}`)
+      }
+      // Make each agent a member of the workforce space. That covers two
+      // things at once: the eco.zoon.workforce roster is now backed by
+      // actual space membership (so the Zoon client's member autocomplete
+      // works across rooms), and every restricted child room's allow rule
+      // is satisfied without per-room invites.
+      if (opts.spaceRoomId && opts.asUserId) {
+        try {
+          await this.client.invite({
+            roomId: opts.spaceRoomId,
+            asUserId: opts.asUserId,
+            targetUserId: a.userId,
+          })
+          await this.client.joinRoom(opts.spaceRoomId, a.userId)
+        } catch (err) {
+          console.warn(
+            `[matrix] space membership for ${a.userId} failed: ${(err as Error).message}`,
+          )
+        }
       }
       for (let i = 0; i < a.rooms.length; i++) {
         const binding = a.rooms[i]!

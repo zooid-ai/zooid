@@ -5,6 +5,7 @@ import type { AgentBinding } from './router.js'
 function fakeClient() {
   return {
     registerBot: vi.fn(async () => undefined),
+    invite: vi.fn(async () => undefined),
     joinRoom: vi.fn(async () => undefined),
     resolveAlias: vi.fn(async (_a: string) => '!existing:example.com' as string | null),
     createRoom: vi.fn(async () => '!new:example.com'),
@@ -191,6 +192,7 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
     const pool = new BotPool(
       {
         registerBot,
+        invite: vi.fn(async () => undefined),
         joinRoom,
         resolveAlias,
         createRoom,
@@ -229,6 +231,7 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
     const pool = new BotPool(
       {
         registerBot: vi.fn(async () => undefined),
+        invite: vi.fn(async () => undefined),
         joinRoom: vi.fn(async () => undefined),
         resolveAlias: vi.fn(async () => null), // alias unknown → must create
         createRoom,
@@ -255,6 +258,7 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
     const pool = new BotPool(
       {
         registerBot: vi.fn(async () => undefined),
+        invite: vi.fn(async () => undefined),
         joinRoom: vi.fn(async () => undefined),
         resolveAlias: vi.fn(async () => '!r:zoon.local'),
         createRoom: vi.fn(async () => '!r:zoon.local'),
@@ -279,6 +283,7 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
     const pool = new BotPool(
       {
         registerBot: vi.fn(async () => undefined),
+        invite: vi.fn(async () => undefined),
         joinRoom: vi.fn(async () => undefined),
         resolveAlias: vi.fn(async () => '!shared:zoon.local'),
         createRoom: vi.fn(async () => '!shared:zoon.local'),
@@ -298,12 +303,74 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
   })
 })
 
+describe('BotPool.bootstrap agent space membership', () => {
+  it('invites the agent to the space (via the AS bot) then joins it as the agent', async () => {
+    const invite = vi.fn(async () => undefined)
+    const joinRoom = vi.fn(async () => undefined)
+    const pool = new BotPool(
+      {
+        registerBot: vi.fn(async () => undefined),
+        invite,
+        joinRoom,
+        resolveAlias: vi.fn(async () => '!r:zoon.local'),
+        createRoom: vi.fn(async () => '!r:zoon.local'),
+        sendStateEvent: vi.fn(async () => ({ event_id: '$ev' })),
+        setDisplayName: vi.fn(async () => undefined),
+      } as never,
+      [
+        {
+          name: 'planner',
+          userId: '@planner:zoon.local',
+          rooms: [{ alias: '#r:zoon.local' }],
+          trigger: 'mention',
+        },
+      ],
+    )
+    await pool.bootstrap({
+      spaceRoomId: '!space:zoon.local',
+      asUserId: '@zooid:zoon.local',
+    })
+    expect(invite).toHaveBeenCalledWith({
+      roomId: '!space:zoon.local',
+      asUserId: '@zooid:zoon.local',
+      targetUserId: '@planner:zoon.local',
+    })
+    expect(joinRoom).toHaveBeenCalledWith('!space:zoon.local', '@planner:zoon.local')
+  })
+
+  it('skips space invite+join when spaceRoomId is not provided', async () => {
+    const invite = vi.fn(async () => undefined)
+    const pool = new BotPool(
+      {
+        registerBot: vi.fn(async () => undefined),
+        invite,
+        joinRoom: vi.fn(async () => undefined),
+        resolveAlias: vi.fn(async () => '!r:zoon.local'),
+        createRoom: vi.fn(async () => '!r:zoon.local'),
+        sendStateEvent: vi.fn(async () => ({ event_id: '$ev' })),
+        setDisplayName: vi.fn(async () => undefined),
+      } as never,
+      [
+        {
+          name: 'planner',
+          userId: '@planner:zoon.local',
+          rooms: [{ alias: '#r:zoon.local' }],
+          trigger: 'mention',
+        },
+      ],
+    )
+    await pool.bootstrap({})
+    expect(invite).not.toHaveBeenCalled()
+  })
+})
+
 describe('BotPool.bootstrap creation-time power levels', () => {
   it('merges admin (PL 100) and per-agent declared PLs into createRoom userPowerLevels', async () => {
     const createRoom = vi.fn(async () => '!created:zoon.local')
     const pool = new BotPool(
       {
         registerBot: vi.fn(async () => undefined),
+        invite: vi.fn(async () => undefined),
         joinRoom: vi.fn(async () => undefined),
         resolveAlias: vi.fn(async () => null), // force create
         createRoom,
@@ -348,6 +415,7 @@ describe('BotPool.bootstrap creation-time power levels', () => {
     const pool = new BotPool(
       {
         registerBot: vi.fn(async () => undefined),
+        invite: vi.fn(async () => undefined),
         joinRoom: vi.fn(async () => undefined),
         resolveAlias: vi.fn(async () => null),
         createRoom,

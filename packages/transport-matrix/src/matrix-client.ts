@@ -177,6 +177,40 @@ export class MatrixClient {
     return (await r.json()) as { event_id: string }
   }
 
+  /**
+   * Invite a user to a room. Sent as the inviter (`asUserId`) — that user
+   * needs invite power in the room. Tolerates the "already in room /
+   * already invited" responses idempotently so bootstrap can run on a
+   * fresh AND a populated homeserver without branching.
+   */
+  async invite(opts: {
+    roomId: string
+    asUserId: string
+    targetUserId: string
+  }): Promise<void> {
+    const url =
+      `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}/invite` +
+      `?user_id=${encodeURIComponent(opts.asUserId)}`
+    const r = await this.fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.asToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ user_id: opts.targetUserId }),
+    })
+    if (r.ok) return
+    if (r.status === 403) {
+      // Tuwunel/Synapse use M_FORBIDDEN both for permission errors AND for
+      // "already a member / already invited". Inspect the body so we only
+      // swallow the idempotent case.
+      const body = await r.text()
+      if (/already (in the room|invited|a member|joined)/i.test(body)) return
+      throw new Error(`invite(${opts.targetUserId}) failed: 403 ${body}`)
+    }
+    throw new Error(`invite(${opts.targetUserId}) failed: ${r.status}`)
+  }
+
   async joinRoom(roomIdOrAlias: string, asUserId: string): Promise<void> {
     const url =
       `${this.homeserver}/_matrix/client/v3/join/${encodeURIComponent(roomIdOrAlias)}` +

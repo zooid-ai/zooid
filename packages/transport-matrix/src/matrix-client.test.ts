@@ -306,6 +306,72 @@ describe('MatrixClient', () => {
   })
 })
 
+describe('MatrixClient.invite', () => {
+  it('POSTs to /invite with the user_id payload, impersonating the inviter', async () => {
+    const fetch = fakeFetch(async ({ url, init }) => {
+      expect(url).toBe(
+        'https://hs.example.com/_matrix/client/v3/rooms/!space%3Aexample.com/invite' +
+          '?user_id=%40zooid%3Aexample.com',
+      )
+      expect(init.method).toBe('POST')
+      expect(JSON.parse(init.body as string)).toEqual({ user_id: '@planner:example.com' })
+      return new Response('{}', { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await client.invite({
+      roomId: '!space:example.com',
+      asUserId: '@zooid:example.com',
+      targetUserId: '@planner:example.com',
+    })
+  })
+
+  it('silently swallows the idempotent "already in the room" 403', async () => {
+    const fetch = fakeFetch(async () =>
+      new Response(
+        JSON.stringify({ errcode: 'M_FORBIDDEN', error: 'User is already in the room' }),
+        { status: 403 },
+      ),
+    )
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await expect(
+      client.invite({
+        roomId: '!r:example.com',
+        asUserId: '@zooid:example.com',
+        targetUserId: '@planner:example.com',
+      }),
+    ).resolves.toBeUndefined()
+  })
+
+  it('rethrows a real permission 403 (no idempotency phrase in body)', async () => {
+    const fetch = fakeFetch(async () =>
+      new Response(
+        JSON.stringify({ errcode: 'M_FORBIDDEN', error: 'You do not have power to invite' }),
+        { status: 403 },
+      ),
+    )
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await expect(
+      client.invite({
+        roomId: '!r:example.com',
+        asUserId: '@zooid:example.com',
+        targetUserId: '@planner:example.com',
+      }),
+    ).rejects.toThrow(/invite/)
+  })
+})
+
 describe('MatrixClient.createRoom userPowerLevels', () => {
   it('forwards userPowerLevels into power_level_content_override.users', async () => {
     const fetch = fakeFetch(async ({ init }) => {

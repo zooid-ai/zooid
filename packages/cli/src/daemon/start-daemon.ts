@@ -175,7 +175,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       hsToken: matrix.transport.hs_token,
       adminUserId: opts.adminUserId,
     })
-    const requestedPort = matrix.transport.port ?? 8080
+    const requestedPort = matrix.transport.port ?? 9000
     // Bind 0.0.0.0 explicitly — @hono/node-server defaults to IPv6-only on
     // macOS, which Docker's NAT bridge can't reach when Tuwunel pushes AS
     // events back to host.docker.internal:<port>.
@@ -221,6 +221,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
           asUserId,
           serverName,
           spaceId: spaceRoomId,
+          admins: adminUserIds,
         })
         console.log(`[matrix] ensured default channel #general:${serverName} → ${generalRoomId}`)
       } catch (err) {

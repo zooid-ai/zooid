@@ -32,6 +32,9 @@ export async function ensureWorkforceSpace(opts: EnsureSpaceOpts): Promise<strin
     initial_state: [{ type: 'm.room.join_rules', state_key: '', content: { join_rule: 'invite' } }],
   }
   if (opts.admins && opts.admins.length > 0) {
+    // Invite each admin so they actually become members — PL 100 alone does
+    // not grant membership in an invite-only space.
+    body.invite = opts.admins
     const users: Record<string, number> = { [opts.asUserId]: 100 }
     for (const a of opts.admins) users[a] = 100
     body.power_level_content_override = { users }
@@ -46,6 +49,13 @@ export interface EnsureDefaultChannelOpts {
   spaceId: string
   /** Localpart of the default channel; defaults to `general`. */
   channelLocalpart?: string
+  /**
+   * Operator MXIDs to seed at PL 100 in the channel's `m.room.power_levels`
+   * at creation. The AS bot is always included. Empty/absent → no override
+   * (the preset's PL defaults apply). Only consulted on first creation —
+   * if the alias already resolves we return the existing room untouched.
+   */
+  admins?: string[]
 }
 
 /**
@@ -61,12 +71,19 @@ export async function ensureDefaultChannel(opts: EnsureDefaultChannelOpts): Prom
   const existing = await opts.client.resolveAlias(alias)
   if (existing) return existing
 
+  let userPowerLevels: Record<string, number> | undefined
+  if (opts.admins && opts.admins.length > 0) {
+    userPowerLevels = { [opts.asUserId]: 100 }
+    for (const a of opts.admins) userPowerLevels[a] = 100
+  }
+
   const roomId = await opts.client.createRoom({
     roomAliasName: localpart,
     invite: [],
     senderUserId: opts.asUserId,
     name: localpart.charAt(0).toUpperCase() + localpart.slice(1),
     restrictedToSpaceId: opts.spaceId,
+    ...(userPowerLevels ? { userPowerLevels } : {}),
   })
   await opts.client.sendStateEvent({
     roomId: opts.spaceId,

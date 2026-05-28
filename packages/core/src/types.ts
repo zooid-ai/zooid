@@ -181,7 +181,9 @@ export interface AgentConfig {
 
 /**
  * Matrix application-service transport. The CLI binds the AS HTTP listener
- * to `port` (defaults to 8080).
+ * to `port` (defaults to 9000 — the most common Matrix AS convention; see
+ * Synapse / mautrix / matrix-appservice-* projects). Must match the port in
+ * the registration YAML's `url` (read by the homeserver, not by Zooid).
  */
 export interface MatrixTransportConfig {
   type: 'matrix'
@@ -207,8 +209,11 @@ export interface MatrixTransportConfig {
    */
   user_namespace: string
   /**
-   * AS HTTP listener port.
-   * @default 8080
+   * AS HTTP listener port. Must match the registration YAML's `url` port —
+   * Zooid never reads the registration, so a mismatch silently sinks every
+   * transaction (the homeserver gets connection refused; you see no error
+   * in Zooid's logs).
+   * @default 9000
    */
   port?: number
   /**
