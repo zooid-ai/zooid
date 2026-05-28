@@ -80,6 +80,13 @@ export class MatrixClient {
     /** Optional `m.room.name`. When set, sent in the createRoom body so the
      *  room has a display name from the moment it exists. */
     name?: string
+    /** When set, the room is created with a `restricted` join rule whose allow
+     *  condition references this space room ID — i.e. joinable by space members
+     *  only, rather than the whole homeserver. */
+    restrictedToSpaceId?: string
+    /** Explicit room version. Restricted join rules require v8+; omit to use the
+     *  homeserver default (modern Tuwunel defaults to v10/v11). */
+    roomVersion?: string
   }): Promise<string> {
     const body: Record<string, unknown> = {
       room_alias_name: opts.roomAliasName,
@@ -87,6 +94,19 @@ export class MatrixClient {
       preset: opts.preset ?? 'public_chat',
     }
     if (opts.name !== undefined) body.name = opts.name
+    if (opts.roomVersion !== undefined) body.room_version = opts.roomVersion
+    if (opts.restrictedToSpaceId !== undefined) {
+      body.initial_state = [
+        {
+          type: 'm.room.join_rules',
+          state_key: '',
+          content: {
+            join_rule: 'restricted',
+            allow: [{ type: 'm.room_membership', room_id: opts.restrictedToSpaceId }],
+          },
+        },
+      ]
+    }
     const r = await this.fetch(
       `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.senderUserId)}`,
       {

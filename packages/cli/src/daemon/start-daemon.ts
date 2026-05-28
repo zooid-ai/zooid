@@ -18,6 +18,7 @@ import { createApp } from '@zooid/transport-http'
 import {
   MatrixClient,
   createMatrixTransport,
+  ensureDefaultChannel,
   ensureWorkforceSpace,
   startWorkforcePublisher,
   type AgentBinding,
@@ -212,6 +213,17 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     await transport.bootstrap({ spaceRoomId, asUserId })
 
     if (spaceRoomId) {
+      try {
+        const generalRoomId = await ensureDefaultChannel({
+          client,
+          asUserId,
+          serverName,
+          spaceId: spaceRoomId,
+        })
+        console.log(`[matrix] ensured default channel #general:${serverName} → ${generalRoomId}`)
+      } catch (err) {
+        console.warn('[matrix] default channel provisioning failed:', err)
+      }
       try {
         const publisher: PublisherHandle = await startWorkforcePublisher({
           client,

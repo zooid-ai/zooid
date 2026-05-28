@@ -305,3 +305,48 @@ describe('MatrixClient', () => {
     })
   })
 })
+
+describe('MatrixClient.createRoom restricted', () => {
+  it('injects a restricted join rule referencing the space when restrictedToSpaceId is set', async () => {
+    const fetch = fakeFetch(async ({ url, init }) => {
+      expect(url).toContain('/_matrix/client/v3/createRoom')
+      const body = JSON.parse(init.body as string)
+      expect(body.room_alias_name).toBe('design')
+      expect(body.initial_state).toContainEqual({
+        type: 'm.room.join_rules',
+        state_key: '',
+        content: {
+          join_rule: 'restricted',
+          allow: [{ type: 'm.room_membership', room_id: '!space:example.com' }],
+        },
+      })
+      return new Response(JSON.stringify({ room_id: '!new:example.com' }), { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    const id = await client.createRoom({
+      roomAliasName: 'design',
+      invite: [],
+      senderUserId: '@architect:example.com',
+      restrictedToSpaceId: '!space:example.com',
+    })
+    expect(id).toBe('!new:example.com')
+  })
+
+  it('omits the restricted join rule when no space is given (public room, unchanged)', async () => {
+    const fetch = fakeFetch(async ({ init }) => {
+      const body = JSON.parse(init.body as string)
+      expect(body.initial_state).toBeUndefined()
+      return new Response(JSON.stringify({ room_id: '!r:example.com' }), { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await client.createRoom({ roomAliasName: 'x', invite: [], senderUserId: '@a:example.com' })
+  })
+})

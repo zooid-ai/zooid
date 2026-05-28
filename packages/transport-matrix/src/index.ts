@@ -11,8 +11,8 @@ export type { AgentBinding, RouteMatch } from './router.js'
 export { BotPool } from './bot-pool.js'
 export { createMatrixTransport } from './transport.js'
 export type { CreateMatrixTransportOptions } from './transport.js'
-export { ensureWorkforceSpace, serverNameFromMxid } from './space-provisioner.js'
-export type { EnsureSpaceOpts } from './space-provisioner.js'
+export { ensureDefaultChannel, ensureWorkforceSpace, serverNameFromMxid } from './space-provisioner.js'
+export type { EnsureDefaultChannelOpts, EnsureSpaceOpts } from './space-provisioner.js'
 export {
   buildWorkforceRoster,
   publishWorkforce,

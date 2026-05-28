@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MatrixClient } from './matrix-client.js'
-import { ensureWorkforceSpace, serverNameFromMxid } from './space-provisioner.js'
+import { ensureDefaultChannel, ensureWorkforceSpace, serverNameFromMxid } from './space-provisioner.js'
 
 function clientWithFetches(...handlers: Array<(url: string, init?: RequestInit) => Response>) {
   let i = 0
@@ -71,6 +71,87 @@ describe('ensureWorkforceSpace', () => {
         preset: 'public_chat',
       }),
     ).rejects.toThrow(/500/)
+  })
+})
+
+describe('ensureWorkforceSpace privacy', () => {
+  it('creates the space invite-only (overriding any public preset)', async () => {
+    const { client } = clientWithFetches(
+      () => new Response(JSON.stringify({ errcode: 'M_NOT_FOUND' }), { status: 404 }),
+      (url, init) => {
+        expect(url).toContain('/_matrix/client/v3/createRoom')
+        const body = JSON.parse(init!.body as string)
+        expect(body.creation_content).toEqual({ type: 'm.space' })
+        expect(body.initial_state).toContainEqual({
+          type: 'm.room.join_rules',
+          state_key: '',
+          content: { join_rule: 'invite' },
+        })
+        return new Response(JSON.stringify({ room_id: '!space:hs.zoon.local' }), { status: 200 })
+      },
+    )
+    const id = await ensureWorkforceSpace({
+      client,
+      asUserId: '@zooid:hs.zoon.local',
+      serverName: 'hs.zoon.local',
+      spaceLocalpart: 'dev',
+      preset: 'public_chat',
+    })
+    expect(id).toBe('!space:hs.zoon.local')
+  })
+})
+
+describe('ensureDefaultChannel', () => {
+  it('returns the existing #general room when its alias resolves', async () => {
+    const { client, fetch } = clientWithFetches((url) => {
+      expect(url).toContain('/_matrix/client/v3/directory/room/%23general%3Ahs.zoon.local')
+      return new Response(JSON.stringify({ room_id: '!gen:hs.zoon.local' }), { status: 200 })
+    })
+    const id = await ensureDefaultChannel({
+      client,
+      asUserId: '@zooid:hs.zoon.local',
+      serverName: 'hs.zoon.local',
+      spaceId: '!space:hs.zoon.local',
+      channelLocalpart: 'general',
+    })
+    expect(id).toBe('!gen:hs.zoon.local')
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates a restricted #general and attaches it to the space when absent', async () => {
+    const { client, fetch } = clientWithFetches(
+      () => new Response(JSON.stringify({ errcode: 'M_NOT_FOUND' }), { status: 404 }),
+      (url, init) => {
+        expect(url).toContain('/_matrix/client/v3/createRoom')
+        const body = JSON.parse(init!.body as string)
+        expect(body.room_alias_name).toBe('general')
+        expect(body.initial_state).toContainEqual({
+          type: 'm.room.join_rules',
+          state_key: '',
+          content: {
+            join_rule: 'restricted',
+            allow: [{ type: 'm.room_membership', room_id: '!space:hs.zoon.local' }],
+          },
+        })
+        return new Response(JSON.stringify({ room_id: '!gen:hs.zoon.local' }), { status: 200 })
+      },
+      (url, init) => {
+        expect(url).toContain(
+          '/_matrix/client/v3/rooms/!space%3Ahs.zoon.local/state/m.space.child/!gen%3Ahs.zoon.local',
+        )
+        expect(JSON.parse(init!.body as string)).toMatchObject({ via: ['hs.zoon.local'] })
+        return new Response(JSON.stringify({ event_id: '$e' }), { status: 200 })
+      },
+    )
+    const id = await ensureDefaultChannel({
+      client,
+      asUserId: '@zooid:hs.zoon.local',
+      serverName: 'hs.zoon.local',
+      spaceId: '!space:hs.zoon.local',
+      channelLocalpart: 'general',
+    })
+    expect(id).toBe('!gen:hs.zoon.local')
+    expect(fetch).toHaveBeenCalledTimes(3)
   })
 })
 

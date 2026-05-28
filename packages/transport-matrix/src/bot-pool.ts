@@ -56,6 +56,7 @@ export class BotPool {
                   invite: opts.adminUserId ? [opts.adminUserId] : [],
                   senderUserId: sender,
                   name: aliasLocalpart,
+                  ...(opts.spaceRoomId ? { restrictedToSpaceId: opts.spaceRoomId } : {}),
                 })
               }
               aliasToId.set(room, resolved)

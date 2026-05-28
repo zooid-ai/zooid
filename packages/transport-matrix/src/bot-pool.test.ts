@@ -209,6 +209,32 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
     )
   })
 
+  it('creates agent rooms restricted to the workforce space when spaceRoomId is set', async () => {
+    const createRoom = vi.fn(async () => '!created:zoon.local')
+    const pool = new BotPool(
+      {
+        registerBot: vi.fn(async () => undefined),
+        joinRoom: vi.fn(async () => undefined),
+        resolveAlias: vi.fn(async () => null), // alias unknown → must create
+        createRoom,
+        sendStateEvent: vi.fn(async () => ({ event_id: '$ev' })),
+        setDisplayName: vi.fn(async () => undefined),
+      } as never,
+      [
+        {
+          name: 'planner',
+          userId: '@planner:zoon.local',
+          rooms: ['#design:zoon.local'],
+          trigger: 'mention',
+        },
+      ],
+    )
+    await pool.bootstrap({ spaceRoomId: '!space:zoon.local', asUserId: '@zooid:zoon.local' })
+    expect(createRoom).toHaveBeenCalledWith(
+      expect.objectContaining({ roomAliasName: 'design', restrictedToSpaceId: '!space:zoon.local' }),
+    )
+  })
+
   it('does nothing extra when spaceRoomId is omitted', async () => {
     const sendStateEvent = vi.fn(async () => ({ event_id: '$ev' }))
     const pool = new BotPool(
