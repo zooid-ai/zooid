@@ -204,8 +204,19 @@ export class MatrixClient {
       // Tuwunel/Synapse use M_FORBIDDEN both for permission errors AND for
       // "already a member / already invited". Inspect the body so we only
       // swallow the idempotent case.
+      //
+      // Phrasings seen in the wild:
+      //   - Synapse: "is already in the room", "is already invited"
+      //   - Tuwunel: "cannot invite user that is joined or banned" (one
+      //     string for both "joined" and "banned" — we can't tell which
+      //     from the body; the bot-pool's outer try-catch surfaces a real
+      //     ban via the subsequent joinRoom failure)
+      //   - Generic: "X is already a member of the room"
       const body = await r.text()
-      if (/already (in the room|invited|a member|joined)/i.test(body)) return
+      const idempotent =
+        /already (in the room|invited|a member|joined)/i.test(body) ||
+        /user that is joined/i.test(body)
+      if (idempotent) return
       throw new Error(`invite(${opts.targetUserId}) failed: 403 ${body}`)
     }
     throw new Error(`invite(${opts.targetUserId}) failed: ${r.status}`)

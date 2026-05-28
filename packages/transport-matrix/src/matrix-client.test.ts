@@ -329,6 +329,30 @@ describe('MatrixClient.invite', () => {
     })
   })
 
+  it('silently swallows Tuwunel\'s "cannot invite user that is joined or banned" 403', async () => {
+    const fetch = fakeFetch(async () =>
+      new Response(
+        JSON.stringify({
+          errcode: 'M_FORBIDDEN',
+          error: 'Auth check failed: cannot invite user that is joined or banned',
+        }),
+        { status: 403 },
+      ),
+    )
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await expect(
+      client.invite({
+        roomId: '!r:example.com',
+        asUserId: '@zooid:example.com',
+        targetUserId: '@planner:example.com',
+      }),
+    ).resolves.toBeUndefined()
+  })
+
   it('silently swallows the idempotent "already in the room" 403', async () => {
     const fetch = fakeFetch(async () =>
       new Response(
