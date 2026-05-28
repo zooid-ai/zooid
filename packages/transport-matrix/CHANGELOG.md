@@ -1,5 +1,45 @@
 # @zooid/transport-matrix
 
+## 0.7.2
+
+### Patch Changes
+
+- 12b31de: Drain trailing `agent_message_chunk`s after a turn resolves. ACP does not
+  guarantee that all `session/update` notifications precede the `session/prompt`
+  response for a normal turn (only the cancellation path mandates it), and some
+  agents (e.g. opencode) flush a final chunk just after the stop reason. The
+  transport now waits for the per-session buffer to stay quiet for a short grace
+  window (debounced, capped) before sending, instead of flushing the moment
+  `prompt()` resolves — which previously truncated or dropped replies.
+- Creation-time operator and agent power levels (ZOD056); fix several
+  homeserver-bootstrap edge cases exposed by ZNC010's invite-only space.
+
+  - New `RoomBinding { alias, powerLevel? }` shape on `MatrixBinding.rooms` —
+    yaml accepts both bare alias strings and `{ alias, power_level }` objects,
+    normalized internally to a uniform shape.
+  - `matrix-client.createRoom` accepts `userPowerLevels` and threads it into
+    `power_level_content_override.users`.
+  - `ensureWorkforceSpace` accepts an `admins` opt, seeds them at PL 100 in the
+    space's power levels AND adds them to the createRoom invite list — PL alone
+    doesn't grant membership in an invite-only space.
+  - `ensureDefaultChannel` accepts an `admins` opt and seeds them at PL 100 in
+    `#general`. Matches the per-room PL semantics for agent rooms.
+  - `bot-pool.bootstrap` accepts `adminUserIds`, builds a per-room
+    `userPowerLevels` map (bot + admins at 100, plus each agent's declared PL),
+    and now invites + joins every agent into the workforce space — restricted
+    child rooms then satisfy their allow rule automatically with no per-room
+    agent invites.
+  - New `MatrixClient.invite()` method, idempotent against the "already in
+    room" 403 surfaced by Tuwunel/Synapse.
+  - `transports.matrix.port` default changed from 8080 → 9000, matching the
+    conventional Matrix AS port used by Synapse, mautrix, and the
+    matrix-appservice-\* family. Anyone with `port:` set explicitly in
+    zooid.yaml is unaffected.
+
+- Updated dependencies
+  - @zooid/core@0.7.2
+  - @zooid/acp-client@0.7.2
+
 ## 0.7.1
 
 ### Patch Changes
