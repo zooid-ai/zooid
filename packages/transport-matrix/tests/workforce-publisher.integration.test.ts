@@ -74,7 +74,7 @@ describe('BotPool + space provisioner (integration)', () => {
       {
         name: 'planner',
         userId: '@planner:zoon.local',
-        rooms: ['#welcome:zoon.local'],
+        rooms: [{ alias: '#welcome:zoon.local' }],
         trigger: 'mention',
       },
     ])

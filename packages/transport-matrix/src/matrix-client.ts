@@ -87,6 +87,13 @@ export class MatrixClient {
     /** Explicit room version. Restricted join rules require v8+; omit to use the
      *  homeserver default (modern Tuwunel defaults to v10/v11). */
     roomVersion?: string
+    /**
+     * Seeds `m.room.power_levels.users` at creation via
+     * `power_level_content_override.users`. The caller owns the full map —
+     * typically the AS bot at 100, plus operator and any agents with
+     * declared PLs. Empty/absent → no override (the preset's defaults apply).
+     */
+    userPowerLevels?: Record<string, number>
   }): Promise<string> {
     const body: Record<string, unknown> = {
       room_alias_name: opts.roomAliasName,
@@ -106,6 +113,9 @@ export class MatrixClient {
           },
         },
       ]
+    }
+    if (opts.userPowerLevels && Object.keys(opts.userPowerLevels).length > 0) {
+      body.power_level_content_override = { users: opts.userPowerLevels }
     }
     const r = await this.fetch(
       `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.senderUserId)}`,

@@ -215,7 +215,7 @@ agents:
     expect(cfg.agents.alice!.matrix).toEqual({
       transport: 'm1',
       user_id: '@alice:localhost',
-      rooms: ['!r:localhost'],
+      rooms: [{ alias: '!r:localhost' }],
       trigger: 'any',
     })
     expect(cfg.agents.alice!.http).toBeUndefined()

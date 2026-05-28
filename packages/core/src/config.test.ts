@@ -401,7 +401,7 @@ agents:
       expect(t.user_namespace).toBe('@.*:localhost')
     }
     expect(config.agents.architect!.matrix?.user_id).toBe('@architect:localhost')
-    expect(config.agents.architect!.matrix?.rooms).toEqual(['!r1:localhost'])
+    expect(config.agents.architect!.matrix?.rooms).toEqual([{ alias: '!r1:localhost' }])
     expect(config.agents.architect!.matrix?.trigger).toBe('mention')
   })
 
@@ -649,8 +649,8 @@ agents:
         - '#docs'
 `)
     expect(config.agents.docs!.matrix?.rooms).toEqual([
-      '#welcome:localhost',
-      '#docs:localhost',
+      { alias: '#welcome:localhost' },
+      { alias: '#docs:localhost' },
     ])
   })
 
@@ -668,7 +668,7 @@ agents:
       rooms:
         - '!abc'
 `)
-    expect(config.agents.docs!.matrix?.rooms).toEqual(['!abc:localhost'])
+    expect(config.agents.docs!.matrix?.rooms).toEqual([{ alias: '!abc:localhost' }])
   })
 
   it('leaves fully-qualified user_id and rooms untouched (mixed forms in one binding)', () => {
@@ -689,9 +689,9 @@ agents:
 `)
     expect(config.agents.docs!.matrix?.user_id).toBe('@docs:localhost')
     expect(config.agents.docs!.matrix?.rooms).toEqual([
-      '#welcome:localhost',
-      '#docs:localhost',
-      '!r1:localhost',
+      { alias: '#welcome:localhost' },
+      { alias: '#docs:localhost' },
+      { alias: '!r1:localhost' },
     ])
   })
 
@@ -728,7 +728,86 @@ agents:
       rooms:
         - 'welcome'
 `),
-    ).toThrow(/rooms\[\] must start with '#' or '!'/)
+    ).toThrow(/must start with '#' or '!'/)
+  })
+})
+
+describe('agent matrix.rooms power_level binding', () => {
+  it('accepts bare-alias strings (default PL, no powerLevel field)', () => {
+    const cfg = loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  bot:
+    workdir: ./bot
+    acp: { preset: claude }
+    matrix:
+      transport: matrix-local
+      user_id: '@bot:localhost'
+      rooms: ['#general']
+      trigger: mention
+`)
+    expect(cfg.agents.bot!.matrix?.rooms).toEqual([{ alias: '#general:localhost' }])
+  })
+
+  it('accepts { alias, power_level } object entries and normalizes them', () => {
+    const cfg = loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  mod:
+    workdir: ./mod
+    acp: { preset: claude }
+    matrix:
+      transport: matrix-local
+      user_id: '@mod:localhost'
+      rooms:
+        - '#general'
+        - { alias: '#chat', power_level: 50 }
+      trigger: mention
+`)
+    expect(cfg.agents.mod!.matrix?.rooms).toEqual([
+      { alias: '#general:localhost' },
+      { alias: '#chat:localhost', powerLevel: 50 },
+    ])
+  })
+
+  it('rejects an object entry without a string alias', () => {
+    expect(() =>
+      loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  mod:
+    workdir: ./mod
+    acp: { preset: claude }
+    matrix:
+      transport: matrix-local
+      user_id: '@mod:localhost'
+      rooms:
+        - { power_level: 50 }
+      trigger: mention
+`),
+    ).toThrow(/alias/)
+  })
+
+  it('rejects a non-integer power_level', () => {
+    expect(() =>
+      loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  mod:
+    workdir: ./mod
+    acp: { preset: claude }
+    matrix:
+      transport: matrix-local
+      user_id: '@mod:localhost'
+      rooms:
+        - { alias: '#chat', power_level: 'high' }
+      trigger: mention
+`),
+    ).toThrow(/power_level/)
   })
 })
 
@@ -1280,7 +1359,7 @@ agents:
         expect(cfg.agents.echo.workdir).toBe('./agents/echo')
         expect(cfg.agents.echo.matrix?.transport).toBe('matrix')
         expect(cfg.agents.echo.matrix?.user_id).toBe('@echo:localhost')
-        expect(cfg.agents.echo.matrix?.rooms).toEqual(['#welcome:localhost'])
+        expect(cfg.agents.echo.matrix?.rooms).toEqual([{ alias: '#welcome:localhost' }])
 
         expect(cfg.agents.docs.workdir).toBe('./agents/docs')
         expect(cfg.agents.docs.matrix?.user_id).toBe('@docs:localhost')

@@ -5,13 +5,13 @@ const agents: AgentBinding[] = [
   {
     name: 'architect',
     userId: '@architect:example.com',
-    rooms: ['!room1:example.com'],
+    rooms: [{ alias: '!room1:example.com' }],
     trigger: 'mention',
   },
   {
     name: 'monitor',
     userId: '@monitor:example.com',
-    rooms: ['!alerts:example.com'],
+    rooms: [{ alias: '!alerts:example.com' }],
     trigger: 'any',
   },
 ]
@@ -67,7 +67,7 @@ describe('route', () => {
       {
         name: 'qa',
         userId: '@qa:example.com',
-        rooms: ['!room1:example.com'],
+        rooms: [{ alias: '!room1:example.com' }],
         trigger: 'mention',
       },
     ]

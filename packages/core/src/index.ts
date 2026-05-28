@@ -36,6 +36,7 @@ export type {
   MountConfig,
   ZooidContainerConfig,
   MatrixBinding,
+  RoomBinding,
   HttpBinding,
   ZooidConfig,
   TransportConfig,

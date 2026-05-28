@@ -9,6 +9,12 @@ export interface BootstrapOpts {
   spaceRoomId?: string
   /** AS bot user ID. Required when spaceRoomId is set; sender of the m.space.child write. */
   asUserId?: string
+  /**
+   * Operator MXIDs seeded at PL 100 in every agent room this pool creates.
+   * Applied via `power_level_content_override.users` at room creation only —
+   * never reconciled. Empty/absent = no operator entries.
+   */
+  adminUserIds?: string[]
 }
 
 export class BotPool {
@@ -36,7 +42,8 @@ export class BotPool {
         console.warn(`[matrix] setDisplayName(${a.userId}) failed: ${(err as Error).message}`)
       }
       for (let i = 0; i < a.rooms.length; i++) {
-        const room = a.rooms[i]
+        const binding = a.rooms[i]!
+        const room = binding.alias
         try {
           let resolved = room
           if (room.startsWith('#')) {
@@ -51,20 +58,29 @@ export class BotPool {
                 const colon = room.indexOf(':')
                 const aliasLocalpart = colon > 1 ? room.slice(1, colon) : room.slice(1)
                 const sender = opts.adminUserId ?? a.userId
+                const userPowerLevels = buildUserPowerLevels(
+                  opts.asUserId,
+                  opts.adminUserIds,
+                  this.agents,
+                  room,
+                )
                 resolved = await this.client.createRoom({
                   roomAliasName: aliasLocalpart,
                   invite: opts.adminUserId ? [opts.adminUserId] : [],
                   senderUserId: sender,
                   name: aliasLocalpart,
                   ...(opts.spaceRoomId ? { restrictedToSpaceId: opts.spaceRoomId } : {}),
+                  ...(userPowerLevels ? { userPowerLevels } : {}),
                 })
               }
               aliasToId.set(room, resolved)
             }
           }
-          // Store the canonical room_id on the binding so the router (which
-          // matches on event.room_id) sees a hit when Tuwunel pushes events.
-          a.rooms[i] = resolved
+          // Rewrite the binding's alias to the canonical room ID so the
+          // router (which matches on event.room_id) sees a hit when Tuwunel
+          // pushes events. The declared powerLevel was a creation-time
+          // seed — it has no role after bootstrap.
+          binding.alias = resolved
           await this.client.joinRoom(resolved, a.userId)
 
           if (
@@ -110,4 +126,30 @@ function localpart(userId: string): string {
   const m = /^@([^:]+):/.exec(userId)
   if (!m) throw new Error(`bad user id: ${userId}`)
   return m[1]
+}
+
+/**
+ * Build the `userPowerLevels` map for a room about to be created. Always
+ * seeds the AS bot (when known) and any operator admins at PL 100; layers
+ * per-agent declared PLs on top so agents land at moderator (or whatever
+ * they declared) without a follow-up state write. Returns undefined when
+ * the map would be empty — `createRoom` then omits the override entirely
+ * and the preset's defaults apply.
+ */
+function buildUserPowerLevels(
+  asUserId: string | undefined,
+  admins: string[] | undefined,
+  agents: AgentBinding[],
+  roomAlias: string,
+): Record<string, number> | undefined {
+  const users: Record<string, number> = {}
+  if (asUserId) users[asUserId] = 100
+  if (admins) for (const a of admins) users[a] = 100
+  for (const a of agents) {
+    for (const r of a.rooms) {
+      if (r.alias !== roomAlias) continue
+      if (r.powerLevel !== undefined) users[a.userId] = r.powerLevel
+    }
+  }
+  return Object.keys(users).length > 0 ? users : undefined
 }

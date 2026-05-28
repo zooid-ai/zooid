@@ -27,7 +27,7 @@ function mkCfg(over: Partial<ZooidConfig['agents']['alice']> = {}): ZooidConfig 
         matrix: {
           transport: 'm1',
           user_id: '@alice:localhost',
-          rooms: ['!r:localhost'],
+          rooms: [{ alias: '!r:localhost' }],
           trigger: 'mention',
         },
         ...over,
@@ -207,7 +207,7 @@ describe('buildAcpRegistry — image resolution (ZOD044)', () => {
           matrix: {
             transport: 'm1',
             user_id: '@bob:localhost',
-            rooms: ['!r:localhost'],
+            rooms: [{ alias: '!r:localhost' }],
             trigger: 'mention',
           },
         },

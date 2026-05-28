@@ -50,7 +50,7 @@ const transport = createMatrixTransport({
   agents: echo as never,
   approvals: approvals as never,
   client,
-  bindings: [{ name: 'dev', userId: agentUser, rooms: [roomId], trigger: 'any' }],
+  bindings: [{ name: 'dev', userId: agentUser, rooms: [{ alias: roomId }], trigger: 'any' }],
   hsToken,
 })
 

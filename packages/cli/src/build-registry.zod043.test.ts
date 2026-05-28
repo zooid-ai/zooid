@@ -28,7 +28,7 @@ function makeCfg(over: Partial<ZooidConfig> = {}): ZooidConfig {
         matrix: {
           transport: 'm1',
           user_id: '@alice:localhost',
-          rooms: ['!r:localhost'],
+          rooms: [{ alias: '!r:localhost' }],
           trigger: 'mention',
         },
         container: { env: { LOG_LEVEL: 'info' } },

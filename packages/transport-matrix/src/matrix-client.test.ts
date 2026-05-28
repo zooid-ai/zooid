@@ -306,6 +306,55 @@ describe('MatrixClient', () => {
   })
 })
 
+describe('MatrixClient.createRoom userPowerLevels', () => {
+  it('forwards userPowerLevels into power_level_content_override.users', async () => {
+    const fetch = fakeFetch(async ({ init }) => {
+      const body = JSON.parse(init.body as string)
+      expect(body.power_level_content_override).toEqual({
+        users: {
+          '@zooid:example.com': 100,
+          '@admin:example.com': 100,
+          '@mod:example.com': 50,
+        },
+      })
+      return new Response(JSON.stringify({ room_id: '!r:example.com' }), { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await client.createRoom({
+      roomAliasName: 'x',
+      invite: [],
+      senderUserId: '@zooid:example.com',
+      userPowerLevels: {
+        '@zooid:example.com': 100,
+        '@admin:example.com': 100,
+        '@mod:example.com': 50,
+      },
+    })
+  })
+
+  it('omits power_level_content_override when userPowerLevels is empty or absent', async () => {
+    const fetch = fakeFetch(async ({ init }) => {
+      const body = JSON.parse(init.body as string)
+      expect(body.power_level_content_override).toBeUndefined()
+      return new Response(JSON.stringify({ room_id: '!r:example.com' }), { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await client.createRoom({
+      roomAliasName: 'x',
+      invite: [],
+      senderUserId: '@zooid:example.com',
+    })
+  })
+})
+
 describe('MatrixClient.createRoom restricted', () => {
   it('injects a restricted join rule referencing the space when restrictedToSpaceId is set', async () => {
     const fetch = fakeFetch(async ({ url, init }) => {

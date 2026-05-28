@@ -77,6 +77,28 @@ export interface ZooidContainerConfig {
 }
 
 /**
+ * A room binding for an agent. Either a bare alias (default PL) or
+ * an alias with a declared power level applied at room creation.
+ *
+ * `alias` may be an alias (`#room:server`) or a room ID (`!id:server`).
+ * Resolved to a canonical room ID by `bot-pool` at bootstrap. The
+ * declared `powerLevel` (when set) seeds the agent's entry in
+ * `m.room.power_levels.users` at room creation; the daemon never reads
+ * or modifies power levels after that — promote/demote in the UI is
+ * canonical.
+ */
+export interface RoomBinding {
+  /** Room alias (typical) or room ID. */
+  alias: string
+  /**
+   * Power level the agent should hold in this room at the moment it is
+   * created. Omitted = `users_default` (effectively 0). Not reconciled
+   * after creation.
+   */
+  powerLevel?: number
+}
+
+/**
  * Matrix transport binding. Lives under `agents.<name>.matrix:` in
  * zooid.yaml. The block name (`matrix`) is the transport-kind
  * discriminator: `transports[transport].type` must equal `"matrix"`.
@@ -98,8 +120,8 @@ export interface MatrixBinding {
    * profile on bootstrap. Falls back to the user_id localpart when absent.
    */
   display_name?: string
-  /** Room IDs / aliases this agent watches. */
-  rooms: string[]
+  /** Rooms this agent watches. Each entry carries the alias/ID and an optional declared PL. */
+  rooms: RoomBinding[]
   /**
    * Routing rule. `mention` requires the bot to be tagged; `any` triggers
    * on every message.

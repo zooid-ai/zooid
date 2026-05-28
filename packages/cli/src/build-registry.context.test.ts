@@ -26,7 +26,7 @@ const matrixCfg: ZooidConfig = {
       matrix: {
         transport: 'mx',
         user_id: '@architect:hs',
-        rooms: ['!r:hs'],
+        rooms: [{ alias: '!r:hs' }],
         trigger: 'mention',
       },
     },

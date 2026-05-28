@@ -496,7 +496,13 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
 
   return {
     app,
-    bootstrap: async (bootstrapOpts: { spaceRoomId?: string; asUserId?: string } = {}) => {
+    bootstrap: async (
+      bootstrapOpts: {
+        spaceRoomId?: string
+        asUserId?: string
+        adminUserIds?: string[]
+      } = {},
+    ) => {
       await pool.bootstrap({ adminUserId, ...bootstrapOpts })
       await Promise.allSettled(
         bindings.map((b) =>
@@ -526,7 +532,7 @@ export async function rebuildThreadState(
   // Impersonate an agent that's actually a member of this room (AS reads
   // require room membership). Falling through to the first binding would
   // 403 if that agent never joined the target room.
-  const asUser = (bindings.find((b) => b.rooms.includes(roomId)) ?? bindings[0])?.userId
+  const asUser = (bindings.find((b) => b.rooms.some((r) => r.alias === roomId)) ?? bindings[0])?.userId
   if (!asUser) return state
 
   const root = await client.fetchEvent(roomId, rootEventId, asUser)

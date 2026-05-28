@@ -190,6 +190,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       new URL(matrix.transport.homeserver).hostname
     const asUserId = `@${matrix.transport.sender_localpart}:${serverName}`
     const spaceLocalpart = matrix.transport.space ?? 'dev'
+    const adminUserIds = opts.adminUserId ? [opts.adminUserId] : []
     let spaceRoomId: string | undefined
     try {
       spaceRoomId = await ensureWorkforceSpace({
@@ -198,6 +199,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         serverName,
         spaceLocalpart,
         preset: 'public_chat',
+        admins: adminUserIds,
       })
       console.log(`[matrix] ensured workforce space #${spaceLocalpart}:${serverName} → ${spaceRoomId}`)
     } catch (err) {
@@ -210,7 +212,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     // those pushes don't hit a connection-refused. Bootstrap also runs
     // *after* the space exists so BotPool can attach each agent room as
     // m.space.child while joining it.
-    await transport.bootstrap({ spaceRoomId, asUserId })
+    await transport.bootstrap({ spaceRoomId, asUserId, adminUserIds })
 
     if (spaceRoomId) {
       try {

@@ -51,7 +51,7 @@ const baseAgents = [
   {
     name: 'architect',
     userId: '@architect:example.com',
-    rooms: ['!r:example.com'],
+    rooms: [{ alias: '!r:example.com' }],
     trigger: 'mention' as const,
   },
 ]

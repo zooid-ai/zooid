@@ -20,12 +20,12 @@ describe('examples/zooid-dev/zooid.yaml', () => {
     const echo = cfg.agents.echo!
     expect(echo.matrix?.user_id).toBe('@echo:localhost')
     expect(echo.matrix?.trigger).toBe('mention')
-    expect(echo.matrix?.rooms).toEqual(['#welcome:localhost'])
+    expect(echo.matrix?.rooms).toEqual([{ alias: '#welcome:localhost' }])
 
     const docs = cfg.agents.docs!
     expect(docs.matrix?.user_id).toBe('@docs:localhost')
     expect(docs.matrix?.trigger).toBe('mention')
-    expect(docs.matrix?.rooms).toEqual(['#docs:localhost'])
+    expect(docs.matrix?.rooms).toEqual([{ alias: '#docs:localhost' }])
     expect(docs.acp).toEqual({ preset: 'opencode' })
   })
 })

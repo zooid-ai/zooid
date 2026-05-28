@@ -13,6 +13,7 @@ import type {
   MatrixBinding,
   MatrixTransportConfig,
   MountConfig,
+  RoomBinding,
   TransportConfig,
   ZooidConfig,
   ZooidContainerConfig,
@@ -452,6 +453,40 @@ function parseTransport(
   return { type: 'http', port }
 }
 
+function parseRoomBinding(path: string, raw: unknown, serverName: string): RoomBinding {
+  function normalizeAlias(alias: string): string {
+    if (alias.length === 0) {
+      throw new Error(`${path}: must be a non-empty alias`)
+    }
+    if (!MATRIX_ROOM_IDENT_RE.test(alias)) {
+      throw new Error(
+        `${path}: must start with '#' or '!' (got ${JSON.stringify(alias)})`,
+      )
+    }
+    return alias.includes(':') ? alias : `${alias}:${serverName}`
+  }
+  if (typeof raw === 'string') {
+    return { alias: normalizeAlias(raw) }
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${path}: must be a string or { alias, power_level } object`)
+  }
+  const r = raw as Record<string, unknown>
+  if (typeof r.alias !== 'string' || r.alias.length === 0) {
+    throw new Error(`${path}.alias: must be a non-empty string`)
+  }
+  const out: RoomBinding = { alias: normalizeAlias(r.alias) }
+  if (r.power_level !== undefined) {
+    if (typeof r.power_level !== 'number' || !Number.isInteger(r.power_level)) {
+      throw new Error(
+        `${path}.power_level: must be an integer (got ${JSON.stringify(r.power_level)})`,
+      )
+    }
+    out.powerLevel = r.power_level
+  }
+  return out
+}
+
 function parseTransportBinding(
   name: string,
   entry: Record<string, unknown>,
@@ -535,17 +570,9 @@ function parseTransportBinding(
     if (!Array.isArray(block.rooms) || block.rooms.length === 0) {
       throw new Error(`agents.${name}.matrix.rooms is required and must be a non-empty array`)
     }
-    const rooms: string[] = []
-    for (const r of block.rooms) {
-      if (typeof r !== 'string' || r.length === 0) {
-        throw new Error(`agents.${name}.matrix.rooms[] must be a non-empty string`)
-      }
-      if (!MATRIX_ROOM_IDENT_RE.test(r)) {
-        throw new Error(
-          `agents.${name}.matrix.rooms[] must start with '#' or '!' (got ${JSON.stringify(r)})`,
-        )
-      }
-      rooms.push(r.includes(':') ? r : `${r}:${serverName}`)
+    const rooms: RoomBinding[] = []
+    for (let i = 0; i < block.rooms.length; i++) {
+      rooms.push(parseRoomBinding(`agents.${name}.matrix.rooms[${i}]`, block.rooms[i], serverName))
     }
 
     let displayName: string | undefined

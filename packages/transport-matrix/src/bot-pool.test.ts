@@ -18,13 +18,13 @@ const agents: AgentBinding[] = [
   {
     name: 'architect',
     userId: '@architect:example.com',
-    rooms: ['!r1:example.com', '!r2:example.com'],
+    rooms: [{ alias: '!r1:example.com' }, { alias: '!r2:example.com' }],
     trigger: 'mention',
   },
   {
     name: 'monitor',
     userId: '@monitor:example.com',
-    rooms: ['!alerts:example.com'],
+    rooms: [{ alias: '!alerts:example.com' }],
     trigger: 'any',
   },
 ]
@@ -90,7 +90,12 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
       },
     }
     const pool = new BotPool(client as never, [
-      { name: 'echo', userId: '@echo:localhost', rooms: ['#welcome:localhost'], trigger: 'mention' },
+      {
+        name: 'echo',
+        userId: '@echo:localhost',
+        rooms: [{ alias: '#welcome:localhost' }],
+        trigger: 'mention',
+      },
     ])
     await pool.bootstrap({ adminUserId: '@admin:localhost' })
 
@@ -115,13 +120,18 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
       },
     }
     const pool = new BotPool(client as never, [
-      { name: 'echo', userId: '@echo:localhost', rooms: ['#welcome:localhost'], trigger: 'mention' },
+      {
+        name: 'echo',
+        userId: '@echo:localhost',
+        rooms: [{ alias: '#welcome:localhost' }],
+        trigger: 'mention',
+      },
     ])
     await pool.bootstrap({ adminUserId: '@admin:localhost' })
     expect(calls).toEqual(['join:@echo:localhost->!existing:localhost'])
   })
 
-  it('rewrites the binding\'s rooms array with resolved IDs so the router can match', async () => {
+  it("rewrites the binding's rooms array with resolved IDs so the router can match", async () => {
     const client = {
       registerBot: async () => {},
       setDisplayName: async () => {},
@@ -132,12 +142,12 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
     const binding: AgentBinding = {
       name: 'echo',
       userId: '@echo:localhost',
-      rooms: ['#welcome:localhost'],
+      rooms: [{ alias: '#welcome:localhost' }],
       trigger: 'mention',
     }
     const pool = new BotPool(client as never, [binding])
     await pool.bootstrap({ adminUserId: '@admin:localhost' })
-    expect(binding.rooms).toEqual(['!resolved:localhost'])
+    expect(binding.rooms).toEqual([{ alias: '!resolved:localhost' }])
   })
 
   it('passes through room IDs (starting with !) without resolving or creating', async () => {
@@ -156,7 +166,12 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
       },
     }
     const pool = new BotPool(client as never, [
-      { name: 'echo', userId: '@echo:localhost', rooms: ['!abc:localhost'], trigger: 'mention' },
+      {
+        name: 'echo',
+        userId: '@echo:localhost',
+        rooms: [{ alias: '!abc:localhost' }],
+        trigger: 'mention',
+      },
     ])
     await pool.bootstrap({ adminUserId: '@admin:localhost' })
     expect(calls).toEqual(['join:@echo:localhost->!abc:localhost'])
@@ -186,7 +201,7 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
         {
           name: 'planner',
           userId: '@planner:zoon.local',
-          rooms: ['#welcome:zoon.local'],
+          rooms: [{ alias: '#welcome:zoon.local' }],
           trigger: 'mention',
         },
       ],
@@ -224,7 +239,7 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
         {
           name: 'planner',
           userId: '@planner:zoon.local',
-          rooms: ['#design:zoon.local'],
+          rooms: [{ alias: '#design:zoon.local' }],
           trigger: 'mention',
         },
       ],
@@ -250,7 +265,7 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
         {
           name: 'planner',
           userId: '@planner:zoon.local',
-          rooms: ['#r:zoon.local'],
+          rooms: [{ alias: '#r:zoon.local' }],
           trigger: 'mention',
         },
       ],
@@ -271,8 +286,8 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
         setDisplayName: vi.fn(async () => undefined),
       } as never,
       [
-        { name: 'a', userId: '@a:zoon.local', rooms: ['#shared:zoon.local'], trigger: 'any' },
-        { name: 'b', userId: '@b:zoon.local', rooms: ['#shared:zoon.local'], trigger: 'any' },
+        { name: 'a', userId: '@a:zoon.local', rooms: [{ alias: '#shared:zoon.local' }], trigger: 'any' },
+        { name: 'b', userId: '@b:zoon.local', rooms: [{ alias: '#shared:zoon.local' }], trigger: 'any' },
       ],
     )
     await pool.bootstrap({ spaceRoomId: '!space:zoon.local', asUserId: '@zooid:zoon.local' })
@@ -280,6 +295,79 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
       ([opts]) => (opts as { eventType: string }).eventType === 'm.space.child',
     )
     expect(childWrites).toHaveLength(1)
+  })
+})
+
+describe('BotPool.bootstrap creation-time power levels', () => {
+  it('merges admin (PL 100) and per-agent declared PLs into createRoom userPowerLevels', async () => {
+    const createRoom = vi.fn(async () => '!created:zoon.local')
+    const pool = new BotPool(
+      {
+        registerBot: vi.fn(async () => undefined),
+        joinRoom: vi.fn(async () => undefined),
+        resolveAlias: vi.fn(async () => null), // force create
+        createRoom,
+        sendStateEvent: vi.fn(async () => ({ event_id: '$ev' })),
+        setDisplayName: vi.fn(async () => undefined),
+      } as never,
+      [
+        {
+          name: 'planner',
+          userId: '@planner:zoon.local',
+          rooms: [{ alias: '#design:zoon.local' }], // default PL
+          trigger: 'mention',
+        },
+        {
+          name: 'mod',
+          userId: '@mod:zoon.local',
+          rooms: [{ alias: '#design:zoon.local', powerLevel: 50 }], // moderator
+          trigger: 'mention',
+        },
+      ],
+    )
+    await pool.bootstrap({
+      asUserId: '@zooid:zoon.local',
+      spaceRoomId: '!space:zoon.local',
+      adminUserIds: ['@admin:zoon.local'],
+    })
+
+    // First createRoom carries the merged map:
+    //   bot @ 100, admin @ 100, mod @ 50 (planner has no declared PL → absent)
+    const firstCall = createRoom.mock.calls[0]?.[0] as {
+      userPowerLevels?: Record<string, number>
+    }
+    expect(firstCall.userPowerLevels).toEqual({
+      '@zooid:zoon.local': 100,
+      '@admin:zoon.local': 100,
+      '@mod:zoon.local': 50,
+    })
+  })
+
+  it('omits userPowerLevels when no admin and no agent declares a PL for the room', async () => {
+    const createRoom = vi.fn(async () => '!r:zoon.local')
+    const pool = new BotPool(
+      {
+        registerBot: vi.fn(async () => undefined),
+        joinRoom: vi.fn(async () => undefined),
+        resolveAlias: vi.fn(async () => null),
+        createRoom,
+        sendStateEvent: vi.fn(async () => ({ event_id: '$ev' })),
+        setDisplayName: vi.fn(async () => undefined),
+      } as never,
+      [
+        {
+          name: 'plain',
+          userId: '@plain:zoon.local',
+          rooms: [{ alias: '#plain:zoon.local' }],
+          trigger: 'mention',
+        },
+      ],
+    )
+    await pool.bootstrap({ spaceRoomId: '!space:zoon.local' })
+    const opts = createRoom.mock.calls[0]?.[0] as {
+      userPowerLevels?: Record<string, number>
+    }
+    expect(opts.userPowerLevels).toBeUndefined()
   })
 })
 
@@ -323,7 +411,12 @@ describe('BotPool.bootstrap — display name', () => {
       setDisplayName: vi.fn(async () => undefined),
     }
     const pool = new BotPool(client as never, [
-      { name: 'echo', userId: '@echo:localhost', rooms: ['#welcome:localhost'], trigger: 'mention' },
+      {
+        name: 'echo',
+        userId: '@echo:localhost',
+        rooms: [{ alias: '#welcome:localhost' }],
+        trigger: 'mention',
+      },
     ])
     await pool.bootstrap({ adminUserId: '@admin:localhost' })
     expect(createRoom).toHaveBeenCalledWith(

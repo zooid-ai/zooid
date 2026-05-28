@@ -1,11 +1,20 @@
+import type { RoomBinding } from '@zooid/core'
 import { extractMentions } from './mentions.js'
+
+export type { RoomBinding }
 
 export interface AgentBinding {
   name: string
   userId: string
   /** Optional human-readable display name. Falls back to the user_id localpart. */
   displayName?: string
-  rooms: string[]
+  /**
+   * Rooms this agent is bound to. Each entry's `alias` starts out as the
+   * configured `#alias` (or `!id`) and is rewritten to the canonical room
+   * ID by `BotPool.bootstrap`. Optional `powerLevel` is seeded into the
+   * room's `m.room.power_levels.users` at room creation only.
+   */
+  rooms: RoomBinding[]
   trigger: 'mention' | 'any'
 }
 
@@ -47,7 +56,7 @@ export function route(
 
   for (const a of agents) {
     if (event.sender === a.userId) continue
-    if (!a.rooms.includes(event.room_id ?? '')) continue
+    if (!a.rooms.some((r) => r.alias === event.room_id)) continue
     if (a.trigger === 'any') {
       matches.push(a)
       continue

@@ -4,8 +4,18 @@ import { buildWorkforceRoster, publishWorkforce } from './workforce-publisher.js
 import type { AgentBinding } from './router.js'
 
 const agents: AgentBinding[] = [
-  { name: 'planner', userId: '@planner:zoon.local', rooms: ['!eng:zoon.local'], trigger: 'mention' },
-  { name: 'reviewer', userId: '@reviewer:zoon.local', rooms: ['!eng:zoon.local', '!review:zoon.local'], trigger: 'any' },
+  {
+    name: 'planner',
+    userId: '@planner:zoon.local',
+    rooms: [{ alias: '!eng:zoon.local' }],
+    trigger: 'mention',
+  },
+  {
+    name: 'reviewer',
+    userId: '@reviewer:zoon.local',
+    rooms: [{ alias: '!eng:zoon.local' }, { alias: '!review:zoon.local' }],
+    trigger: 'any',
+  },
 ]
 
 describe('buildWorkforceRoster', () => {

@@ -9,7 +9,11 @@ export interface WorkforceRoster {
 export function buildWorkforceRoster(agents: AgentBinding[]): WorkforceRoster {
   return {
     version: 1,
-    agents: agents.map((a) => ({ user_id: a.userId, name: a.name, rooms: a.rooms })),
+    agents: agents.map((a) => ({
+      user_id: a.userId,
+      name: a.name,
+      rooms: a.rooms.map((r) => r.alias),
+    })),
   }
 }
 
