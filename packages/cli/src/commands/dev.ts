@@ -161,7 +161,11 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
         title: 'Wait for Tuwunel /_matrix/client/versions',
         task: async () => {
           if (!ctx.svc) throw new Error('service not started')
-          await ctx.svc.waitHealthy({ url: homeserver, timeoutMs: 60_000 })
+          // 180s covers Docker Desktop's first-run bind-mount setup on macOS
+          // (which can sit in `created` for 30–90s before transitioning to
+          // `running`) plus Tuwunel's RocksDB init. Repeated runs against an
+          // existing DB are far quicker.
+          await ctx.svc.waitHealthy({ url: homeserver, timeoutMs: 180_000 })
         },
       },
       {

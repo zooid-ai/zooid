@@ -1,6 +1,6 @@
 {
   "name": "@zooid/runtime-docker",
-  "version": "0.7.2",
+  "version": "0.7.3",
   "description": "Docker runtime for zooid. Spawns the agent CLI inside a container with a workspace mount and an env allowlist.",
   "type": "module",
   "license": "MIT",

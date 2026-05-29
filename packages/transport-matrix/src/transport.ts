@@ -58,7 +58,13 @@ const SEEN_EVENT_CAP = 5_000
 // DRAIN_QUIET_MS (debounce — re-arms on each late chunk) before flushing,
 // capped at DRAIN_MAX_MS so a misbehaving stream can't hang the turn.
 const DRAIN_QUIET_MS = 300
-const DRAIN_MAX_MS = 3_000
+// 30s upper bound on how long we wait after `session/prompt` resolves before
+// flushing whatever we have (or declaring an empty turn). Set high because
+// some agents — opencode especially — resolve the prompt promise *before*
+// the agent_message_chunk stream starts, and the chunk burst can be 5–15s
+// after that. The drain still short-circuits via DRAIN_QUIET_MS once any
+// content has settled, so this cap only kicks in for genuinely-stuck turns.
+const DRAIN_MAX_MS = 30_000
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -442,12 +448,22 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       // Drain: the prompt promise resolves on the stopReason response, but
       // trailing chunks may still arrive (see DRAIN_* above). Wait until the
       // buffer is quiet for DRAIN_QUIET_MS, re-arming on each new chunk.
+      //
+      // Subtlety: some agents (opencode in particular) resolve `session/prompt`
+      // *before* the agent_message_chunk stream starts. So the buffer can be
+      // empty for several seconds after prompt resolves, and only then do the
+      // chunks arrive. We can't break the drain just because the buffer is
+      // empty — we have to wait up to drainMaxMs for chunks to *start*. Once
+      // any content arrives, the "quiet for drainQuietMs" rule kicks in.
       const drainStart = Date.now()
       let drained = buffers.get(sessionId) ?? ''
       while (drainQuietMs > 0 && Date.now() - drainStart < drainMaxMs) {
         await delay(drainQuietMs)
         const next = buffers.get(sessionId) ?? ''
-        if (next === drained) break
+        // Stop only when we have content AND it hasn't grown — i.e. the
+        // generation has actually started and is now done. An unchanged
+        // empty buffer means the stream hasn't started yet; keep waiting.
+        if (next === drained && next.length > 0) break
         drained = next
       }
       const text = buffers.get(sessionId) ?? ''

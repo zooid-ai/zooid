@@ -1,5 +1,12 @@
 # @zooid/transport-http
 
+## 0.7.3
+
+### Patch Changes
+
+- @zooid/core@0.7.3
+- @zooid/acp-client@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes

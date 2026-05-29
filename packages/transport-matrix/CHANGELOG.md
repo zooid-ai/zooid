@@ -1,5 +1,44 @@
 # @zooid/transport-matrix
 
+## 0.7.3
+
+### Patch Changes
+
+- Drain trailing `agent_message_chunk`s when the stream starts _after_ the
+  prompt promise resolves.
+
+  Some ACP agents (opencode in particular) resolve `session/prompt` before
+  the agent_message_chunk stream begins — sometimes by 5–15 seconds. The
+  previous drain logic broke out of the wait loop as soon as the buffer
+  had been empty for 300 ms, which meant those late-starting chunks were
+  missed and the turn ended with "turn finished with empty buffer; nothing
+  sent."
+
+  Two changes:
+
+  - The drain loop now only short-circuits when the buffer has content _and_
+    has stopped growing — an unchanged empty buffer means the stream hasn't
+    started yet, so we keep waiting.
+  - `DRAIN_MAX_MS` raised from 3 s to 30 s. The drain still exits early via
+    `DRAIN_QUIET_MS` (300 ms) once any content has settled, so this cap only
+    matters for genuinely stuck turns.
+
+- 13383ea: `MatrixClient.invite()` now also swallows Tuwunel's idempotent
+  "cannot invite user that is joined or banned" 403, in addition to
+  Synapse's "already in the room / already invited" phrasings.
+
+  Previously, restarting the daemon on an already-bootstrapped Tuwunel
+  homeserver emitted a misleading "[matrix] space membership for ... failed"
+  warning every time, because the agent was already a space member and
+  Tuwunel surfaces that as the "joined or banned" 403 (one error string for
+  both cases). The bot-pool's outer try-catch already prevented this from
+  being a real failure, so the change is purely log-noise cleanup. If the
+  agent is genuinely banned, the subsequent joinRoom call surfaces that
+  explicitly.
+
+  - @zooid/core@0.7.3
+  - @zooid/acp-client@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes

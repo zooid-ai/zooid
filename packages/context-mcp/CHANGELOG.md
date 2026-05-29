@@ -1,5 +1,11 @@
 # @zooid/context-mcp
 
+## 0.7.3
+
+### Patch Changes
+
+- @zooid/core@0.7.3
+
 ## 0.7.2
 
 ### Patch Changes
