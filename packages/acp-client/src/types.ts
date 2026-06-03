@@ -63,6 +63,13 @@ export interface AgentMessageChunkEvent {
   type: 'agent_message_chunk'
   sessionId: string
   content: ContentBlock
+  /**
+   * Identifier of the assistant message this chunk belongs to, when the agent
+   * supplies one (opencode does; Claude Code does not). Lets transports detect
+   * message boundaries — a new id means a new message, which agents emit
+   * without any delimiter chunk between them. Undefined when not provided.
+   */
+  messageId?: string
 }
 
 export interface ToolCallLocation {

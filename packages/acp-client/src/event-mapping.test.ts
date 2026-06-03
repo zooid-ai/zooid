@@ -18,6 +18,26 @@ describe('acpUpdateToAgentEvent', () => {
       type: 'agent_message_chunk',
       sessionId: 's-1',
       content: { type: 'text', text: 'hello' },
+      messageId: undefined,
+    })
+  })
+
+  it('forwards messageId on agent_message_chunk when the agent supplies one (opencode)', () => {
+    const event = acpUpdateToAgentEvent({
+      sessionId: 's-1',
+      update: {
+        sessionUpdate: 'agent_message_chunk',
+        content: { type: 'text', text: 'hello' },
+        // opencode stamps each assistant message with its own id; not in the
+        // ACP schema, so it rides through as an extra field.
+        messageId: 'msg_abc',
+      } as never,
+    })
+    expect(event).toEqual<AgentEvent>({
+      type: 'agent_message_chunk',
+      sessionId: 's-1',
+      content: { type: 'text', text: 'hello' },
+      messageId: 'msg_abc',
     })
   })
 

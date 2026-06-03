@@ -17,6 +17,10 @@ export function acpUpdateToAgentEvent(
         type: 'agent_message_chunk',
         sessionId,
         content: update.content,
+        // `messageId` is not part of the ACP `agent_message_chunk` schema, but
+        // opencode includes it. Forward it so transports can split on message
+        // boundaries; harmlessly undefined for agents that omit it.
+        messageId: (update as { messageId?: string }).messageId,
       }
     case 'tool_call':
       return {

@@ -80,6 +80,10 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const pool = new BotPool(client, bindings)
   const sessions = new Map<string, SessionContext>()
   const buffers = new Map<string, string>()
+  // Last messageId seen per session's buffer. opencode streams each assistant
+  // message under its own id with no delimiter chunk between them, so a change
+  // here marks a message boundary we must break on.
+  const bufferMessageIds = new Map<string, string>()
   // Per-session promise tail so out-of-band events (tool_call, plan, etc.)
   // serialize on the wire even though the ACP producer doesn't await us.
   const sendQueue = new Map<string, Promise<void>>()
@@ -103,10 +107,26 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       const block = event.content as { type?: string; text?: string }
       if (block.type === 'text' && typeof block.text === 'string') {
         const current = buffers.get(event.sessionId) ?? ''
-        // An empty chunk signals a new text block starting (e.g. after a tool call).
-        // Insert a paragraph break so consecutive blocks don't run together.
-        const prefix = block.text === '' && current.length > 0 ? '\n\n' : ''
+        // Within a message, tokens carry their own leading spaces, so we
+        // concatenate raw. Two signals start a *new* message block that must not
+        // run together with the previous text:
+        //  - an empty chunk (some agents emit one between blocks, e.g. after a
+        //    tool call), or
+        //  - a change in messageId — opencode streams each assistant message
+        //    under its own id and emits no delimiter chunk between them, and the
+        //    first token of the new message has no leading space, so without
+        //    this they weld together ("…one.🅿️").
+        const prevMessageId = bufferMessageIds.get(event.sessionId)
+        const messageChanged =
+          event.messageId !== undefined &&
+          prevMessageId !== undefined &&
+          event.messageId !== prevMessageId
+        const needsBreak =
+          current.length > 0 && (block.text === '' || messageChanged)
+        const prefix = needsBreak ? '\n\n' : ''
         buffers.set(event.sessionId, current + prefix + block.text)
+        if (event.messageId !== undefined)
+          bufferMessageIds.set(event.sessionId, event.messageId)
       } else {
         console.warn(`[matrix:${name}] dropped chunk block type=${block.type}`, block)
       }
@@ -416,6 +436,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     const sessionId = await agents.ensureSession(agent.name, sessionKey, evt.room_id)
     sessions.set(sessionId, { agent, roomId: evt.room_id, threadRoot })
     buffers.set(sessionId, '')
+    bufferMessageIds.delete(sessionId)
 
     const roomId = evt.room_id
     const TYPING_TTL_MS = 30_000
@@ -507,6 +528,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       await safeTyping(false)
       await safePresence('online')
       buffers.delete(sessionId)
+      bufferMessageIds.delete(sessionId)
     }
   }
 

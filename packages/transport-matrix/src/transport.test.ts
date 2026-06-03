@@ -995,6 +995,100 @@ describe('tool-call and plan event bridging', () => {
   })
 })
 
+describe('agent_message_chunk message-boundary buffering', () => {
+  async function startTurn(eventId: string) {
+    const { transport, agents, client, finishPrompt } = makeTransport()
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: eventId,
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    return { agents, client, finishPrompt, sessionId: 'sess-' + eventId }
+  }
+
+  const emit = (
+    agents: { onEvent: unknown },
+    sessionId: string,
+    text: string,
+    messageId?: string,
+  ) =>
+    (agents.onEvent as (n: string, e: unknown) => unknown)('architect', {
+      type: 'agent_message_chunk',
+      sessionId,
+      content: { type: 'text', text },
+      messageId,
+    })
+
+  const sentBody = (client: { sendMessage: { mock: { calls: unknown[][] } } }) =>
+    (client.sendMessage.mock.calls[0]![0] as { content: { body: string } }).content.body
+
+  it('inserts a paragraph break when messageId changes between chunks (opencode run-on)', async () => {
+    // The exact production failure: opencode streams "…it." under one message id,
+    // then "Filed:" under a NEW id with no delimiter chunk. Without a break they
+    // weld into "it.Filed:".
+    const { agents, client, finishPrompt, sessionId } = await startTurn('$mid1')
+    await emit(agents, sessionId, 'Let me file it.', 'msg_aaa')
+    await emit(agents, sessionId, 'Filed: done', 'msg_bbb')
+    finishPrompt()
+    await settleTurn()
+    expect(client.sendMessage).toHaveBeenCalledTimes(1)
+    expect(sentBody(client)).toBe('Let me file it.\n\nFiled: done')
+  })
+
+  it('does NOT break between chunks sharing a messageId (token streaming stays intact)', async () => {
+    // Within one message, tokens carry their own leading spaces; we must
+    // concatenate raw or we corrupt every streamed sentence.
+    const { agents, client, finishPrompt, sessionId } = await startTurn('$mid2')
+    await emit(agents, sessionId, 'Hello', 'msg_aaa')
+    await emit(agents, sessionId, ' world', 'msg_aaa')
+    await emit(agents, sessionId, '.', 'msg_aaa')
+    finishPrompt()
+    await settleTurn()
+    expect(sentBody(client)).toBe('Hello world.')
+  })
+
+  it('breaks only once across a three-message run', async () => {
+    const { agents, client, finishPrompt, sessionId } = await startTurn('$mid3')
+    await emit(agents, sessionId, 'one.', 'msg_a')
+    await emit(agents, sessionId, 'two.', 'msg_b')
+    await emit(agents, sessionId, 'three.', 'msg_c')
+    finishPrompt()
+    await settleTurn()
+    expect(sentBody(client)).toBe('one.\n\ntwo.\n\nthree.')
+  })
+
+  it('still breaks on an empty delimiter chunk (agents that signal that way)', async () => {
+    const { agents, client, finishPrompt, sessionId } = await startTurn('$mid4')
+    await emit(agents, sessionId, 'before', 'msg_a')
+    await emit(agents, sessionId, '', 'msg_a') // empty delimiter, same id
+    await emit(agents, sessionId, 'after', 'msg_a')
+    finishPrompt()
+    await settleTurn()
+    expect(sentBody(client)).toBe('before\n\nafter')
+  })
+
+  it('concatenates raw when chunks carry no messageId (e.g. Claude Code)', async () => {
+    const { agents, client, finishPrompt, sessionId } = await startTurn('$mid5')
+    await emit(agents, sessionId, 'Hello', undefined)
+    await emit(agents, sessionId, ' there', undefined)
+    finishPrompt()
+    await settleTurn()
+    expect(sentBody(client)).toBe('Hello there')
+  })
+})
+
 describe('eco.zoon.interrupt handling', () => {
   it('dispatches cancelSession(agent.name, sessionId) for an interrupt that targets a tracked session', async () => {
     const { transport, agents, finishPrompt } = makeTransport()
