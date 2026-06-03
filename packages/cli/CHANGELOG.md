@@ -1,5 +1,18 @@
 # zooid
 
+## 0.7.4
+
+### Patch Changes
+
+- Updated dependencies [85abdbc]
+  - @zooid/acp-client@0.7.4
+  - @zooid/transport-matrix@0.7.4
+  - @zooid/core@0.7.4
+  - @zooid/context-mcp@0.7.4
+  - @zooid/runtime-docker@0.7.4
+  - @zooid/runtime-local@0.7.4
+  - @zooid/transport-http@0.7.4
+
 ## 0.7.3
 
 ### Patch Changes

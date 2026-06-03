@@ -1,5 +1,11 @@
 # @zooid/runtime-docker
 
+## 0.7.4
+
+### Patch Changes
+
+- @zooid/core@0.7.4
+
 ## 0.7.3
 
 ### Patch Changes

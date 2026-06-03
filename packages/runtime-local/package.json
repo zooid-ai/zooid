@@ -1,6 +1,6 @@
 {
   "name": "@zooid/runtime-local",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Local (host machine) runtime for zooid. Spawns the agent CLI directly via node:child_process.",
   "type": "module",
   "license": "MIT",

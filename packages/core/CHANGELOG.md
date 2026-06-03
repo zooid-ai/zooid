@@ -1,5 +1,12 @@
 # @zooid/core
 
+## 0.7.4
+
+### Patch Changes
+
+- Updated dependencies [85abdbc]
+  - @zooid/acp-client@0.7.4
+
 ## 0.7.3
 
 ### Patch Changes
