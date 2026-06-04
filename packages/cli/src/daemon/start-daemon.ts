@@ -52,6 +52,13 @@ export interface StartDaemonOpts {
   /** Force a re-pull of every resolved image at startup (no inspect check). */
   refreshImages?: boolean
   /**
+   * Create the workforce space publicly joinable instead of invite-only. Set
+   * only by `zooid dev`: the local homeserver is never deployed, so a
+   * self-service-registered account can join `#<space>` from the web client
+   * without an invite. Production (`zooid start`) leaves this off.
+   */
+  publicWorkforceSpace?: boolean
+  /**
    * Per-line progress hook for the image-prepull pass. Called once per
    * top-level summary plus once per image (start + completion). Used by
    * `zooid dev` to surface pull progress under the "Start daemon" listr
@@ -200,6 +207,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         spaceLocalpart,
         preset: 'public_chat',
         admins: adminUserIds,
+        joinRule: opts.publicWorkforceSpace ? 'public' : 'invite',
       })
       console.log(`[matrix] ensured workforce space #${spaceLocalpart}:${serverName} → ${spaceRoomId}`)
     } catch (err) {

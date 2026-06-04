@@ -75,7 +75,7 @@ describe('ensureWorkforceSpace', () => {
 })
 
 describe('ensureWorkforceSpace privacy', () => {
-  it('creates the space invite-only (overriding any public preset)', async () => {
+  it('creates the space invite-only by default (overriding any public preset)', async () => {
     const { client } = clientWithFetches(
       () => new Response(JSON.stringify({ errcode: 'M_NOT_FOUND' }), { status: 404 }),
       (url, init) => {
@@ -96,6 +96,31 @@ describe('ensureWorkforceSpace privacy', () => {
       serverName: 'hs.zoon.local',
       spaceLocalpart: 'dev',
       preset: 'public_chat',
+    })
+    expect(id).toBe('!space:hs.zoon.local')
+  })
+
+  it('creates a publicly-joinable space when joinRule is public (zooid dev)', async () => {
+    const { client } = clientWithFetches(
+      () => new Response(JSON.stringify({ errcode: 'M_NOT_FOUND' }), { status: 404 }),
+      (url, init) => {
+        expect(url).toContain('/_matrix/client/v3/createRoom')
+        const body = JSON.parse(init!.body as string)
+        expect(body.initial_state).toContainEqual({
+          type: 'm.room.join_rules',
+          state_key: '',
+          content: { join_rule: 'public' },
+        })
+        return new Response(JSON.stringify({ room_id: '!space:hs.zoon.local' }), { status: 200 })
+      },
+    )
+    const id = await ensureWorkforceSpace({
+      client,
+      asUserId: '@zooid:hs.zoon.local',
+      serverName: 'hs.zoon.local',
+      spaceLocalpart: 'dev',
+      preset: 'public_chat',
+      joinRule: 'public',
     })
     expect(id).toBe('!space:hs.zoon.local')
   })

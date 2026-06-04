@@ -202,6 +202,10 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
             installSignalHandlers: false,
             adminUserId: `@${flags.adminUser}:${shape.serverName}`,
             agentsDir: layout.agentsDir,
+            // Local-only homeserver: make the workforce space publicly joinable
+            // so a self-service-registered dev account lands in #<space> from
+            // the web client without needing an invite.
+            publicWorkforceSpace: true,
             onTap: (agentName, event) => captures[agentName]?.onTap(event),
             prepullLog: (line) => {
               t.output = line.replace(/^\[zooid\]\s+/, '').trim()

@@ -13,6 +13,15 @@ export interface EnsureSpaceOpts {
    * if the alias already resolves we return the existing room untouched.
    */
   admins?: string[]
+  /**
+   * Join rule pinned on the space at creation. Defaults to `invite`: a
+   * workspace is joined by invitation, not self-service, so it can't be walked
+   * into (which would otherwise satisfy every restricted child room's `allow`).
+   * `zooid dev` passes `public` so a self-service-registered local account can
+   * join `#<space>` straight from the web client without an invite — acceptable
+   * because the dev homeserver is local-only and never deployed.
+   */
+  joinRule?: 'invite' | 'public'
 }
 
 export async function ensureWorkforceSpace(opts: EnsureSpaceOpts): Promise<string> {
@@ -26,10 +35,12 @@ export async function ensureWorkforceSpace(opts: EnsureSpaceOpts): Promise<strin
     name: display,
     preset: opts.preset,
     creation_content: { type: 'm.space' },
-    // A workspace is joined by invitation, not self-service. Pin the space's
-    // join rule to invite regardless of preset so it can't be walked into
-    // (which would otherwise satisfy every restricted child room's allow).
-    initial_state: [{ type: 'm.room.join_rules', state_key: '', content: { join_rule: 'invite' } }],
+    // Pin the join rule regardless of preset. Defaults to invite so the space
+    // can't be walked into (which would otherwise satisfy every restricted
+    // child room's allow); `zooid dev` opts into `public` for local-only use.
+    initial_state: [
+      { type: 'm.room.join_rules', state_key: '', content: { join_rule: opts.joinRule ?? 'invite' } },
+    ],
   }
   if (opts.admins && opts.admins.length > 0) {
     // Invite each admin so they actually become members — PL 100 alone does
