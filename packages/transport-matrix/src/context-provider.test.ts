@@ -314,4 +314,37 @@ describe('MatrixContextProvider', () => {
     const info = await provider.getChannelInfo('!room:hs')
     expect(info.name).toBe('!room:hs')
   })
+
+  it('renders media events as placeholders instead of skipping them', async () => {
+    const client = fakeClient({
+      fetchRoomMessages: vi.fn().mockResolvedValue({
+        chunk: [
+          {
+            event_id: '$img',
+            sender: '@alice:hs',
+            origin_server_ts: 1000,
+            type: 'm.room.message',
+            content: { msgtype: 'm.image', body: 'dog.jpg', url: 'mxc://hs/a' },
+          },
+          {
+            event_id: '$file',
+            sender: '@alice:hs',
+            origin_server_ts: 2000,
+            type: 'm.room.message',
+            content: { msgtype: 'm.file', body: 'report.pdf', url: 'mxc://hs/b' },
+          },
+        ],
+        end: undefined,
+      }),
+    } as unknown as Partial<MatrixClient>)
+    const provider = new MatrixContextProvider({
+      client,
+      asUserId: '@_zooid:hs',
+      agentBots: new Map(),
+    })
+    const page = await provider.getRoomHistory('!room:hs', {})
+    const byId = new Map(page.messages.map((m) => [m.id, m]))
+    expect(byId.get('$img')?.text).toBe('[image: dog.jpg]')
+    expect(byId.get('$file')?.text).toBe('[file: report.pdf]')
+  })
 })

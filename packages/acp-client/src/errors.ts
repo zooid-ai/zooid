@@ -10,6 +10,7 @@ export type ErrorCode =
   | 'container_exit'
   | 'acp_protocol'
   | 'permission_denied'
+  | 'media_failed'
   | 'internal'
 
 export interface Classified {

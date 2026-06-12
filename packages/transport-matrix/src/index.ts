@@ -6,11 +6,11 @@ export { renderRegistration } from './registration.js'
 export type { MatrixTransportConfig } from './registration.js'
 export { extractMentions } from './mentions.js'
 export type { MaybeMessage } from './mentions.js'
-export { route } from './router.js'
+export { route, isMediaMsgtype, MEDIA_MSGTYPES } from './router.js'
 export type { AgentBinding, RouteMatch } from './router.js'
 export { BotPool } from './bot-pool.js'
 export { createMatrixTransport } from './transport.js'
-export type { CreateMatrixTransportOptions } from './transport.js'
+export type { CreateMatrixTransportOptions, MediaClientLike } from './transport.js'
 export { ensureDefaultChannel, ensureWorkforceSpace, serverNameFromMxid } from './space-provisioner.js'
 export type { EnsureDefaultChannelOpts, EnsureSpaceOpts } from './space-provisioner.js'
 export {
@@ -24,3 +24,9 @@ export type {
   PublisherHandle,
   StartOpts as StartWorkforcePublisherOpts,
 } from './workforce-publisher.js'
+export { MediaClient, parseMxcUri, MAX_INLINE_IMAGE_BYTES, INLINE_IMAGE_MIMES, MAX_DOWNLOAD_BYTES } from './media-client.js'
+export type { MediaClientOptions } from './media-client.js'
+export { PendingMediaStore, MAX_MEDIA_PER_TURN } from './pending-media.js'
+export type { PendingMediaItem } from './pending-media.js'
+export { writeAttachment } from './attachments.js'
+export type { WriteAttachmentInput } from './attachments.js'

@@ -6,6 +6,8 @@ import type {
   ToolCallStatus,
   ToolKind,
 } from '@agentclientprotocol/sdk'
+
+export type { ContentBlock }
 import type { PresetName } from './presets.js'
 
 /**

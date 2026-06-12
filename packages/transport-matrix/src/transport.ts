@@ -1,14 +1,38 @@
 import { Hono } from 'hono'
 import { timingSafeEqual } from 'node:crypto'
 import type { AcpRegistry, ApprovalCorrelator, RegisteredApproval } from '@zooid/core'
-import type { AgentEvent } from '@zooid/acp-client'
+import type { AgentEvent, ContentBlock } from '@zooid/acp-client'
 import { MatrixClient } from './matrix-client.js'
 import { BotPool } from './bot-pool.js'
-import { route, type AgentBinding, type ThreadState } from './router.js'
+import { route, isMediaMsgtype, type AgentBinding, type ThreadState } from './router.js'
 import { stripMention, extractMentions } from './mentions.js'
 import { toToolCallBody, toUpdateBody, toPlanBody, toErrorBody } from './event-encoders.js'
 import { classify } from '@zooid/acp-client'
 import { toMatrixHtml } from './markdown-to-matrix-html.js'
+import {
+  PendingMediaStore,
+  type PendingMediaItem,
+} from './pending-media.js'
+import {
+  MediaClient,
+  MAX_INLINE_IMAGE_BYTES,
+  INLINE_IMAGE_MIMES,
+} from './media-client.js'
+import { writeAttachment } from './attachments.js'
+
+export interface MediaClientLike {
+  download(input: {
+    mxcUri: string
+    asUserId: string
+    maxBytes?: number
+  }): Promise<{ data: Uint8Array; contentType: string }>
+  upload(input: {
+    data: Uint8Array
+    contentType: string
+    filename?: string
+    asUserId: string
+  }): Promise<{ content_uri: string }>
+}
 
 export interface CreateMatrixTransportOptions {
   agents: AcpRegistry
@@ -24,6 +48,10 @@ export interface CreateMatrixTransportOptions {
   drainQuietMs?: number
   /** Hard cap on the post-turn drain. Defaults to `DRAIN_MAX_MS`. */
   drainMaxMs?: number
+  /** Injected media client for downloading/uploading Matrix media. */
+  media?: MediaClientLike
+  /** Injected attachment writer (defaults to the real writeAttachment). */
+  writeAttachmentFn?: typeof writeAttachment
 }
 
 interface SessionContext {
@@ -47,6 +75,120 @@ interface MatrixEvent {
 }
 
 const STARTUP_GRACE_MS = 5_000
+
+interface MediaBlocksResult {
+  blocks: ContentBlock[]
+  pathLines: string[]
+}
+
+async function buildMediaBlocks(
+  items: PendingMediaItem[],
+  opts: {
+    agent: AgentBinding
+    media: MediaClientLike | undefined
+    writeAttachmentFn: typeof writeAttachment
+    onError: (item: PendingMediaItem, err: unknown) => void
+  },
+): Promise<MediaBlocksResult> {
+  const blocks: ContentBlock[] = []
+  const pathLines: string[] = []
+
+  if (!opts.media || items.length === 0) return { blocks, pathLines }
+
+  for (const item of items) {
+    try {
+      const isInlineCandidate =
+        item.msgtype === 'm.image' &&
+        INLINE_IMAGE_MIMES.includes(item.info?.mimetype ?? '') &&
+        (item.info?.size === undefined || item.info.size <= MAX_INLINE_IMAGE_BYTES)
+
+      if (isInlineCandidate) {
+        const { data, contentType } = await opts.media.download({
+          mxcUri: item.url,
+          asUserId: opts.agent.userId,
+        })
+        // Double-check actual size (info can lie)
+        if (data.byteLength <= MAX_INLINE_IMAGE_BYTES) {
+          blocks.push({
+            type: 'image',
+            data: Buffer.from(data).toString('base64'),
+            mimeType: contentType,
+          })
+          continue
+        }
+        // Actual size exceeded cap — fall through to file route with the already-downloaded bytes
+        if (opts.agent.workspaceDir) {
+          const paths = opts.writeAttachmentFn({
+            workspaceDir: opts.agent.workspaceDir,
+            agentWorkspacePath: opts.agent.agentWorkspacePath ?? opts.agent.workspaceDir,
+            eventId: item.eventId,
+            filename: item.filename ?? item.body,
+            data,
+          })
+          blocks.push({
+            type: 'resource_link',
+            uri: `file://${paths.agentPath}`,
+            name: item.filename ?? item.body,
+          })
+          pathLines.push(`Attached file: ${paths.agentPath}`)
+        }
+      } else {
+        // File route (m.file, m.video, m.audio, or oversized image)
+        if (!opts.agent.workspaceDir) continue
+        const { data } = await opts.media.download({
+          mxcUri: item.url,
+          asUserId: opts.agent.userId,
+        })
+        const paths = opts.writeAttachmentFn({
+          workspaceDir: opts.agent.workspaceDir,
+          agentWorkspacePath: opts.agent.agentWorkspacePath ?? opts.agent.workspaceDir,
+          eventId: item.eventId,
+          filename: item.filename ?? item.body,
+          data,
+        })
+        blocks.push({
+          type: 'resource_link',
+          uri: `file://${paths.agentPath}`,
+          name: item.filename ?? item.body,
+          mimeType: item.info?.mimetype,
+          size: item.info?.size,
+        })
+        pathLines.push(`Attached file: ${paths.agentPath}`)
+      }
+    } catch (err) {
+      opts.onError(item, err)
+    }
+  }
+
+  return { blocks, pathLines }
+}
+
+async function sendMediaError(
+  ctx: { agent: AgentBinding; roomId: string; threadRoot: string },
+  _err: unknown,
+  message: string,
+  client: MatrixClient,
+): Promise<void> {
+  await client
+    .sendCustomEvent({
+      roomId: ctx.roomId,
+      asUserId: ctx.agent.userId,
+      eventType: 'eco.zoon.error',
+      content: toErrorBody(
+        {
+          kind: 'error' as const,
+          agentId: ctx.agent.name,
+          sessionId: null,
+          turnId: null,
+          code: 'media_failed',
+          message: message.slice(0, 250),
+          transient: false,
+        },
+        ctx.threadRoot,
+      ),
+    })
+    .catch((e) => console.warn(`[matrix:${ctx.agent.name}] eco.zoon.error send failed:`, e))
+}
 const SEEN_EVENT_CAP = 5_000
 
 // ACP only guarantees that an agent flushes pending `session/update`
@@ -77,6 +219,9 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const { agents, approvals, client, bindings, hsToken, adminUserId } = opts
   const drainQuietMs = opts.drainQuietMs ?? DRAIN_QUIET_MS
   const drainMaxMs = opts.drainMaxMs ?? DRAIN_MAX_MS
+  const mediaClient = opts.media
+  const writeAttachmentFn = opts.writeAttachmentFn ?? writeAttachment
+  const pendingMedia = new PendingMediaStore()
   const pool = new BotPool(client, bindings)
   const sessions = new Map<string, SessionContext>()
   const buffers = new Map<string, string>()
@@ -104,7 +249,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     }
 
     if (event.type === 'agent_message_chunk') {
-      const block = event.content as { type?: string; text?: string }
+      const block = event.content as { type?: string; text?: string; data?: string; mimeType?: string }
       if (block.type === 'text' && typeof block.text === 'string') {
         const current = buffers.get(event.sessionId) ?? ''
         // Within a message, tokens carry their own leading spaces, so we
@@ -127,6 +272,38 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         buffers.set(event.sessionId, current + prefix + block.text)
         if (event.messageId !== undefined)
           bufferMessageIds.set(event.sessionId, event.messageId)
+      } else if (
+        block.type === 'image' &&
+        typeof block.data === 'string' &&
+        typeof block.mimeType === 'string' &&
+        mediaClient
+      ) {
+        // Outbound agent image: upload immediately and send as a threaded m.image.
+        const ctx = sessions.get(event.sessionId)
+        if (ctx) {
+          const bytes = Buffer.from(block.data, 'base64')
+          const ext = (block.mimeType.split('/')[1] ?? 'png').replace(/[^a-z0-9]/gi, '')
+          const filename = `image.${ext}`
+          void mediaClient
+            .upload({ data: bytes, contentType: block.mimeType, filename, asUserId: ctx.agent.userId })
+            .then(({ content_uri }) =>
+              client.sendMessage({
+                roomId: ctx.roomId,
+                asUserId: ctx.agent.userId,
+                threadRoot: ctx.threadRoot,
+                content: {
+                  msgtype: 'm.image',
+                  body: filename,
+                  url: content_uri,
+                  info: { mimetype: block.mimeType, size: bytes.length },
+                },
+              }),
+            )
+            .catch((err) => {
+              console.warn(`[matrix:${name}] outbound image upload failed:`, err)
+              void sendMediaError(ctx, err, 'agent image upload failed', client)
+            })
+        }
       } else {
         console.warn(`[matrix:${name}] dropped chunk block type=${block.type}`, block)
       }
@@ -315,6 +492,29 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         continue
       }
       logInbound(evt)
+
+      // Capture media events in the pending store; never route them to agents.
+      if (
+        evt.type === 'm.room.message' &&
+        isMediaMsgtype(evt.content?.msgtype) &&
+        evt.room_id &&
+        evt.event_id &&
+        evt.sender &&
+        evt.content?.url &&
+        !bindings.some((b) => b.userId === evt.sender)
+      ) {
+        pendingMedia.add(evt.room_id, inboundThreadRoot(evt), {
+          eventId: evt.event_id,
+          sender: evt.sender,
+          msgtype: evt.content.msgtype as string,
+          body: (evt.content.body as string | undefined) ?? '',
+          filename: evt.content.filename as string | undefined,
+          url: evt.content.url as string,
+          info: evt.content.info as PendingMediaItem['info'],
+        })
+        continue
+      }
+
       // Agent-promotion: top-level inbound event becomes the thread root.
       // For in-thread messages the existing root is preserved.
       const promotedRoot = inboundThreadRoot(evt) ?? evt.event_id
@@ -461,10 +661,33 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     try {
       const rawBody = evt.content?.body ?? ''
       const promptText = stripMention(rawBody, agent.userId)
+
+      // Drain pending media for this sender+thread and prepend as ACP content blocks.
+      const pendingItems = pendingMedia.drain(
+        evt.room_id,
+        inboundThreadRoot(evt),
+        evt.sender ?? '',
+      )
+      const { blocks, pathLines } = await buildMediaBlocks(pendingItems, {
+        agent,
+        media: mediaClient,
+        writeAttachmentFn,
+        onError: (item, err) => {
+          console.warn(`[matrix:${agent.name}] media_failed for ${item.body}:`, err)
+          void sendMediaError(
+            { agent, roomId: evt.room_id!, threadRoot },
+            err,
+            `Could not process attachment: ${item.body}`,
+            client,
+          )
+        },
+      })
+
+      const fullPromptText = [promptText, ...pathLines].filter(Boolean).join('\n')
       await agents.prompt(agent.name, {
         threadId: sessionKey,
         channelId: evt.room_id,
-        content: [{ type: 'text', text: promptText }],
+        content: [...blocks, { type: 'text', text: fullPromptText }],
       })
       // Drain: the prompt promise resolves on the stopReason response, but
       // trailing chunks may still arrive (see DRAIN_* above). Wait until the

@@ -147,15 +147,33 @@ export class MatrixContextProvider implements TransportContextProvider {
 
   private toMessage(ev: MatrixMessageEvent): Message | null {
     if (ev.type !== 'm.room.message') return null
-    if (ev.content?.msgtype !== 'm.text' || typeof ev.content.body !== 'string') return null
+    const msgtype = ev.content?.msgtype
+    const body = ev.content?.body
     const agent = this.opts.agentBots.get(ev.sender)
-    const relatesTo = ev.content['m.relates_to']
+    const relatesTo = ev.content?.['m.relates_to']
     const threadId =
       relatesTo?.rel_type === 'm.thread' && relatesTo.event_id ? relatesTo.event_id : undefined
+
+    // Media events render as context placeholders
+    if (msgtype === 'm.image' || msgtype === 'm.file' || msgtype === 'm.video' || msgtype === 'm.audio') {
+      const kind = msgtype.slice(2) // 'image', 'file', 'video', 'audio'
+      const name = typeof body === 'string' && body ? body : 'untitled'
+      return {
+        id: ev.event_id,
+        sender: ev.sender,
+        text: `[${kind}: ${name}]`,
+        timestamp: new Date(ev.origin_server_ts).toISOString(),
+        is_agent: agent !== undefined,
+        ...(agent !== undefined ? { agent_name: agent } : {}),
+        ...(threadId !== undefined ? { thread_id: threadId } : {}),
+      }
+    }
+
+    if (msgtype !== 'm.text' || typeof body !== 'string') return null
     return {
       id: ev.event_id,
       sender: ev.sender,
-      text: ev.content.body,
+      text: body,
       timestamp: new Date(ev.origin_server_ts).toISOString(),
       is_agent: agent !== undefined,
       ...(agent !== undefined ? { agent_name: agent } : {}),

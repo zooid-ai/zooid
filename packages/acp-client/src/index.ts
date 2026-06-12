@@ -18,6 +18,7 @@ export type {
   ApprovalDecision,
   ApprovalRequest,
   AgentMessageChunkEvent,
+  ContentBlock,
   PlanEvent,
   PromptInput,
   PromptResult,

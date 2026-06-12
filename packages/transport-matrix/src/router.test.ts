@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { route, type AgentBinding } from './router.js'
+import { route, isMediaMsgtype, type AgentBinding } from './router.js'
 
 const agents: AgentBinding[] = [
   {
@@ -86,5 +86,26 @@ describe('route', () => {
       content: {},
     }
     expect(route(stateEvent as never, agents)).toEqual([])
+  })
+})
+
+describe('media events', () => {
+  it('classifies media msgtypes', () => {
+    for (const t of ['m.image', 'm.file', 'm.video', 'm.audio']) {
+      expect(isMediaMsgtype(t)).toBe(true)
+    }
+    expect(isMediaMsgtype('m.text')).toBe(false)
+    expect(isMediaMsgtype('m.notice')).toBe(false)
+    expect(isMediaMsgtype(undefined)).toBe(false)
+  })
+
+  it('never routes media events to agents, even trigger=any', () => {
+    const monitorRoom = msg({ room: '!alerts:example.com', body: 'dog.jpg' })
+    const mediaEvent = {
+      ...monitorRoom,
+      content: { msgtype: 'm.image', body: 'dog.jpg', url: 'mxc://localhost/abc' },
+    }
+    const matches = route(mediaEvent, agents)
+    expect(matches).toEqual([])
   })
 })

@@ -16,6 +16,16 @@ export interface AgentBinding {
    */
   rooms: RoomBinding[]
   trigger: 'mention' | 'any'
+  /** Host path of the agent's workspace (resolved agent.workdir). Media files land here. */
+  workspaceDir?: string
+  /** Path prefix as the agent sees it: '/workspace' for containers, = workspaceDir for local. */
+  agentWorkspacePath?: string
+}
+
+export const MEDIA_MSGTYPES = new Set(['m.image', 'm.file', 'm.video', 'm.audio'])
+
+export function isMediaMsgtype(t: string | undefined): boolean {
+  return t !== undefined && MEDIA_MSGTYPES.has(t)
 }
 
 export interface ThreadState {
@@ -49,6 +59,7 @@ export function route(
 ): RouteMatch[] {
   if (event.type !== 'm.room.message') return []
   if (!event.content?.msgtype) return []
+  if (isMediaMsgtype(event.content.msgtype)) return []
   const mentions = new Set(extractMentions(event as never))
   const matches: RouteMatch[] = []
   const threadRoot = inboundThreadRoot(event)

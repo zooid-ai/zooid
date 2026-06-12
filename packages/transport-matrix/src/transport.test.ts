@@ -1312,3 +1312,245 @@ describe('full loop integration', () => {
     )
   })
 })
+
+// ─── Media pipeline tests ────────────────────────────────────────────────────
+
+const TINY_PNG_B64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+const TINY_PNG = Buffer.from(TINY_PNG_B64, 'base64')
+
+function fakeMedia() {
+  return {
+    download: vi.fn(async () => ({ data: new Uint8Array(TINY_PNG), contentType: 'image/png' })),
+    upload: vi.fn(async () => ({ content_uri: 'mxc://localhost/up1' })),
+  }
+}
+
+const workspaceBinding = {
+  ...baseAgents[0],
+  workspaceDir: '/tmp/ws',
+  agentWorkspacePath: '/workspace',
+}
+
+function makeMediaTransport(opts: {
+  media?: ReturnType<typeof fakeMedia>
+  writeAttachmentFn?: unknown
+} = {}) {
+  const { reg, finishPrompt } = fakeRegistry()
+  const approvals = fakeApprovals()
+  const client = fakeClient()
+  const transport = createMatrixTransport({
+    agents: reg as never,
+    approvals: approvals as never,
+    client: client as never,
+    bindings: [workspaceBinding],
+    hsToken: 'hs-secret',
+    drainQuietMs: 0,
+    media: opts.media as never,
+    writeAttachmentFn: opts.writeAttachmentFn as never,
+  })
+  return { transport, agents: reg, client, finishPrompt }
+}
+
+function imageEvent(over: {
+  size?: number
+  mimetype?: string
+  msgtype?: string
+  body?: string
+  eventId?: string
+} = {}) {
+  return {
+    type: 'm.room.message',
+    event_id: over.eventId ?? '$media1',
+    room_id: '!r:example.com',
+    sender: '@alice:example.com',
+    content: {
+      msgtype: over.msgtype ?? 'm.image',
+      body: over.body ?? 'dog.png',
+      url: 'mxc://localhost/abc',
+      info: { mimetype: over.mimetype ?? 'image/png', size: over.size ?? 67 },
+    },
+  }
+}
+
+function mentionMsg(body: string, eventId = '$text1') {
+  return {
+    type: 'm.room.message',
+    event_id: eventId,
+    room_id: '!r:example.com',
+    sender: '@alice:example.com',
+    content: {
+      msgtype: 'm.text',
+      body: `@architect ${body}`,
+      'm.mentions': { user_ids: ['@architect:example.com'] },
+    },
+  }
+}
+
+describe('inbound media', () => {
+  it('media events do not trigger a turn; m.text from the same sender drains them inline', async () => {
+    const media = fakeMedia()
+    const { transport, agents } = makeMediaTransport({ media })
+
+    // Image event: no turn fired
+    await postTxn(transport.app, { events: [imageEvent()] })
+    await settleTurn()
+    expect(agents.prompt).not.toHaveBeenCalled()
+
+    // m.text mention from same sender: turn fires, image block prepended
+    agents.prompt.mockImplementation(async (_name: string, p: { content: unknown[] }) => {
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-$text1',
+        content: { type: 'text', text: 'got it' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, { events: [mentionMsg('look at this')] })
+    await settleTurn()
+
+    expect(agents.prompt).toHaveBeenCalledOnce()
+    const content = (agents.prompt.mock.calls[0][1] as { content: unknown[] }).content
+    expect(content[0]).toMatchObject({ type: 'image', data: TINY_PNG_B64, mimeType: 'image/png' })
+    expect((content[1] as { type: string; text: string }).type).toBe('text')
+    expect(media.download).toHaveBeenCalledOnce()
+  })
+
+  it('routes an oversized image to the file path with a resource_link block and prose line', async () => {
+    const media = fakeMedia()
+    const writeAttachmentFn = vi.fn(() => ({
+      hostPath: '/tmp/ws/.zooid/attachments/media1/dog.png',
+      agentPath: '/workspace/.zooid/attachments/media1/dog.png',
+    }))
+    const { transport, agents } = makeMediaTransport({ media, writeAttachmentFn })
+
+    agents.prompt.mockResolvedValue({ stopReason: 'end_turn' as const })
+    await postTxn(transport.app, { events: [imageEvent({ size: 600_000 })] }) // > MAX_INLINE_IMAGE_BYTES
+    await postTxn(transport.app, { events: [mentionMsg('summarize')] })
+    await settleTurn()
+
+    const content = (agents.prompt.mock.calls[0][1] as { content: unknown[] }).content
+    expect(content[0]).toMatchObject({
+      type: 'resource_link',
+      uri: 'file:///workspace/.zooid/attachments/media1/dog.png',
+      name: 'dog.png',
+    })
+    expect((content[1] as { text: string }).text).toContain(
+      '/workspace/.zooid/attachments/media1/dog.png',
+    )
+  })
+
+  it('routes m.file to the workspace regardless of size', async () => {
+    const media = fakeMedia()
+    const writeAttachmentFn = vi.fn(() => ({
+      hostPath: '/tmp/ws/.zooid/attachments/media1/report.pdf',
+      agentPath: '/workspace/.zooid/attachments/media1/report.pdf',
+    }))
+    const { transport, agents } = makeMediaTransport({ media, writeAttachmentFn })
+
+    agents.prompt.mockResolvedValue({ stopReason: 'end_turn' as const })
+    await postTxn(transport.app, {
+      events: [imageEvent({ msgtype: 'm.file', body: 'report.pdf', mimetype: 'application/pdf' })],
+    })
+    await postTxn(transport.app, { events: [mentionMsg('read it')] })
+    await settleTurn()
+
+    expect(writeAttachmentFn).toHaveBeenCalledOnce()
+    const content = (agents.prompt.mock.calls[0][1] as { content: unknown[] }).content
+    expect((content[0] as { type: string }).type).toBe('resource_link')
+  })
+
+  it('emits eco.zoon.error (code media_failed) when download fails, still runs the turn text-only', async () => {
+    const media = fakeMedia()
+    media.download.mockRejectedValueOnce(new Error('download boom'))
+    const { transport, agents, client } = makeMediaTransport({ media })
+
+    agents.prompt.mockImplementation(async () => {
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-$text1',
+        content: { type: 'text', text: 'ok' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, { events: [imageEvent()] })
+    await postTxn(transport.app, { events: [mentionMsg('look')] })
+    await settleTurn()
+
+    expect(client.sendCustomEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: 'eco.zoon.error',
+        content: expect.objectContaining({ code: 'media_failed' }),
+      }),
+    )
+    const content = (agents.prompt.mock.calls[0][1] as { content: unknown[] }).content
+    expect(content).toHaveLength(1)
+    expect((content[0] as { type: string }).type).toBe('text')
+  })
+})
+
+describe('outbound agent images', () => {
+  it('uploads an image chunk and sends a threaded m.image as the agent user', async () => {
+    const media = fakeMedia()
+    const { transport, agents, client } = makeMediaTransport({ media })
+
+    agents.prompt.mockImplementation(async () => {
+      // Emit image block during prompt
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-$text1',
+        content: { type: 'image', data: TINY_PNG_B64, mimeType: 'image/png' },
+      })
+      // Also emit text block so the turn isn't empty
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-$text1',
+        content: { type: 'text', text: 'here is the image' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+
+    await postTxn(transport.app, { events: [mentionMsg('show me an image')] })
+    await settleTurn()
+    // Give async upload/send a moment to settle
+    await new Promise((r) => setTimeout(r, 10))
+
+    expect(media.upload).toHaveBeenCalledWith(
+      expect.objectContaining({ contentType: 'image/png', asUserId: '@architect:example.com' }),
+    )
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        asUserId: '@architect:example.com',
+        content: expect.objectContaining({
+          msgtype: 'm.image',
+          url: 'mxc://localhost/up1',
+          info: expect.objectContaining({ mimetype: 'image/png', size: TINY_PNG.length }),
+        }),
+      }),
+    )
+  })
+
+  it('does not throw when an audio block arrives (non-goal — warn and drop)', async () => {
+    const media = fakeMedia()
+    const { transport, agents } = makeMediaTransport({ media })
+
+    agents.prompt.mockImplementation(async () => {
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-$text1',
+        content: { type: 'audio', data: 'AAAA', mimeType: 'audio/wav' },
+      })
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-$text1',
+        content: { type: 'text', text: 'ok' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+
+    await expect(
+      postTxn(transport.app, { events: [mentionMsg('test audio')] }),
+    ).resolves.not.toThrow()
+    await settleTurn()
+  })
+})

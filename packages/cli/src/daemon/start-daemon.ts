@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { mkdir, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
 import {
@@ -17,6 +17,7 @@ import {
 import { createApp } from '@zooid/transport-http'
 import {
   MatrixClient,
+  MediaClient,
   createMatrixTransport,
   ensureDefaultChannel,
   ensureWorkforceSpace,
@@ -162,6 +163,11 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       homeserver: matrix.transport.homeserver,
       asToken: matrix.transport.as_token,
     })
+    const mediaClient = new MediaClient({
+      homeserver: matrix.transport.homeserver,
+      asToken: matrix.transport.as_token,
+    })
+    const isContainerRuntime = config.runtime !== 'local'
     const bindings: AgentBinding[] = []
     for (const a of Object.values(config.agents)) {
       if (a.matrix?.transport !== matrix.name) continue
@@ -172,6 +178,10 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         trigger: a.matrix.trigger,
       }
       if (a.matrix.display_name !== undefined) binding.displayName = a.matrix.display_name
+      // Resolve workspace dirs for media attachment routing.
+      const workspaceDir = isAbsolute(a.workdir) ? a.workdir : resolve(configDir, a.workdir)
+      binding.workspaceDir = workspaceDir
+      binding.agentWorkspacePath = isContainerRuntime ? '/workspace' : workspaceDir
       bindings.push(binding)
     }
     const transport = createMatrixTransport({
@@ -181,6 +191,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       bindings,
       hsToken: matrix.transport.hs_token,
       adminUserId: opts.adminUserId,
+      media: mediaClient,
     })
     const requestedPort = matrix.transport.port ?? 9000
     // Bind 0.0.0.0 explicitly — @hono/node-server defaults to IPv6-only on
