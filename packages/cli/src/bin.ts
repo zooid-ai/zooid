@@ -33,7 +33,7 @@ cli
   .option('--admin-password <pw>', 'Admin password', { default: 'admin' })
   .option(
     '--watch-web [path]',
-    'Run vite build --watch on @zoon/web. Path defaults to sibling ../zoon/packages/web.',
+    'Run vite build --watch on @zooid/zoon-web. Path defaults to sibling ../zoon/packages/web.',
   )
   .action(async (flags) => {
     await runDev({

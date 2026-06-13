@@ -1,27 +1,39 @@
 import { existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { fetchWebBundle, type FetchWebBundleOptions } from './fetch.js'
 
 const ENV_OVERRIDE = 'ZOOID_DEV_WEB_ROOT_OVERRIDE'
 
-export function resolveWebRoot(cliRoot: string): string {
+export interface EnsureWebRootOptions {
+  cliRoot: string
+  cacheDir: string
+  version: string | undefined
+  fetchBundle?: (opts: FetchWebBundleOptions) => Promise<string>
+  onProgress?: (msg: string) => void
+}
+
+export async function ensureWebRoot(opts: EnsureWebRootOptions): Promise<string> {
   const override = process.env[ENV_OVERRIDE]
   if (override && existsSync(join(override, 'index.html'))) return resolve(override)
 
-  const published = join(cliRoot, 'dist', 'web')
-  if (existsSync(join(published, 'index.html'))) return published
-
-  const fromSource = webSourcePackage(cliRoot)
+  const fromSource = webSourcePackage(opts.cliRoot)
   if (fromSource && existsSync(join(fromSource, 'dist', 'index.html'))) {
     return join(fromSource, 'dist')
   }
 
-  throw new Error(
-    `@zoon/web build not found.\n  Tried: ${published}\n  Tried: ${fromSource ?? '(no monorepo source)'}\n` +
-      `Run \`pnpm -C zoon/packages/web build\` (or set ${ENV_OVERRIDE} to a built dist).`,
-  )
+  if (!opts.version) {
+    throw new Error(
+      `No @zooid/zoon-web version pin (zooid.zoonWebVersion) in the cli package.json ` +
+        `and no monorepo sibling build found.\n` +
+        `Set ${ENV_OVERRIDE} to a built dist, or run from the monorepo.`,
+    )
+  }
+  opts.onProgress?.(`Fetching @zooid/zoon-web ${opts.version}…`)
+  const fetchBundleFn = opts.fetchBundle ?? fetchWebBundle
+  return fetchBundleFn({ version: opts.version, cacheDir: opts.cacheDir })
 }
 
-// Returns the path to the in-tree @zoon/web package (zoon/packages/web) if the
+// Returns the path to the in-tree @zooid/zoon-web package (zoon/packages/web) if the
 // CLI is running from the monorepo source. Returns null when running from an
 // installed package (no sibling zoon/ tree).
 export function webSourcePackage(cliRoot: string): string | null {
