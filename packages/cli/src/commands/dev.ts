@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import { Listr } from 'listr2'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serve, type ServerType } from '@hono/node-server'
 import {
@@ -17,7 +17,8 @@ import { resolvePaths } from '../bootstrap/paths.js'
 import { ensureTokens, type Tokens } from '../bootstrap/tokens.js'
 import { startDaemon, type DaemonHandle } from '../daemon/start-daemon.js'
 import { TuwunelService } from '../services/tuwunel.js'
-import { resolveWebRoot, webSourcePackage } from '../web/resolve.js'
+import { ensureWebRoot, webSourcePackage } from '../web/resolve.js'
+import { readZoonWebPin } from '../web/pin.js'
 import { webStatic } from '../web/static.js'
 import { startWebWatch, type WebWatchHandle } from '../web/watch.js'
 import {
@@ -66,7 +67,7 @@ export interface DevFlags {
   adminPassword: string
   installSignalHandlers?: boolean
   foreground?: boolean
-  // Run `vite build --watch` against a @zoon/web package and serve its dist.
+  // Run `vite build --watch` against a @zooid/zoon-web package and serve its dist.
   // true = auto-detect (sibling ../zoon/packages/web or in-monorepo); string = explicit path.
   watchWeb?: string | boolean
 }
@@ -216,7 +217,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
       ...(flags.watchWeb
         ? [
             {
-              title: 'Start @zoon/web watcher (vite build --watch)',
+              title: 'Start @zooid/zoon-web watcher (vite build --watch)',
               task: async (): Promise<void> => {
                 const pkgDir =
                   typeof flags.watchWeb === 'string'
@@ -225,7 +226,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
                 if (!pkgDir) {
                   const defaultPath = dirname(dirname(dirname(CLI_ROOT))) + '/zoon/packages/web'
                   throw new Error(
-                    `--watch-web: @zoon/web not found at ${defaultPath}.\n` +
+                    `--watch-web: @zooid/zoon-web not found at ${defaultPath}.\n` +
                       `Pass an explicit path: --watch-web=/path/to/zoon/packages/web`,
                   )
                 }
@@ -235,9 +236,18 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
           ]
         : []),
       {
-        title: `Serve @zoon/web on http://localhost:${flags.uiPort}`,
-        task: () => {
-          const webRoot = ctx.webWatch?.distPath ?? resolveWebRoot(CLI_ROOT)
+        title: `Serve @zooid/zoon-web on http://localhost:${flags.uiPort}`,
+        task: async (_, t) => {
+          const webRoot =
+            ctx.webWatch?.distPath ??
+            (await ensureWebRoot({
+              cliRoot: CLI_ROOT,
+              cacheDir: join(layout.dataRoot, 'web'),
+              version: readZoonWebPin(CLI_ROOT),
+              onProgress: (msg) => {
+                t.output = msg
+              },
+            }))
           const app = webStatic({ webRoot, homeserverUrl: homeserver })
           ctx.uiServer = serve({ fetch: app.fetch, port: flags.uiPort })
         },
@@ -294,7 +304,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
       `  ${chalk.cyan('admin user:')} ${flags.adminUser} / ${flags.adminPassword}`,
       `  ${chalk.cyan('data dir:')} ${layout.dataRoot}`,
       ...(ctx.webWatch
-        ? [`  ${chalk.cyan('web watcher:')} live (vite build --watch on @zoon/web)`]
+        ? [`  ${chalk.cyan('web watcher:')} live (vite build --watch on @zooid/zoon-web)`]
         : []),
       '',
       chalk.dim('Press Ctrl-C to stop.'),

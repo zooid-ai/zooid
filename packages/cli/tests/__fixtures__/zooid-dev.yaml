@@ -1,7 +1,7 @@
 # Local-dev workforce for `zooid dev`. Run from this directory:
 #   pnpm zooid dev
 #
-# Boots Tuwunel + the daemon + the bundled @zoon/web UI in one foreground
+# Boots Tuwunel + the daemon + the @zooid/zoon-web UI in one foreground
 # process, registers an `admin:admin` Matrix user, and joins the agents to
 # their #welcome / per-agent rooms.
 #
