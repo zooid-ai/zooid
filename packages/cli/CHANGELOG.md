@@ -1,5 +1,22 @@
 # zooid
 
+## 0.8.0
+
+### Minor Changes
+
+- fetch zoon from npm registry, agent media pipeline
+
+### Patch Changes
+
+- Updated dependencies
+  - @zooid/acp-client@0.8.0
+  - @zooid/context-mcp@0.8.0
+  - @zooid/core@0.8.0
+  - @zooid/runtime-docker@0.8.0
+  - @zooid/runtime-local@0.8.0
+  - @zooid/transport-http@0.8.0
+  - @zooid/transport-matrix@0.8.0
+
 ## 0.7.4
 
 ### Patch Changes

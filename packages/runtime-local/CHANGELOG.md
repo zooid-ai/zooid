@@ -1,5 +1,16 @@
 # @zooid/runtime-local
 
+## 0.8.0
+
+### Minor Changes
+
+- fetch zoon from npm registry, agent media pipeline
+
+### Patch Changes
+
+- Updated dependencies
+  - @zooid/core@0.8.0
+
 ## 0.7.4
 
 ### Patch Changes
