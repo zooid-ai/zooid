@@ -40,6 +40,7 @@ function fakeClient() {
   return {
     registerBot: vi.fn(async () => undefined),
     joinRoom: vi.fn(async () => undefined),
+    leaveRoom: vi.fn(async () => undefined),
     sendMessage: vi.fn(async () => ({ event_id: '$x' })),
     sendCustomEvent: vi.fn(async () => ({ event_id: '$x' })),
     setTyping: vi.fn(async () => {}),
@@ -66,6 +67,7 @@ function makeTransport(drain?: { drainQuietMs?: number; drainMaxMs?: number }) {
     client: client as never,
     bindings: baseAgents,
     hsToken: 'hs-secret',
+    botUserId: '@zooid:example.com',
     // Disable post-turn drain by default so settleTurn (microtasks) suffices.
     // Tests covering trailing-chunk behavior pass an explicit window.
     drainQuietMs: drain?.drainQuietMs ?? 0,
@@ -1552,5 +1554,49 @@ describe('outbound agent images', () => {
       postTxn(transport.app, { events: [mentionMsg('test audio')] }),
     ).resolves.not.toThrow()
     await settleTurn()
+  })
+})
+
+describe('ad-hoc bot invite declines', () => {
+  let n = 0
+  const invite = (stateKey: string, sender: string) => ({
+    type: 'm.room.member',
+    event_id: `$inv${++n}`,
+    room_id: '!r:example.com',
+    sender,
+    state_key: stateKey,
+    content: { membership: 'invite' },
+  })
+
+  it('declines an invite to the AS bot from a human, with a reason', async () => {
+    const { transport, client } = makeTransport()
+    await postTxn(transport.app, { events: [invite('@zooid:example.com', '@zongshan:example.com')] })
+    expect(client.leaveRoom).toHaveBeenCalledWith(
+      '!r:example.com',
+      '@zooid:example.com',
+      { reason: expect.stringContaining('zooid.yaml') },
+    )
+  })
+
+  it('declines an invite to an agent from a human', async () => {
+    const { transport, client } = makeTransport()
+    await postTxn(transport.app, { events: [invite('@architect:example.com', '@zongshan:example.com')] })
+    expect(client.leaveRoom).toHaveBeenCalledWith(
+      '!r:example.com',
+      '@architect:example.com',
+      expect.objectContaining({ reason: expect.any(String) }),
+    )
+  })
+
+  it('does NOT decline a provisioning invite (inviter is our AS bot)', async () => {
+    const { transport, client } = makeTransport()
+    await postTxn(transport.app, { events: [invite('@architect:example.com', '@zooid:example.com')] })
+    expect(client.leaveRoom).not.toHaveBeenCalled()
+  })
+
+  it('ignores an invite to a human (not one of our bots)', async () => {
+    const { transport, client } = makeTransport()
+    await postTxn(transport.app, { events: [invite('@dave:example.com', '@zongshan:example.com')] })
+    expect(client.leaveRoom).not.toHaveBeenCalled()
   })
 })

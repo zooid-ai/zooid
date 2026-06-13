@@ -445,6 +445,39 @@ describe('MatrixClient.createRoom userPowerLevels', () => {
   })
 })
 
+describe('MatrixClient.leaveRoom', () => {
+  it('leaves (rejects) a room as the impersonated user, with a reason', async () => {
+    const fetch = fakeFetch(async ({ url, init }) => {
+      expect(url).toBe(
+        'https://hs.example.com/_matrix/client/v3/rooms/!r%3Aexample.com/leave' +
+          '?user_id=%40zooid%3Aexample.com',
+      )
+      expect(init.method).toBe('POST')
+      expect(JSON.parse(init.body as string)).toEqual({ reason: 'no thanks' })
+      return new Response('{}', { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await client.leaveRoom('!r:example.com', '@zooid:example.com', { reason: 'no thanks' })
+  })
+
+  it('sends an empty body when no reason is given', async () => {
+    const fetch = fakeFetch(async ({ init }) => {
+      expect(JSON.parse(init.body as string)).toEqual({})
+      return new Response('{}', { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await client.leaveRoom('!r:example.com', '@zooid:example.com')
+  })
+})
+
 describe('MatrixClient.createRoom restricted', () => {
   it('injects a restricted join rule referencing the space when restrictedToSpaceId is set', async () => {
     const fetch = fakeFetch(async ({ url, init }) => {

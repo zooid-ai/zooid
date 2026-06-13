@@ -222,6 +222,25 @@ export class MatrixClient {
     throw new Error(`invite(${opts.targetUserId}) failed: ${r.status}`)
   }
 
+  async leaveRoom(
+    roomId: string,
+    asUserId: string,
+    opts?: { reason?: string },
+  ): Promise<void> {
+    const url =
+      `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave` +
+      `?user_id=${encodeURIComponent(asUserId)}`
+    const r = await this.fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.asToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(opts?.reason ? { reason: opts.reason } : {}),
+    })
+    if (!r.ok) throw new Error(`leaveRoom(${roomId}, ${asUserId}) failed: ${r.status}`)
+  }
+
   async joinRoom(roomIdOrAlias: string, asUserId: string): Promise<void> {
     const url =
       `${this.homeserver}/_matrix/client/v3/join/${encodeURIComponent(roomIdOrAlias)}` +

@@ -52,6 +52,10 @@ export interface CreateMatrixTransportOptions {
   media?: MediaClientLike
   /** Injected attachment writer (defaults to the real writeAttachment). */
   writeAttachmentFn?: typeof writeAttachment
+  /** AS sender-bot MXID (@<sender_localpart>:<server>). Together with the agent
+   *  bindings this forms the set of "our bot users" whose ad-hoc invites are
+   *  declined. */
+  botUserId?: string
 }
 
 interface SessionContext {
@@ -67,9 +71,12 @@ interface MatrixEvent {
   origin_server_ts?: number
   room_id?: string
   sender?: string
+  /** Present on state events (m.room.member → the affected user). */
+  state_key?: string
   content?: Record<string, unknown> & {
     msgtype?: string
     body?: string
+    membership?: string
     'm.relates_to'?: { rel_type?: string; event_id?: string }
   }
 }
@@ -216,13 +223,20 @@ function inboundThreadRoot(evt: MatrixEvent): string | undefined {
 }
 
 export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
-  const { agents, approvals, client, bindings, hsToken, adminUserId } = opts
+  const { agents, approvals, client, bindings, hsToken, adminUserId, botUserId } = opts
   const drainQuietMs = opts.drainQuietMs ?? DRAIN_QUIET_MS
   const drainMaxMs = opts.drainMaxMs ?? DRAIN_MAX_MS
   const mediaClient = opts.media
   const writeAttachmentFn = opts.writeAttachmentFn ?? writeAttachment
   const pendingMedia = new PendingMediaStore()
   const pool = new BotPool(client, bindings)
+  const ourBotUserIds = new Set<string>([
+    ...(botUserId ? [botUserId] : []),
+    ...bindings.map((b) => b.userId),
+  ])
+  const DECLINE_REASON =
+    'Bots are placed in rooms only by the zooid daemon (workforce-as-code). ' +
+    'Ad-hoc invites are declined — add the bot to the room in zooid.yaml.'
   const sessions = new Map<string, SessionContext>()
   const buffers = new Map<string, string>()
   // Last messageId seen per session's buffer. opencode streams each assistant
@@ -402,6 +416,27 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           `[matrix] dropping stale message event ${evt.event_id} ` +
             `(ts=${evt.origin_server_ts}, daemon started at ${cutoffTs + STARTUP_GRACE_MS})`,
         )
+        continue
+      }
+      if (evt.type === 'm.room.member' && evt.content?.membership === 'invite') {
+        const target = evt.state_key
+        const inviter = evt.sender
+        if (
+          target &&
+          evt.room_id &&
+          ourBotUserIds.has(target) &&
+          (!inviter || !ourBotUserIds.has(inviter))
+        ) {
+          console.log(
+            `[matrix] declining ad-hoc invite for ${target} in ${evt.room_id} ` +
+              `from ${inviter ?? 'unknown'}`,
+          )
+          await client
+            .leaveRoom(evt.room_id, target, { reason: DECLINE_REASON })
+            .catch((err) =>
+              console.warn(`[matrix] leaveRoom(${evt.room_id}, ${target}) failed:`, err),
+            )
+        }
         continue
       }
       if (evt.type === 'eco.zoon.session_reset') {

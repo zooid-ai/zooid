@@ -184,6 +184,13 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       binding.agentWorkspacePath = isContainerRuntime ? '/workspace' : workspaceDir
       bindings.push(binding)
     }
+    // user_namespace is a regex like `@.*:localhost`; the part after the last
+    // `:` is the homeserver's server_name. Fall back to the homeserver URL's
+    // host if the namespace shape is unexpected.
+    const serverName =
+      matrix.transport.user_namespace.split(':').slice(1).join(':').replace(/\\?\)?$/, '') ||
+      new URL(matrix.transport.homeserver).hostname
+    const asUserId = `@${matrix.transport.sender_localpart}:${serverName}`
     const transport = createMatrixTransport({
       agents: registry,
       approvals,
@@ -191,6 +198,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       bindings,
       hsToken: matrix.transport.hs_token,
       adminUserId: opts.adminUserId,
+      botUserId: asUserId,
       media: mediaClient,
     })
     const requestedPort = matrix.transport.port ?? 9000
@@ -199,14 +207,6 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     // events back to host.docker.internal:<port>.
     server = serve({ fetch: transport.app.fetch, port: requestedPort, hostname: '0.0.0.0' })
     port = await listenAsync(server)
-
-    // user_namespace is a regex like `@.*:localhost`; the part after the last
-    // `:` is the homeserver's server_name. Fall back to the homeserver URL's
-    // host if the namespace shape is unexpected.
-    const serverName =
-      matrix.transport.user_namespace.split(':').slice(1).join(':').replace(/\\?\)?$/, '') ||
-      new URL(matrix.transport.homeserver).hostname
-    const asUserId = `@${matrix.transport.sender_localpart}:${serverName}`
     const spaceLocalpart = matrix.transport.space ?? 'dev'
     const adminUserIds = opts.adminUserId ? [opts.adminUserId] : []
     let spaceRoomId: string | undefined
