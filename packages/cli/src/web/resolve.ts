@@ -23,17 +23,17 @@ export async function ensureWebRoot(opts: EnsureWebRootOptions): Promise<string>
 
   if (!opts.version) {
     throw new Error(
-      `No @zooid/zoon-web version pin (zooid.zoonWebVersion) in the cli package.json ` +
+      `No @zooid/web version pin (zooid.webVersion) in the cli package.json ` +
         `and no monorepo sibling build found.\n` +
         `Set ${ENV_OVERRIDE} to a built dist, or run from the monorepo.`,
     )
   }
-  opts.onProgress?.(`Fetching @zooid/zoon-web ${opts.version}…`)
+  opts.onProgress?.(`Fetching @zooid/web ${opts.version}…`)
   const fetchBundleFn = opts.fetchBundle ?? fetchWebBundle
   return fetchBundleFn({ version: opts.version, cacheDir: opts.cacheDir })
 }
 
-// Returns the path to the in-tree @zooid/zoon-web package (zoon/packages/web) if the
+// Returns the path to the in-tree @zooid/web package (zooid-clients/packages/web) if the
 // CLI is running from the monorepo source. Returns null when running from an
 // installed package (no sibling zoon/ tree).
 export function webSourcePackage(cliRoot: string): string | null {

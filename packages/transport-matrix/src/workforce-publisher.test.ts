@@ -36,7 +36,7 @@ describe('buildWorkforceRoster', () => {
 })
 
 describe('publishWorkforce', () => {
-  it('PUTs eco.zoon.workforce state event on the configured space', async () => {
+  it('PUTs dev.zooid.workforce state event on the configured space', async () => {
     const fetch = vi.fn(async () => new Response('{}', { status: 200 }))
     const client = new MatrixClient({
       homeserver: 'https://hs.zoon.local',
@@ -54,7 +54,7 @@ describe('publishWorkforce', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
     const [url, init] = fetch.mock.calls[0]!
     expect(url).toBe(
-      'https://hs.zoon.local/_matrix/client/v3/rooms/!space%3Azoon.local/state/eco.zoon.workforce/?user_id=%40zooid%3Azoon.local',
+      'https://hs.zoon.local/_matrix/client/v3/rooms/!space%3Azoon.local/state/dev.zooid.workforce/?user_id=%40zooid%3Azoon.local',
     )
     expect(init?.method).toBe('PUT')
     expect(init?.headers).toMatchObject({ Authorization: 'Bearer as-tok' })

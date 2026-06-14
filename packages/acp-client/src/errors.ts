@@ -16,7 +16,7 @@ export type ErrorCode =
 export interface Classified {
   code: ErrorCode
   transient: boolean
-  /** Verbatim ACP RequestError triple — forwarded into eco.zoon.error.acp_error. */
+  /** Verbatim ACP RequestError triple — forwarded into dev.zooid.error.acp_error. */
   acp_error?: { code: number; message: string; data?: unknown }
 }
 

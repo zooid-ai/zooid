@@ -316,7 +316,7 @@ describe('matrix transport /transactions', () => {
     expect(call.content).not.toHaveProperty('format')
   })
 
-  it('emits eco.zoon.approval_request when an approval is registered', async () => {
+  it('emits dev.zooid.approval_request when an approval is registered', async () => {
     const { transport, approvals, client } = makeTransport()
     await postTxn(transport.app, {
       events: [
@@ -343,18 +343,18 @@ describe('matrix transport /transactions', () => {
     await new Promise((r) => setImmediate(r))
     expect(client.sendCustomEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        eventType: 'eco.zoon.approval_request',
+        eventType: 'dev.zooid.approval_request',
         content: expect.objectContaining({ approval_id: 'a1' }),
       }),
     )
   })
 
-  it('resolves an approval when an eco.zoon.approval_response event arrives', async () => {
+  it('resolves an approval when an dev.zooid.approval_response event arrives', async () => {
     const { transport, approvals } = makeTransport()
     await postTxn(transport.app, {
       events: [
         {
-          type: 'eco.zoon.approval_response',
+          type: 'dev.zooid.approval_response',
           event_id: '$resp',
           room_id: '!r:example.com',
           sender: '@alice:example.com',
@@ -537,13 +537,13 @@ describe('thread implicit triggers', () => {
   })
 })
 
-describe('eco.zoon.session_reset', () => {
+describe('dev.zooid.session_reset', () => {
   it('ends the thread-keyed session when sent inside a thread', async () => {
     const { transport, agents } = makeTransport()
     await postTxn(transport.app, {
       events: [
         {
-          type: 'eco.zoon.session_reset',
+          type: 'dev.zooid.session_reset',
           event_id: '$reset',
           room_id: '!r:example.com',
           sender: '@alice:example.com',
@@ -561,7 +561,7 @@ describe('eco.zoon.session_reset', () => {
     await postTxn(transport.app, {
       events: [
         {
-          type: 'eco.zoon.session_reset',
+          type: 'dev.zooid.session_reset',
           event_id: '$reset-room',
           room_id: '!r:example.com',
           sender: '@alice:example.com',
@@ -604,7 +604,7 @@ describe('eco.zoon.session_reset', () => {
     await postTxn(transport.app, {
       events: [
         {
-          type: 'eco.zoon.session_reset',
+          type: 'dev.zooid.session_reset',
           event_id: '$reset',
           room_id: '!r:example.com',
           sender: '@alice:example.com',
@@ -846,7 +846,7 @@ describe('tool-call and plan event bridging', () => {
     return { transport, agents, client, finishPrompt, sessionId: 'sess-$e6' }
   }
 
-  it('forwards tool_call as eco.zoon.tool_call in-room under the agent bot user', async () => {
+  it('forwards tool_call as dev.zooid.tool_call in-room under the agent bot user', async () => {
     const { agents, client, finishPrompt, sessionId } = await startTurnAndGetSession()
     await (agents.onEvent as (n: string, e: unknown) => unknown)('architect', {
       type: 'tool_call',
@@ -861,7 +861,7 @@ describe('tool-call and plan event bridging', () => {
       expect.objectContaining({
         roomId: '!r:example.com',
         asUserId: '@architect:example.com',
-        eventType: 'eco.zoon.tool_call',
+        eventType: 'dev.zooid.tool_call',
         content: expect.objectContaining({
           session_id: sessionId,
           tool_call_id: 'tc-1',
@@ -875,7 +875,7 @@ describe('tool-call and plan event bridging', () => {
     await settleTurn()
   })
 
-  it('forwards tool_call_update as eco.zoon.tool_call_update', async () => {
+  it('forwards tool_call_update as dev.zooid.tool_call_update', async () => {
     const { agents, client, finishPrompt, sessionId } = await startTurnAndGetSession()
     await (agents.onEvent as (n: string, e: unknown) => unknown)('architect', {
       type: 'tool_call_update',
@@ -885,14 +885,14 @@ describe('tool-call and plan event bridging', () => {
     })
     await settleTurn()
     const call = client.sendCustomEvent.mock.calls.find(
-      ([arg]) => (arg as { eventType: string }).eventType === 'eco.zoon.tool_call_update',
+      ([arg]) => (arg as { eventType: string }).eventType === 'dev.zooid.tool_call_update',
     )
     expect(call).toBeDefined()
     finishPrompt()
     await settleTurn()
   })
 
-  it('forwards plan as eco.zoon.plan', async () => {
+  it('forwards plan as dev.zooid.plan', async () => {
     const { agents, client, finishPrompt, sessionId } = await startTurnAndGetSession()
     await (agents.onEvent as (n: string, e: unknown) => unknown)('architect', {
       type: 'plan',
@@ -901,7 +901,7 @@ describe('tool-call and plan event bridging', () => {
     })
     await settleTurn()
     const call = client.sendCustomEvent.mock.calls.find(
-      ([arg]) => (arg as { eventType: string }).eventType === 'eco.zoon.plan',
+      ([arg]) => (arg as { eventType: string }).eventType === 'dev.zooid.plan',
     )
     expect(call).toBeDefined()
     finishPrompt()
@@ -945,7 +945,7 @@ describe('tool-call and plan event bridging', () => {
 
     const call = client.sendCustomEvent.mock.calls.find(
       ([arg]) =>
-        (arg as { eventType: string }).eventType === 'eco.zoon.available_commands_update',
+        (arg as { eventType: string }).eventType === 'dev.zooid.available_commands_update',
     )
     expect(call).toBeDefined()
     expect((call![0] as { content: Record<string, unknown> }).content).toMatchObject({
@@ -985,7 +985,7 @@ describe('tool-call and plan event bridging', () => {
     })
     await settleTurn()
     const call = client.sendCustomEvent.mock.calls.find(
-      ([arg]) => (arg as { eventType: string }).eventType === 'eco.zoon.tool_call',
+      ([arg]) => (arg as { eventType: string }).eventType === 'dev.zooid.tool_call',
     )
     expect((call?.[0] as { content: Record<string, unknown> }).content['m.relates_to']).toEqual({
       rel_type: 'm.thread',
@@ -1162,7 +1162,7 @@ describe('agent_message_chunk message-boundary buffering', () => {
 
     expect(sentBodies(client)).toEqual(['Sure, making a list.', 'Working through them.'])
     const planIdx = client.sendCustomEvent.mock.calls.findIndex(
-      ([arg]) => (arg as { eventType: string }).eventType === 'eco.zoon.plan',
+      ([arg]) => (arg as { eventType: string }).eventType === 'dev.zooid.plan',
     )
     expect(planIdx).toBeGreaterThanOrEqual(0)
     // Order across both mocks: msg1 → plan → msg2.
@@ -1174,7 +1174,7 @@ describe('agent_message_chunk message-boundary buffering', () => {
   })
 })
 
-describe('eco.zoon.interrupt handling', () => {
+describe('dev.zooid.interrupt handling', () => {
   it('dispatches cancelSession(agent.name, sessionId) for an interrupt that targets a tracked session', async () => {
     const { transport, agents, finishPrompt } = makeTransport()
     await postTxn(transport.app, {
@@ -1194,7 +1194,7 @@ describe('eco.zoon.interrupt handling', () => {
     await postTxn(transport.app, {
       events: [
         {
-          type: 'eco.zoon.interrupt',
+          type: 'dev.zooid.interrupt',
           event_id: '$int',
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
@@ -1226,7 +1226,7 @@ describe('eco.zoon.interrupt handling', () => {
     await postTxn(transport.app, {
       events: [
         {
-          type: 'eco.zoon.interrupt',
+          type: 'dev.zooid.interrupt',
           event_id: '$int2',
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
@@ -1245,7 +1245,7 @@ describe('eco.zoon.interrupt handling', () => {
     await postTxn(transport.app, {
       events: [
         {
-          type: 'eco.zoon.interrupt',
+          type: 'dev.zooid.interrupt',
           event_id: '$int3',
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
@@ -1276,7 +1276,7 @@ describe('eco.zoon.interrupt handling', () => {
     await postTxn(transport.app, {
       events: [
         {
-          type: 'eco.zoon.interrupt',
+          type: 'dev.zooid.interrupt',
           event_id: '$intT',
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
@@ -1311,7 +1311,7 @@ describe('eco.zoon.interrupt handling', () => {
     const interrupt = (id: string) => ({
       events: [
         {
-          type: 'eco.zoon.interrupt',
+          type: 'dev.zooid.interrupt',
           event_id: id,
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
@@ -1334,7 +1334,7 @@ describe('eco.zoon.interrupt handling', () => {
       {
         events: [
           {
-            type: 'eco.zoon.interrupt',
+            type: 'dev.zooid.interrupt',
             event_id: '$bad',
             origin_server_ts: Date.now(),
             room_id: '!r:example.com',
@@ -1545,7 +1545,7 @@ describe('inbound media', () => {
     expect((content[0] as { type: string }).type).toBe('resource_link')
   })
 
-  it('emits eco.zoon.error (code media_failed) when download fails, still runs the turn text-only', async () => {
+  it('emits dev.zooid.error (code media_failed) when download fails, still runs the turn text-only', async () => {
     const media = fakeMedia()
     media.download.mockRejectedValueOnce(new Error('download boom'))
     const { transport, agents, client } = makeMediaTransport({ media })
@@ -1564,7 +1564,7 @@ describe('inbound media', () => {
 
     expect(client.sendCustomEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        eventType: 'eco.zoon.error',
+        eventType: 'dev.zooid.error',
         content: expect.objectContaining({ code: 'media_failed' }),
       }),
     )

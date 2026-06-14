@@ -19,7 +19,7 @@ function makeSibling(rootDir: string): { cliRoot: string; webDist: string } {
   const webPkg = join(rootDir, 'zoon', 'packages', 'web')
   const webDist = join(webPkg, 'dist')
   mkdirSync(webDist, { recursive: true })
-  writeFileSync(join(webPkg, 'package.json'), '{"name":"@zooid/zoon-web"}')
+  writeFileSync(join(webPkg, 'package.json'), '{"name":"@zooid/web"}')
   writeFileSync(join(webDist, 'index.html'), '<html/>')
   return { cliRoot, webDist }
 }
@@ -62,12 +62,12 @@ describe('ensureWebRoot', () => {
     mkdirSync(cliRoot, { recursive: true })
     await expect(
       ensureWebRoot({ cliRoot, cacheDir: join(root, 'cache'), version: undefined, fetchBundle: vi.fn() }),
-    ).rejects.toThrow(/zoonWebVersion/)
+    ).rejects.toThrow(/webVersion/)
   })
 })
 
 describe('webSourcePackage', () => {
-  it('returns the source package dir when sibling zoon/packages/web exists', () => {
+  it('returns the source package dir when sibling zooid-clients/packages/web exists', () => {
     const { cliRoot } = makeSibling(root)
     expect(webSourcePackage(cliRoot)).toBe(join(root, 'zoon', 'packages', 'web'))
   })

@@ -9,14 +9,14 @@ function registryFetch(opts: { tgz: Buffer; integrity: string; version?: string 
   const version = opts.version ?? '0.1.0'
   return vi.fn(async (url: string | URL) => {
     const u = String(url)
-    if (u === 'https://registry.npmjs.org/@zooid/zoon-web') {
+    if (u === 'https://registry.npmjs.org/@zooid/web') {
       return new Response(
         JSON.stringify({
           'dist-tags': { latest: version },
           versions: {
             [version]: {
               dist: {
-                tarball: `https://registry.npmjs.org/@zooid/zoon-web/-/zoon-web-${version}.tgz`,
+                tarball: `https://registry.npmjs.org/@zooid/web/-/web-${version}.tgz`,
                 integrity: opts.integrity,
               },
             },
@@ -25,7 +25,7 @@ function registryFetch(opts: { tgz: Buffer; integrity: string; version?: string 
         { status: 200 },
       )
     }
-    if (u.endsWith(`/zoon-web-${version}.tgz`)) {
+    if (u.endsWith(`/web-${version}.tgz`)) {
       return new Response(new Uint8Array(opts.tgz), { status: 200 })
     }
     return new Response('not found', { status: 404 })
@@ -86,7 +86,7 @@ describe('fetchWebBundle', () => {
       const { tgz, integrity } = makeBundleTgz()
       const f = registryFetch({ tgz, integrity, version: '0.0.9' })
       await expect(fetchWebBundle({ version: '0.1.0', cacheDir, fetch: f })).rejects.toThrow(
-        /@zooid\/zoon-web@0\.1\.0/,
+        /@zooid\/web@0\.1\.0/,
       )
     } finally {
       teardown()

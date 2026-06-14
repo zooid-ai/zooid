@@ -253,7 +253,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
           asUserId,
           getAgents: () => bindings,
         })
-        console.log(`[matrix] published eco.zoon.workforce (${bindings.length} agents)`)
+        console.log(`[matrix] published dev.zooid.workforce (${bindings.length} agents)`)
         void publisher
       } catch (err) {
         console.warn('[matrix] workforce roster publication failed:', err)

@@ -67,8 +67,8 @@ export interface DevFlags {
   adminPassword: string
   installSignalHandlers?: boolean
   foreground?: boolean
-  // Run `vite build --watch` against a @zooid/zoon-web package and serve its dist.
-  // true = auto-detect (sibling ../zoon/packages/web or in-monorepo); string = explicit path.
+  // Run `vite build --watch` against a @zooid/web package and serve its dist.
+  // true = auto-detect (sibling ../zooid-clients/packages/web or in-monorepo); string = explicit path.
   watchWeb?: string | boolean
 }
 
@@ -217,17 +217,17 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
       ...(flags.watchWeb
         ? [
             {
-              title: 'Start @zooid/zoon-web watcher (vite build --watch)',
+              title: 'Start @zooid/web watcher (vite build --watch)',
               task: async (): Promise<void> => {
                 const pkgDir =
                   typeof flags.watchWeb === 'string'
                     ? resolve(flags.watchWeb)
                     : webSourcePackage(CLI_ROOT)
                 if (!pkgDir) {
-                  const defaultPath = dirname(dirname(dirname(CLI_ROOT))) + '/zoon/packages/web'
+                  const defaultPath = dirname(dirname(dirname(CLI_ROOT))) + '/zooid-clients/packages/web'
                   throw new Error(
-                    `--watch-web: @zooid/zoon-web not found at ${defaultPath}.\n` +
-                      `Pass an explicit path: --watch-web=/path/to/zoon/packages/web`,
+                    `--watch-web: @zooid/web not found at ${defaultPath}.\n` +
+                      `Pass an explicit path: --watch-web=/path/to/zooid-clients/packages/web`,
                   )
                 }
                 ctx.webWatch = await startWebWatch({ webPackageDir: pkgDir })
@@ -236,7 +236,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
           ]
         : []),
       {
-        title: `Serve @zooid/zoon-web on http://localhost:${flags.uiPort}`,
+        title: `Serve @zooid/web on http://localhost:${flags.uiPort}`,
         task: async (_, t) => {
           const webRoot =
             ctx.webWatch?.distPath ??
@@ -304,7 +304,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
       `  ${chalk.cyan('admin user:')} ${flags.adminUser} / ${flags.adminPassword}`,
       `  ${chalk.cyan('data dir:')} ${layout.dataRoot}`,
       ...(ctx.webWatch
-        ? [`  ${chalk.cyan('web watcher:')} live (vite build --watch on @zooid/zoon-web)`]
+        ? [`  ${chalk.cyan('web watcher:')} live (vite build --watch on @zooid/web)`]
         : []),
       '',
       chalk.dim('Press Ctrl-C to stop.'),

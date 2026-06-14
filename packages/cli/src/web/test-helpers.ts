@@ -6,7 +6,7 @@ import * as tar from 'tar'
 
 export function makeBundleTgz(
   files: Record<string, string> = {
-    'package/package.json': '{"name":"@zooid/zoon-web"}',
+    'package/package.json': '{"name":"@zooid/web"}',
     'package/dist/index.html': '<html>zoon</html>',
     'package/dist/assets/app.js': '// app',
   },

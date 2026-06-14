@@ -48,7 +48,7 @@ export class BotPool {
         console.warn(`[matrix] setDisplayName(${a.userId}) failed: ${(err as Error).message}`)
       }
       // Make each agent a member of the workforce space. That covers two
-      // things at once: the eco.zoon.workforce roster is now backed by
+      // things at once: the dev.zooid.workforce roster is now backed by
       // actual space membership (so the Zoon client's member autocomplete
       // works across rooms), and every restricted child room's allow rule
       // is satisfied without per-room invites.

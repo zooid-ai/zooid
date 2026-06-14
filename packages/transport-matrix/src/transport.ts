@@ -180,7 +180,7 @@ async function sendMediaError(
     .sendCustomEvent({
       roomId: ctx.roomId,
       asUserId: ctx.agent.userId,
-      eventType: 'eco.zoon.error',
+      eventType: 'dev.zooid.error',
       content: toErrorBody(
         {
           kind: 'error' as const,
@@ -194,7 +194,7 @@ async function sendMediaError(
         ctx.threadRoot,
       ),
     })
-    .catch((e) => console.warn(`[matrix:${ctx.agent.name}] eco.zoon.error send failed:`, e))
+    .catch((e) => console.warn(`[matrix:${ctx.agent.name}] dev.zooid.error send failed:`, e))
 }
 const SEEN_EVENT_CAP = 5_000
 
@@ -406,12 +406,12 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
 
     const eventType =
       event.type === 'tool_call'
-        ? 'eco.zoon.tool_call'
+        ? 'dev.zooid.tool_call'
         : event.type === 'tool_call_update'
-          ? 'eco.zoon.tool_call_update'
+          ? 'dev.zooid.tool_call_update'
           : event.type === 'available_commands'
-            ? 'eco.zoon.available_commands_update'
-            : 'eco.zoon.plan'
+            ? 'dev.zooid.available_commands_update'
+            : 'dev.zooid.plan'
     const body =
       event.type === 'tool_call'
         ? toToolCallBody(event)
@@ -460,7 +460,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     void client.sendCustomEvent({
       roomId: ctx.roomId,
       asUserId: ctx.agent.userId,
-      eventType: 'eco.zoon.approval_request',
+      eventType: 'dev.zooid.approval_request',
       content,
     })
   })
@@ -523,7 +523,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         }
         continue
       }
-      if (evt.type === 'eco.zoon.session_reset') {
+      if (evt.type === 'dev.zooid.session_reset') {
         // Spec § /clear: room-scope reset is unsupported. Only thread-scoped
         // resets carry a thread relation; drop bare room-level resets silently.
         const relates = evt.content?.['m.relates_to'] as
@@ -532,10 +532,10 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         const threadRoot =
           relates?.rel_type === 'm.thread' && relates.event_id ? relates.event_id : undefined
         if (!threadRoot) {
-          console.log('[matrix] dropping eco.zoon.session_reset without thread relation')
+          console.log('[matrix] dropping dev.zooid.session_reset without thread relation')
           continue
         }
-        console.log(`[matrix] inbound eco.zoon.session_reset in ${evt.room_id} thread=${threadRoot}`)
+        console.log(`[matrix] inbound dev.zooid.session_reset in ${evt.room_id} thread=${threadRoot}`)
         for (const a of bindings) {
           agents.endSession(a.name, threadRoot)
         }
@@ -545,7 +545,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         // the most-recently-posting agent under the same sessionKey.
         continue
       }
-      if (evt.type === 'eco.zoon.interrupt') {
+      if (evt.type === 'dev.zooid.interrupt') {
         const content = (evt.content ?? {}) as { session_id?: string; reason?: string }
         // Thread-relation form (client-friendly): /interrupt in a thread sends
         // an empty event with `m.relates_to: thread/<root>`. Cancel every
@@ -575,7 +575,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         }
         // Legacy form: explicit session_id in content.
         if (!content.session_id) {
-          console.warn(`[matrix] eco.zoon.interrupt missing session_id (event_id=${evt.event_id})`)
+          console.warn(`[matrix] dev.zooid.interrupt missing session_id (event_id=${evt.event_id})`)
           continue
         }
         const ctx = sessions.get(content.session_id)
@@ -591,7 +591,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         })
         continue
       }
-      if (evt.type === 'eco.zoon.approval_response') {
+      if (evt.type === 'dev.zooid.approval_response') {
         const content = (evt.content ?? {}) as {
           approval_id?: string
           session_id?: string
@@ -715,10 +715,10 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
               .sendCustomEvent({
                 roomId: evt.room_id,
                 asUserId: a.userId,
-                eventType: 'eco.zoon.error',
+                eventType: 'dev.zooid.error',
                 content: body,
               })
-              .catch((e) => console.warn(`[matrix:${a.name}] eco.zoon.error send failed:`, e))
+              .catch((e) => console.warn(`[matrix:${a.name}] dev.zooid.error send failed:`, e))
           })
       }
     }

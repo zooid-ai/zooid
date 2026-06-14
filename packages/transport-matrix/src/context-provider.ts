@@ -43,7 +43,7 @@ export class MatrixContextProvider implements TransportContextProvider {
 
   async getRoomHistory(channelId: string, hopts: HistoryOptions): Promise<HistoryPage> {
     // Server-side filter: only `m.room.message` events. Without this we'd
-    // burn the page budget on reactions, `eco.zoon.*` custom events, typing
+    // burn the page budget on reactions, `dev.zooid.*` custom events, typing
     // notifications, etc., and routinely return empty pages with a stale
     // `has_more` cursor.
     const { chunk, end } = await this.opts.client.fetchRoomMessages({

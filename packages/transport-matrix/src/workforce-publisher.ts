@@ -28,7 +28,7 @@ export async function publishWorkforce(opts: PublishOpts): Promise<void> {
   await opts.client.sendStateEvent({
     roomId: opts.spaceRoomId,
     asUserId: opts.asUserId,
-    eventType: 'eco.zoon.workforce',
+    eventType: 'dev.zooid.workforce',
     stateKey: '',
     content: buildWorkforceRoster(opts.agents) as unknown as Record<string, unknown>,
   })

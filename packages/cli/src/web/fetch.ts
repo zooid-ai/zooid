@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import * as tar from 'tar'
 
-const PKG = '@zooid/zoon-web'
+const PKG = '@zooid/web'
 const DEFAULT_REGISTRY = 'https://registry.npmjs.org'
 
 export interface FetchWebBundleOptions {
@@ -14,7 +14,7 @@ export interface FetchWebBundleOptions {
 }
 
 /**
- * Ensure <cacheDir>/<version> holds the extracted dist/ of @zooid/zoon-web.
+ * Ensure <cacheDir>/<version> holds the extracted dist/ of @zooid/web.
  * Atomic: extracts into a temp dir and renames, so a crash never leaves a
  * half-populated version dir. A populated version dir (index.html present)
  * is the completion marker.

@@ -10,26 +10,26 @@ import { makeBundleTgz } from './test-helpers.js'
 let server: Server
 let base = ''
 const { tgz, integrity } = makeBundleTgz({
-  'package/package.json': '{"name":"@zooid/zoon-web"}',
+  'package/package.json': '{"name":"@zooid/web"}',
   'package/dist/index.html': '<html>integration</html>',
 })
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    if (req.url === '/@zooid/zoon-web') {
+    if (req.url === '/@zooid/web') {
       res.setHeader('content-type', 'application/json')
       res.end(
         JSON.stringify({
           versions: {
             '0.1.0': {
-              dist: { tarball: `${base}/@zooid/zoon-web/-/zoon-web-0.1.0.tgz`, integrity },
+              dist: { tarball: `${base}/@zooid/web/-/web-0.1.0.tgz`, integrity },
             },
           },
         }),
       )
       return
     }
-    if (req.url === '/@zooid/zoon-web/-/zoon-web-0.1.0.tgz') {
+    if (req.url === '/@zooid/web/-/web-0.1.0.tgz') {
       res.setHeader('content-type', 'application/octet-stream')
       res.end(tgz)
       return

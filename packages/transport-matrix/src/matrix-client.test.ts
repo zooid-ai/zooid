@@ -287,7 +287,7 @@ describe('MatrixClient', () => {
 
   it('sends a custom event type when content type is set', async () => {
     const fetch = fakeFetch(async ({ url, init }) => {
-      expect(url).toMatch(/\/send\/eco\.zoon\.approval_request\//)
+      expect(url).toMatch(/\/send\/dev\.zooid\.approval_request\//)
       const body = JSON.parse(init.body as string)
       expect(body.approval_id).toBe('a1')
       return new Response(JSON.stringify({ event_id: '$x' }), { status: 200 })
@@ -300,7 +300,7 @@ describe('MatrixClient', () => {
     await client.sendCustomEvent({
       roomId: '!r:example.com',
       asUserId: '@architect:example.com',
-      eventType: 'eco.zoon.approval_request',
+      eventType: 'dev.zooid.approval_request',
       content: { approval_id: 'a1', description: 'Run: git push' },
     })
   })

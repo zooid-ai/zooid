@@ -4,9 +4,9 @@ import { join } from 'node:path'
 export function readZoonWebPin(cliRoot: string): string | undefined {
   try {
     const pkg = JSON.parse(readFileSync(join(cliRoot, 'package.json'), 'utf8')) as {
-      zooid?: { zoonWebVersion?: string }
+      zooid?: { webVersion?: string }
     }
-    return pkg.zooid?.zoonWebVersion
+    return pkg.zooid?.webVersion
   } catch {
     return undefined
   }

@@ -34,7 +34,7 @@ Boot the local stack:
 zooid dev
 ```
 
-`zooid dev` starts a Tuwunel Matrix homeserver in a container, generates the Application Service registration, registers an `admin:admin` user, runs the daemon, and serves the [Zoon](https://github.com/zooid-ai/zoon) web client.
+`zooid dev` starts a Tuwunel Matrix homeserver in a container, generates the Application Service registration, registers an `admin:admin` user, runs the daemon, and serves the [Zooid web client](https://github.com/zooid-ai/clients).
 
 Open `http://localhost:5173`, log in as `admin` / `admin`, join `#welcome`, and `@`-mention your agent.
 
@@ -48,7 +48,7 @@ Every layer is open and replaceable.
 | -------- | --------- | ------------- | --------------------------------------------- |
 | Protocol | Matrix    | Open standard | Adopted by Germany, France, Switzerland, NATO |
 | Server   | Tuwunel   | Apache-2.0    | Swiss government in production                |
-| Client   | Zoon      | Apache-2.0    | Built on `matrix-js-sdk`                      |
+| Client   | Zooid web | Apache-2.0    | Built on `matrix-js-sdk`                      |
 | Runtime  | **Zooid** | MIT           | This project                                  |
 
 ## Agent images

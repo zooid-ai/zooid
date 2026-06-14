@@ -9,10 +9,10 @@ beforeEach(() => (dir = mkdtempSync(join(tmpdir(), 'zooid-pin-'))))
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 describe('readZoonWebPin', () => {
-  it('reads zooid.zoonWebVersion from the cli package.json', () => {
+  it('reads zooid.webVersion from the cli package.json', () => {
     writeFileSync(
       join(dir, 'package.json'),
-      JSON.stringify({ name: 'zooid', zooid: { zoonWebVersion: '0.1.0' } }),
+      JSON.stringify({ name: 'zooid', zooid: { webVersion: '0.1.0' } }),
     )
     expect(readZoonWebPin(dir)).toBe('0.1.0')
   })
