@@ -254,6 +254,65 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   // Idempotency: appservice transactions are retried on 4xx/5xx/timeout, and
   // the same event_id can arrive twice. Skip ones we've already taken.
   const seenEventIds = new Set<string>()
+  // Messages flushed per session this turn. Lets the drain loop tell "stream
+  // not started yet" (0 flushes, empty buffer → keep waiting) from "turn done,
+  // last message already flushed mid-stream" (>0 flushes, empty buffer → stop).
+  const flushedCounts = new Map<string, number>()
+
+  // Build the m.text content for a chunk of assistant prose, attaching a
+  // formatted_body only when the HTML render adds rich text the plain body
+  // can't carry (marked wraps plain prose in <p>…</p>; skip that — most
+  // clients render `body` better than a stripped re-encode).
+  const buildTextContent = (
+    text: string,
+  ): { msgtype: string; body: string; [k: string]: unknown } => {
+    const content: { msgtype: string; body: string; [k: string]: unknown } = {
+      msgtype: 'm.text',
+      body: text,
+    }
+    const html = toMatrixHtml(text)
+    if (html) {
+      const escapedPlain =
+        '<p>' +
+        text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
+        '</p>'
+      const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
+      if (norm(html) !== norm(escapedPlain)) {
+        content.format = 'org.matrix.custom.html'
+        content.formatted_body = html
+      }
+    }
+    return content
+  }
+
+  // Flush a session's buffered assistant text as its own Matrix message and
+  // clear the buffer. No-op on an empty buffer. The send is chained onto
+  // sendQueue so it orders correctly against tool_call/plan events from the
+  // same turn. The buffer is cleared synchronously (before the first await),
+  // so a chunk for the *next* message that arrives during the send starts
+  // fresh. Returns true when a message was enqueued.
+  const flushBuffer = (sessionId: string): boolean => {
+    const ctx = sessions.get(sessionId)
+    const text = buffers.get(sessionId) ?? ''
+    if (!ctx || text.length === 0) return false
+    buffers.set(sessionId, '')
+    flushedCounts.set(sessionId, (flushedCounts.get(sessionId) ?? 0) + 1)
+    const content = buildTextContent(text)
+    const tail = (sendQueue.get(sessionId) ?? Promise.resolve()).then(async () => {
+      try {
+        await client.sendMessage({
+          roomId: ctx.roomId,
+          asUserId: ctx.agent.userId,
+          content,
+          threadRoot: ctx.threadRoot,
+        })
+      } catch (err) {
+        console.warn(`[matrix:${ctx.agent.name}] sendMessage flush failed:`, err)
+      }
+    })
+    sendQueue.set(sessionId, tail)
+    return true
+  }
 
   agents.onEvent = async (name, event: AgentEvent) => {
     const ctx = sessions.get(event.sessionId)
@@ -265,27 +324,29 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     if (event.type === 'agent_message_chunk') {
       const block = event.content as { type?: string; text?: string; data?: string; mimeType?: string }
       if (block.type === 'text' && typeof block.text === 'string') {
-        const current = buffers.get(event.sessionId) ?? ''
-        // Within a message, tokens carry their own leading spaces, so we
-        // concatenate raw. Two signals start a *new* message block that must not
-        // run together with the previous text:
-        //  - an empty chunk (some agents emit one between blocks, e.g. after a
-        //    tool call), or
-        //  - a change in messageId — opencode streams each assistant message
-        //    under its own id and emits no delimiter chunk between them, and the
-        //    first token of the new message has no leading space, so without
-        //    this they weld together ("…one.🅿️").
+        // A change in ACP messageId marks the previous assistant message as
+        // complete. opencode streams each assistant message under its own id
+        // with no delimiter chunk between them, so a change here is the only
+        // boundary signal. Flush the previous message as its own Matrix
+        // message — each ACP message lands separately (and interleaves with
+        // tool_call/plan events) instead of welding into one turn-end blob.
         const prevMessageId = bufferMessageIds.get(event.sessionId)
         const messageChanged =
           event.messageId !== undefined &&
           prevMessageId !== undefined &&
           event.messageId !== prevMessageId
-        const needsBreak =
-          current.length > 0 && (block.text === '' || messageChanged)
-        const prefix = needsBreak ? '\n\n' : ''
-        buffers.set(event.sessionId, current + prefix + block.text)
         if (event.messageId !== undefined)
           bufferMessageIds.set(event.sessionId, event.messageId)
+        // flushBuffer clears the buffer synchronously, so the new message's
+        // text below starts fresh.
+        if (messageChanged) flushBuffer(event.sessionId)
+        // Within a single message, tokens carry their own leading spaces, so we
+        // concatenate raw. An empty chunk (some agents emit one between blocks,
+        // e.g. after a tool call within the same message) is a paragraph break.
+        const current = buffers.get(event.sessionId) ?? ''
+        const needsBreak = current.length > 0 && block.text === ''
+        const prefix = needsBreak ? '\n\n' : ''
+        buffers.set(event.sessionId, current + prefix + block.text)
       } else if (
         block.type === 'image' &&
         typeof block.data === 'string' &&
@@ -323,6 +384,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       }
       return
     }
+
+    // An out-of-band event (tool_call / tool_call_update / plan) after some
+    // buffered text means that assistant message is complete — flush it first
+    // so it lands before this event on the wire, preserving interleaving.
+    flushBuffer(event.sessionId)
 
     const eventType =
       event.type === 'tool_call'
@@ -672,6 +738,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     sessions.set(sessionId, { agent, roomId: evt.room_id, threadRoot })
     buffers.set(sessionId, '')
     bufferMessageIds.delete(sessionId)
+    flushedCounts.set(sessionId, 0)
 
     const roomId = evt.room_id
     const TYPING_TTL_MS = 30_000
@@ -739,44 +806,23 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       while (drainQuietMs > 0 && Date.now() - drainStart < drainMaxMs) {
         await delay(drainQuietMs)
         const next = buffers.get(sessionId) ?? ''
-        // Stop only when we have content AND it hasn't grown — i.e. the
-        // generation has actually started and is now done. An unchanged
-        // empty buffer means the stream hasn't started yet; keep waiting.
-        if (next === drained && next.length > 0) break
+        // Stop when the buffer is quiet (unchanged) and either it holds the
+        // final message to flush, or we already flushed a message this turn
+        // (so an empty, quiet buffer means the turn is genuinely done — the
+        // last message was flushed mid-stream). An unchanged *empty* buffer
+        // with nothing flushed yet means the stream hasn't started; keep
+        // waiting up to drainMaxMs.
+        if (next === drained && (next.length > 0 || (flushedCounts.get(sessionId) ?? 0) > 0))
+          break
         drained = next
       }
-      const text = buffers.get(sessionId) ?? ''
-      if (text.length > 0) {
-        const html = toMatrixHtml(text)
-        const content: { msgtype: string; body: string; [k: string]: unknown } = {
-          msgtype: 'm.text',
-          body: text,
-        }
-        // Only attach formatted_body when it adds rich-text the plain body
-        // can't carry. marked wraps plain prose in <p>…</p>; if that's all
-        // we'd add, skip — most clients render `body` better than a stripped
-        // re-encode.
-        if (html) {
-          const escapedPlain =
-            '<p>' +
-            text
-              .replace(/&/g, '&amp;')
-              .replace(/</g, '&lt;')
-              .replace(/>/g, '&gt;') +
-            '</p>'
-          const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
-          if (norm(html) !== norm(escapedPlain)) {
-            content.format = 'org.matrix.custom.html'
-            content.formatted_body = html
-          }
-        }
-        await client.sendMessage({
-          roomId: evt.room_id,
-          asUserId: agent.userId,
-          content,
-          threadRoot,                  // every reply threads, full stop
-        })
-      } else {
+      // Flush the final assistant message — the one with no following messageId
+      // change or out-of-band event to have triggered an earlier flush.
+      flushBuffer(sessionId)
+      // Wait for every queued send (mid-turn flushes, tool/plan events, final
+      // flush) to settle before tearing the session down.
+      await (sendQueue.get(sessionId) ?? Promise.resolve())
+      if ((flushedCounts.get(sessionId) ?? 0) === 0) {
         console.warn(
           `[matrix:${agent.name}] turn finished with empty buffer (session=${sessionId}); nothing sent to ${evt.room_id}`,
         )
@@ -787,6 +833,8 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       await safePresence('online')
       buffers.delete(sessionId)
       bufferMessageIds.delete(sessionId)
+      flushedCounts.delete(sessionId)
+      sendQueue.delete(sessionId)
     }
   }
 

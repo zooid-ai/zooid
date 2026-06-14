@@ -1036,17 +1036,23 @@ describe('agent_message_chunk message-boundary buffering', () => {
   const sentBody = (client: { sendMessage: { mock: { calls: unknown[][] } } }) =>
     (client.sendMessage.mock.calls[0]![0] as { content: { body: string } }).content.body
 
-  it('inserts a paragraph break when messageId changes between chunks (opencode run-on)', async () => {
-    // The exact production failure: opencode streams "…it." under one message id,
-    // then "Filed:" under a NEW id with no delimiter chunk. Without a break they
-    // weld into "it.Filed:".
+  const sentBodies = (client: { sendMessage: { mock: { calls: unknown[][] } } }) =>
+    client.sendMessage.mock.calls.map(
+      (c) => (c[0] as { content: { body: string } }).content.body,
+    )
+
+  it('flushes a separate Matrix message when messageId changes (opencode run-on)', async () => {
+    // opencode streams "…it." under one message id, then "Filed:" under a NEW
+    // id with no delimiter chunk. Each id is a distinct assistant message, so
+    // each lands as its own Matrix message rather than welding into "it.Filed:"
+    // (or being buffered into a single turn-end blob).
     const { agents, client, finishPrompt, sessionId } = await startTurn('$mid1')
     await emit(agents, sessionId, 'Let me file it.', 'msg_aaa')
     await emit(agents, sessionId, 'Filed: done', 'msg_bbb')
     finishPrompt()
     await settleTurn()
-    expect(client.sendMessage).toHaveBeenCalledTimes(1)
-    expect(sentBody(client)).toBe('Let me file it.\n\nFiled: done')
+    expect(client.sendMessage).toHaveBeenCalledTimes(2)
+    expect(sentBodies(client)).toEqual(['Let me file it.', 'Filed: done'])
   })
 
   it('does NOT break between chunks sharing a messageId (token streaming stays intact)', async () => {
@@ -1061,14 +1067,15 @@ describe('agent_message_chunk message-boundary buffering', () => {
     expect(sentBody(client)).toBe('Hello world.')
   })
 
-  it('breaks only once across a three-message run', async () => {
+  it('flushes each message of a three-message run separately', async () => {
     const { agents, client, finishPrompt, sessionId } = await startTurn('$mid3')
     await emit(agents, sessionId, 'one.', 'msg_a')
     await emit(agents, sessionId, 'two.', 'msg_b')
     await emit(agents, sessionId, 'three.', 'msg_c')
     finishPrompt()
     await settleTurn()
-    expect(sentBody(client)).toBe('one.\n\ntwo.\n\nthree.')
+    expect(client.sendMessage).toHaveBeenCalledTimes(3)
+    expect(sentBodies(client)).toEqual(['one.', 'two.', 'three.'])
   })
 
   it('still breaks on an empty delimiter chunk (agents that signal that way)', async () => {
@@ -1088,6 +1095,34 @@ describe('agent_message_chunk message-boundary buffering', () => {
     finishPrompt()
     await settleTurn()
     expect(sentBody(client)).toBe('Hello there')
+  })
+
+  it('flushes buffered text before a following plan event (interleaving)', async () => {
+    // A turn that alternates prose and plan updates: each prose message must
+    // land on the wire before the plan event that follows it, not be deferred
+    // to turn end (the bug — everything buffered, then one blob after N plans).
+    const { agents, client, finishPrompt, sessionId } = await startTurn('$mid6')
+    await emit(agents, sessionId, 'Sure, making a list.', 'msg_a')
+    await (agents.onEvent as (n: string, e: unknown) => unknown)('architect', {
+      type: 'plan',
+      sessionId,
+      entries: [{ content: 'Buy milk', status: 'pending' }],
+    })
+    await emit(agents, sessionId, 'Working through them.', 'msg_b')
+    finishPrompt()
+    await settleTurn()
+
+    expect(sentBodies(client)).toEqual(['Sure, making a list.', 'Working through them.'])
+    const planIdx = client.sendCustomEvent.mock.calls.findIndex(
+      ([arg]) => (arg as { eventType: string }).eventType === 'eco.zoon.plan',
+    )
+    expect(planIdx).toBeGreaterThanOrEqual(0)
+    // Order across both mocks: msg1 → plan → msg2.
+    const msg1 = client.sendMessage.mock.invocationCallOrder[0]!
+    const msg2 = client.sendMessage.mock.invocationCallOrder[1]!
+    const plan = client.sendCustomEvent.mock.invocationCallOrder[planIdx]!
+    expect(msg1).toBeLessThan(plan)
+    expect(plan).toBeLessThan(msg2)
   })
 })
 
