@@ -97,6 +97,27 @@ describe('acpUpdateToAgentEvent', () => {
     }
   })
 
+  it('maps available_commands_update to an available_commands event', () => {
+    const event = acpUpdateToAgentEvent({
+      sessionId: 's-1',
+      update: {
+        sessionUpdate: 'available_commands_update',
+        availableCommands: [
+          { name: 'plan', description: 'Switch to plan mode' },
+          { name: 'compact', description: 'Compact the context', input: null },
+        ],
+      } as never,
+    })
+    expect(event).toEqual<AgentEvent>({
+      type: 'available_commands',
+      sessionId: 's-1',
+      commands: [
+        { name: 'plan', description: 'Switch to plan mode' },
+        { name: 'compact', description: 'Compact the context' },
+      ],
+    })
+  })
+
   it('returns null for unknown update variants (forward-compat)', () => {
     const event = acpUpdateToAgentEvent({
       sessionId: 's-1',

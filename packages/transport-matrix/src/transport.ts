@@ -6,7 +6,7 @@ import { MatrixClient } from './matrix-client.js'
 import { BotPool } from './bot-pool.js'
 import { route, isMediaMsgtype, type AgentBinding, type ThreadState } from './router.js'
 import { stripMention, extractMentions } from './mentions.js'
-import { toToolCallBody, toUpdateBody, toPlanBody, toErrorBody } from './event-encoders.js'
+import { toToolCallBody, toUpdateBody, toPlanBody, toAvailableCommandsBody, toErrorBody } from './event-encoders.js'
 import { classify } from '@zooid/acp-client'
 import { toMatrixHtml } from './markdown-to-matrix-html.js'
 import {
@@ -395,13 +395,17 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         ? 'eco.zoon.tool_call'
         : event.type === 'tool_call_update'
           ? 'eco.zoon.tool_call_update'
-          : 'eco.zoon.plan'
+          : event.type === 'available_commands'
+            ? 'eco.zoon.available_commands_update'
+            : 'eco.zoon.plan'
     const body =
       event.type === 'tool_call'
         ? toToolCallBody(event)
         : event.type === 'tool_call_update'
           ? toUpdateBody(event)
-          : toPlanBody(event)
+          : event.type === 'available_commands'
+            ? toAvailableCommandsBody(event)
+            : toPlanBody(event)
     body['m.relates_to'] = { rel_type: 'm.thread', event_id: ctx.threadRoot }
     const tail = (sendQueue.get(event.sessionId) ?? Promise.resolve()).then(async () => {
       try {

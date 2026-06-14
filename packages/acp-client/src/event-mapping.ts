@@ -47,6 +47,17 @@ export function acpUpdateToAgentEvent(
       }
     case 'plan':
       return { type: 'plan', sessionId, entries: update.entries }
+    case 'available_commands_update': {
+      const u = update as { availableCommands?: Array<{ name: string; description: string }> }
+      return {
+        type: 'available_commands',
+        sessionId,
+        commands: (u.availableCommands ?? []).map((c) => ({
+          name: c.name,
+          description: c.description,
+        })),
+      }
+    }
     default:
       return null
   }

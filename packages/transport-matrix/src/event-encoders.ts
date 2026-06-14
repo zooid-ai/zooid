@@ -1,4 +1,5 @@
 import type {
+  AvailableCommandsEvent,
   PlanEvent,
   TapEvent,
   ToolCallEvent,
@@ -63,6 +64,18 @@ export function toPlanBody(evt: PlanEvent): Record<string, unknown> {
   return {
     session_id: evt.sessionId,
     entries: evt.entries,
+  }
+}
+
+export function toAvailableCommandsBody(
+  evt: AvailableCommandsEvent,
+): Record<string, unknown> {
+  return {
+    session_id: evt.sessionId,
+    available_commands: evt.commands.map((c) => ({
+      name: c.name,
+      description: c.description,
+    })),
   }
 }
 

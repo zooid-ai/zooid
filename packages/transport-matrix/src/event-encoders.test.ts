@@ -9,6 +9,7 @@ import {
   toUpdateBody,
   toPlanBody,
   toErrorBody,
+  toAvailableCommandsBody,
 } from './event-encoders.js'
 
 describe('toToolCallBody', () => {
@@ -120,6 +121,27 @@ describe('toPlanBody', () => {
     expect(toPlanBody(evt)).toEqual({
       session_id: 'sess-1',
       entries: evt.entries,
+    })
+  })
+})
+
+describe('toAvailableCommandsBody', () => {
+  it('encodes available_commands into the body ZNC021 decodes', () => {
+    expect(
+      toAvailableCommandsBody({
+        type: 'available_commands',
+        sessionId: 's-1',
+        commands: [
+          { name: 'plan', description: 'Switch to plan mode' },
+          { name: 'compact', description: 'Compact the context' },
+        ],
+      }),
+    ).toEqual({
+      session_id: 's-1',
+      available_commands: [
+        { name: 'plan', description: 'Switch to plan mode' },
+        { name: 'compact', description: 'Compact the context' },
+      ],
     })
   })
 })

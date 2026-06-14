@@ -60,6 +60,13 @@ export type AgentEvent =
   | ToolCallEvent
   | ToolCallUpdateEvent
   | PlanEvent
+  | AvailableCommandsEvent
+
+export interface AvailableCommandsEvent {
+  type: 'available_commands'
+  sessionId: string
+  commands: Array<{ name: string; description: string }>
+}
 
 export interface AgentMessageChunkEvent {
   type: 'agent_message_chunk'
