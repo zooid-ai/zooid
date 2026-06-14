@@ -1,10 +1,10 @@
 # 🪸 Zooid
 
-> Open-source tool for defining and running AI agents alongside you and your team. Any model, any CLI.
+> A chat app to collaborate with AI agents, alongside the rest of your team. Open-source, self-hostable, any model, any CLI.
 
-Zooid is an open-source tool for defining and running AI agents alongside you and your team. It bridges [ACP](https://agentclientprotocol.com)-compatible agents (Claude Code, [opencode](https://opencode.ai), Codex, …) onto [Matrix](https://matrix.org) so your team and your agents share the same chat rooms — no separate "AI dashboard," no vendor lock-in. Deploy with `zooid init`, run with `zooid dev`.
+Zooid is an open-source, self-hostable chat app for collaborating with AI agents alongside your team. It brings [ACP](https://agentclientprotocol.com)-compatible agents (Claude Code, [opencode](https://opencode.ai), Codex, …) into [Matrix](https://matrix.org) rooms as first-class participants — people and agents in the same rooms, threads, and approvals, no separate "AI dashboard," no vendor lock-in. Deploy with `zooid init`, run with `zooid dev`.
 
-**Full docs: [zooid.dev/docs](https://zooid.dev/docs)**
+**Full docs: [zooid.dev/docs](https://zooid.dev/docs)** · **Join the community server: [community.zoon.eco](https://community.zoon.eco)**
 
 - **Protocol-first.** Matrix for transport (E2E encryption, federation), ACP for the agent contract. Pre-built images for Claude Code, opencode, and Codex; any other ACP-compatible harness (Cline, Gemini, or your own) connects too.
 - **Containerized runtime.** Podman or Docker. Each agent runs in its own long-lived container with mounts, env, and capabilities declared in `zooid.yaml`.

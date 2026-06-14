@@ -1,7 +1,7 @@
 {
   "name": "zooid",
   "version": "0.8.0",
-  "description": "Open-source tool for defining and running AI agents alongside you and your team. Any model, any CLI.",
+  "description": "An open-source, self-hostable chat app for collaborating with AI agents alongside your team. Any model, any CLI.",
   "type": "module",
   "license": "MIT",
   "private": false,
@@ -25,7 +25,7 @@
     "access": "public"
   },
   "zooid": {
-    "webVersion": "0.1.0"
+    "webVersion": "0.7.0"
   },
   "engines": {
     "node": ">=22"
