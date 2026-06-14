@@ -1,5 +1,21 @@
 # zooid
 
+## 0.9.0
+
+### Minor Changes
+
+- Rename the Matrix wire-event prefix `eco.zoon.*` → `dev.zooid.*` (clean break, no dual-read) and switch the bundled web client to `@zooid/web` (the renamed Zooid web client, pinned at 0.7.0). The daemon emits `dev.zooid.*` events from the Matrix transport, ACP client, and daemon startup.
+
+### Patch Changes
+
+- @zooid/core@0.9.0
+- @zooid/acp-client@0.9.0
+- @zooid/context-mcp@0.9.0
+- @zooid/runtime-docker@0.9.0
+- @zooid/runtime-local@0.9.0
+- @zooid/transport-http@0.9.0
+- @zooid/transport-matrix@0.9.0
+
 ## 0.8.0
 
 ### Minor Changes

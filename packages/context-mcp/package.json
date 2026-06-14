@@ -1,6 +1,6 @@
 {
   "name": "@zooid/context-mcp",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Daemon-side stdio MCP server + per-spawn registry that exposes zooid_get_history / zooid_get_members / zooid_get_channel_info to ACP shims, backed by each transport's TransportContextProvider.",
   "type": "module",
   "license": "MIT",
