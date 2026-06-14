@@ -258,6 +258,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   // not started yet" (0 flushes, empty buffer → keep waiting) from "turn done,
   // last message already flushed mid-stream" (>0 flushes, empty buffer → stop).
   const flushedCounts = new Map<string, number>()
+  // Commands a shim advertises during session load/new — i.e. before runTurn
+  // registers the session ctx (sessions.set). Stashed here keyed by sessionId
+  // and replayed once the ctx exists, so `available_commands_update` (which is
+  // only ever emitted at session establishment, never mid-turn) isn't dropped.
+  const pendingCommands = new Map<string, AgentEvent>()
 
   // Build the m.text content for a chunk of assistant prose, attaching a
   // formatted_body only when the HTML render adds rich text the plain body
@@ -317,7 +322,16 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   agents.onEvent = async (name, event: AgentEvent) => {
     const ctx = sessions.get(event.sessionId)
     if (!ctx) {
-      console.warn(`[matrix:${name}] no session ctx for ${event.sessionId}`)
+      // available_commands_update is advertised during ensureSession (session
+      // load/new), before runTurn calls sessions.set — so the ctx isn't there
+      // yet. Stash the latest roster and replay it once runTurn registers the
+      // ctx. Other event types arriving without a ctx are genuinely orphaned
+      // (e.g. replayed history for a thread we're not handling) — drop them.
+      if (event.type === 'available_commands') {
+        pendingCommands.set(event.sessionId, event)
+      } else {
+        console.warn(`[matrix:${name}] no session ctx for ${event.sessionId}`)
+      }
       return
     }
 
@@ -743,6 +757,14 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     buffers.set(sessionId, '')
     bufferMessageIds.delete(sessionId)
     flushedCounts.set(sessionId, 0)
+    // Commands the shim advertised during ensureSession (session load/new)
+    // arrived before the ctx above existed and were stashed — replay the latest
+    // now that the session is fully registered, so the palette actually fills.
+    const stashedCommands = pendingCommands.get(sessionId)
+    if (stashedCommands) {
+      pendingCommands.delete(sessionId)
+      void agents.onEvent?.(agent.name, stashedCommands)
+    }
 
     const roomId = evt.room_id
     const TYPING_TTL_MS = 30_000

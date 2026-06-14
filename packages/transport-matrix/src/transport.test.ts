@@ -908,6 +908,54 @@ describe('tool-call and plan event bridging', () => {
     await settleTurn()
   })
 
+  it('replays available_commands advertised during ensureSession (before the session ctx exists)', async () => {
+    // Regression (ZOD040 ctx race): shims advertise commands during session
+    // load/new — i.e. inside ensureSession, BEFORE runTurn registers the ctx.
+    // Without buffer-and-replay the event hits onEvent with no ctx and is
+    // dropped, so the command palette never fills. available_commands is only
+    // ever emitted at session establishment, so this is its ONLY chance.
+    const { transport, agents, client, finishPrompt } = makeTransport()
+    agents.ensureSession.mockImplementation(async (_name: string, threadId: string) => {
+      const sessionId = `sess-${threadId}`
+      await (agents.onEvent as (n: string, e: unknown) => unknown)('architect', {
+        type: 'available_commands',
+        sessionId,
+        commands: [{ name: 'compact', description: 'Compact the context' }],
+      })
+      return sessionId
+    })
+
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$e7',
+          origin_server_ts: Date.now(),
+          room_id: '!r:example.com',
+          sender: '@user:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+
+    const call = client.sendCustomEvent.mock.calls.find(
+      ([arg]) =>
+        (arg as { eventType: string }).eventType === 'eco.zoon.available_commands_update',
+    )
+    expect(call).toBeDefined()
+    expect((call![0] as { content: Record<string, unknown> }).content).toMatchObject({
+      session_id: 'sess-$e7',
+      available_commands: [{ name: 'compact', description: 'Compact the context' }],
+    })
+    finishPrompt()
+    await settleTurn()
+  })
+
   it('attaches m.relates_to thread when the originating message was in-thread', async () => {
     const { transport, agents, client, finishPrompt } = makeTransport()
     await postTxn(transport.app, {
