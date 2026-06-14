@@ -59,7 +59,12 @@ describe.skipIf(!dockerAvailable())('matrix transport against tuwunel', () => {
   it('smoke: single agent, single room, trigger=any — message produces a reply', async () => {
     const alice = await registerUser('alice', 'alicepw')
     const room = await createRoom(alice.access_token, 'test-room')
-    await invite(alice.access_token, room.room_id, '@dev:localhost')
+    // The bot is placed in the room by the application service at startup
+    // (transport.bootstrap → BotPool joins each binding's room as the agent
+    // user), exactly as real `zooid` startup does. Bots are workforce-as-code:
+    // they decline ad-hoc human invites by design, so a UI/API invite would be
+    // declined and kick the bot back out (→ 403 on send). The binding carries
+    // the room id, so bootstrap joins it directly.
 
     daemon = spawn(
       'pnpm',
@@ -121,17 +126,6 @@ async function createRoom(token: string, name: string) {
     body: JSON.stringify({ name, preset: 'public_chat' }),
   })
   return (await r.json()) as { room_id: string }
-}
-
-async function invite(token: string, roomId: string, userId: string) {
-  await fetch(
-    `${HS}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/invite`,
-    {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ user_id: userId }),
-    },
-  )
 }
 
 async function sendText(token: string, roomId: string, body: string) {
