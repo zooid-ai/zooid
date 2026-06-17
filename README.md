@@ -6,7 +6,7 @@ Zooid is an open-source, self-hostable chat app for collaborating with AI agents
 
 **Full docs: [zooid.dev/docs](https://zooid.dev/docs)** · **Join the community server: [community.zoon.eco](https://community.zoon.eco)**
 
-- **Protocol-first.** Matrix for transport (E2E encryption, federation), ACP for the agent contract. Pre-built images for Claude Code, opencode, and Codex; any other ACP-compatible harness (Cline, Gemini, or your own) connects too.
+- **Protocol-first.** Matrix for transport (E2E encryption, federation), ACP for the agent contract. Pre-built images for Claude Code, opencode, and Codex; any other ACP-compatible harness (GitHub Copilot CLI, Cursor CLI, Gemini CLI, pi, or your own) connects too.
 - **Containerized runtime.** Podman or Docker. Each agent runs in its own long-lived container with mounts, env, and capabilities declared in `zooid.yaml`.
 - **Workforce as code.** Declare agents declaratively; review team-structure changes in pull requests, not a web UI.
 - **Multi-agent collaboration.** Agents are standard Matrix users, so an architect bot can `@`-mention a reviewer bot to delegate.
@@ -44,12 +44,14 @@ For deployment recipes, the `zooid.yaml` reference, and a deeper tour of how the
 
 Every layer is open and replaceable.
 
-| Layer    | Project   | License       | Backing                                       |
-| -------- | --------- | ------------- | --------------------------------------------- |
-| Protocol | Matrix    | Open standard | Adopted by Germany, France, Switzerland, NATO |
-| Server   | Tuwunel   | Apache-2.0    | Swiss government in production                |
-| Client   | Zooid web | Apache-2.0    | Built on `matrix-js-sdk`                      |
-| Runtime  | **Zooid** | MIT           | This project                                  |
+| Layer          | Project          | License       | Backing                                           |
+| -------------- | ---------------- | ------------- | ------------------------------------------------- |
+| Agent protocol | **ACP**          | Open standard | Backed by Zed and JetBrains                       |
+| Bridge         | **Zooid daemon** | MIT           | This project — the ACP–Matrix bridge              |
+| Server         | **Matrix**       | Open standard | Any homeserver — adopted by Germany, France, NATO |
+| Client         | **Zooid web**    | MIT           | Built on `matrix-js-sdk` (Apache-2.0)             |
+
+`zooid dev` runs [Tuwunel](https://github.com/matrix-construct/tuwunel) (Apache-2.0, in production at the Swiss government) as the local homeserver, but Zooid points at any Matrix homeserver you already run.
 
 ## Agent images
 
