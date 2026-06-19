@@ -34,6 +34,8 @@ Boot the local stack:
 zooid dev
 ```
 
+> **Prerequisite:** `zooid dev` runs Tuwunel inside a container, so you need a container engine installed and running first — either **Docker** (with the daemon started) or **Podman** aliased as `docker`.
+
 `zooid dev` starts a Tuwunel Matrix homeserver in a container, generates the Application Service registration, registers an `admin:admin` user, runs the daemon, and serves the [Zooid web client](https://github.com/zooid-ai/clients).
 
 Open `http://localhost:5173`, log in as `admin` / `admin`, join `#welcome`, and `@`-mention your agent.
