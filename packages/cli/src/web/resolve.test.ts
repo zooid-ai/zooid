@@ -16,7 +16,7 @@ afterEach(() => {
 function makeSibling(rootDir: string): { cliRoot: string; webDist: string } {
   const cliRoot = join(rootDir, 'zooid', 'packages', 'cli')
   mkdirSync(cliRoot, { recursive: true })
-  const webPkg = join(rootDir, 'zoon', 'packages', 'web')
+  const webPkg = join(rootDir, 'zooid-clients', 'packages', 'web')
   const webDist = join(webPkg, 'dist')
   mkdirSync(webDist, { recursive: true })
   writeFileSync(join(webPkg, 'package.json'), '{"name":"@zooid/web"}')
@@ -69,7 +69,7 @@ describe('ensureWebRoot', () => {
 describe('webSourcePackage', () => {
   it('returns the source package dir when sibling zooid-clients/packages/web exists', () => {
     const { cliRoot } = makeSibling(root)
-    expect(webSourcePackage(cliRoot)).toBe(join(root, 'zoon', 'packages', 'web'))
+    expect(webSourcePackage(cliRoot)).toBe(join(root, 'zooid-clients', 'packages', 'web'))
   })
 
   it('returns null outside the monorepo', () => {
