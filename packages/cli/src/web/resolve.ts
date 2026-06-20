@@ -35,9 +35,9 @@ export async function ensureWebRoot(opts: EnsureWebRootOptions): Promise<string>
 
 // Returns the path to the in-tree @zooid/web package (zooid-clients/packages/web) if the
 // CLI is running from the monorepo source. Returns null when running from an
-// installed package (no sibling zoon/ tree).
+// installed package (no sibling zooid-clients/ tree).
 export function webSourcePackage(cliRoot: string): string | null {
   const workspaceRoot = dirname(dirname(dirname(cliRoot)))
-  const candidate = join(workspaceRoot, 'zoon', 'packages', 'web')
+  const candidate = join(workspaceRoot, 'zooid-clients', 'packages', 'web')
   return existsSync(join(candidate, 'package.json')) ? candidate : null
 }
