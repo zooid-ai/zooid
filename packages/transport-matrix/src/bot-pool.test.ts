@@ -149,6 +149,64 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
     ])
   })
 
+  it('two pools racing the same room → exactly one room, both join it, no orphans', async () => {
+    // Models the real bug: two agents in *separate* daemon processes bootstrap
+    // the same workforce concurrently. They share one stateful homeserver where
+    // an alias can be claimed exactly once. Each pool's first directory read is
+    // stale (returns null — it read before anyone claimed), so both proceed to
+    // createRoom; the second create loses (alias in use) and must recover by
+    // re-resolving and joining, not orphaning.
+    const aliasToRoom = new Map<string, string>()
+    let roomsCreated = 0
+    let n = 0
+    const makeClient = () => {
+      let staleRead = true
+      const joins: string[] = []
+      return {
+        joins,
+        registerBot: async () => {},
+        setDisplayName: async () => {},
+        invite: async () => {},
+        sendStateEvent: async () => ({ event_id: '$x' }),
+        resolveAlias: async (a: string) => {
+          if (staleRead) {
+            staleRead = false
+            return null
+          }
+          return aliasToRoom.get(a) ?? null
+        },
+        createRoom: async (o: { roomAliasName: string }) => {
+          const alias = `#${o.roomAliasName}:s`
+          if (aliasToRoom.has(alias)) throw new Error('createRoom(shared) failed: 409 M_ROOM_IN_USE')
+          const id = `!room${++n}:s`
+          aliasToRoom.set(alias, id)
+          roomsCreated++
+          return id
+        },
+        joinRoom: async (room: string, user: string) => {
+          joins.push(`${user}->${room}`)
+        },
+      }
+    }
+    const a = makeClient()
+    const b = makeClient()
+    const poolA = new BotPool(a as never, [
+      { name: 'a', userId: '@a:s', rooms: [{ alias: '#shared:s' }], trigger: 'mention' },
+    ])
+    const poolB = new BotPool(b as never, [
+      { name: 'b', userId: '@b:s', rooms: [{ alias: '#shared:s' }], trigger: 'mention' },
+    ])
+    await poolA.bootstrap({ adminUserId: '@admin:s' })
+    await poolB.bootstrap({ adminUserId: '@admin:s' })
+
+    // Exactly one room exists — the loser recovered instead of orphaning.
+    expect(roomsCreated).toBe(1)
+    const theRoom = aliasToRoom.get('#shared:s')
+    // Both agents joined that one room.
+    expect(a.joins).toEqual([`@a:s->${theRoom}`])
+    expect(b.joins).toEqual([`@b:s->${theRoom}`])
+  })
+
   it('rethrows when createRoom fails and the alias still does not resolve', async () => {
     const client = {
       registerBot: async () => {},
