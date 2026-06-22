@@ -1,5 +1,7 @@
+import { join } from 'node:path'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { renderRegistration } from '@zooid/transport-matrix'
+import { deriveRegistrationUrl } from './registration-url.js'
 import type { Paths } from './paths.js'
 
 export interface TuwunelTomlOpts {
@@ -35,6 +37,12 @@ export interface BootstrapConfigsOpts {
   hsToken: string
   senderLocalpart: string
   userNamespace: string
+  /** Workstation slug. When set: registration id = slug, exclusive namespace, url derived from port/advertise_url. */
+  slug?: string
+  /** AS HTTP listener port. Used to derive the registration url when slug is set. */
+  port?: number
+  /** Explicit registration url override. Mutually exclusive with port. */
+  advertiseUrl?: string
 }
 
 export function writeBootstrapConfigs(opts: BootstrapConfigsOpts): void {
@@ -45,9 +53,16 @@ export function writeBootstrapConfigs(opts: BootstrapConfigsOpts): void {
 
   writeFileSync(paths.tuwunelTomlPath, renderTuwunelToml({ serverName }))
 
+  const id = opts.slug ?? 'zooid'
+  const url = opts.slug
+    ? deriveRegistrationUrl({ port: opts.port ?? 9099, advertise_url: opts.advertiseUrl })
+    : `http://host.docker.internal:9099`
+  const exclusive = !!opts.slug
+  const registrationPath = join(paths.registrationsDir, `${id}.yaml`)
+
   const yaml = renderRegistration({
-    id: 'zooid',
-    url: `http://host.docker.internal:9099`,
+    id,
+    url,
     homeserver: `http://localhost:${TUWUNEL_INTERNAL_PORT}`,
     asToken,
     hsToken,
@@ -56,9 +71,7 @@ export function writeBootstrapConfigs(opts: BootstrapConfigsOpts): void {
     // BotPool.bootstrap creates `#alias:<server>` rooms when missing — the
     // AS needs an aliases namespace to legally claim them.
     aliasNamespace: `#.*:${serverName}`,
-    // zooid dev shares @.*:<server_name> between bots and the predefined
-    // admin human, so the AS cannot claim the namespace exclusively.
-    exclusive: false,
+    exclusive,
   })
-  writeFileSync(paths.appserviceYamlPath, yaml)
+  writeFileSync(registrationPath, yaml)
 }

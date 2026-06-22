@@ -6,7 +6,8 @@ export interface HomeserverShape {
   serverName: string
 }
 
-const NAMESPACE_RE = /^@\.\*:([A-Za-z0-9.-]+)$/
+// Matches @.*:server (flat) or @slug\..*:server (slug-scoped exclusive namespace)
+const NAMESPACE_RE = /^@(?:\.\*|[a-z0-9-]+\\\.\.\*):([A-Za-z0-9.-]+)$/
 
 export function deriveHomeserverShape(
   matrix: MatrixTransportConfig,
@@ -23,7 +24,7 @@ export function deriveHomeserverShape(
   const m = NAMESPACE_RE.exec(matrix.user_namespace)
   if (!m) {
     throw new Error(
-      `user_namespace ${matrix.user_namespace!}: expected the simple form '@.*:<server_name>'`,
+      `user_namespace ${matrix.user_namespace!}: expected '@.*:<server_name>' or '@<slug>\\\..*:<server_name>'`,
     )
   }
   const serverName = m[1]!

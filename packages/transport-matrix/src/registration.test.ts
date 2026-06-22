@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { parse } from 'yaml'
 import { renderRegistration, type MatrixTransportConfig } from './registration.js'
 
 const baseConfig: MatrixTransportConfig = {
@@ -38,4 +39,23 @@ describe('renderRegistration', () => {
     const yaml = renderRegistration(baseConfig)
     expect(yaml).toContain('rate_limited: false')
   })
+})
+
+it('renders a slug-scoped EXCLUSIVE registration', () => {
+  const y = parse(
+    renderRegistration({
+      id: 'laptop',
+      url: 'http://10.0.1.5:9099',
+      homeserver: 'https://zoon.eco',
+      asToken: 'as-x',
+      hsToken: 'hs-x',
+      senderLocalpart: 'laptop',
+      userNamespace: '@laptop\\..*:zoon.eco',
+      exclusive: true,
+    }),
+  )
+  expect(y.sender_localpart).toBe('laptop')
+  expect(y.url).toBe('http://10.0.1.5:9099')
+  expect(y.namespaces.users[0]).toEqual({ exclusive: true, regex: '@laptop\\..*:zoon.eco' })
+  expect(y.namespaces.rooms).toEqual([]) // never fence by room id
 })

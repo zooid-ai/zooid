@@ -181,9 +181,8 @@ export interface AgentConfig {
 
 /**
  * Matrix application-service transport. The CLI binds the AS HTTP listener
- * to `port` (defaults to 9000 — the most common Matrix AS convention; see
- * Synapse / mautrix / matrix-appservice-* projects). Must match the port in
- * the registration YAML's `url` (read by the homeserver, not by Zooid).
+ * to `port` (defaults to 9099 for co-located/community-box mode). Must match
+ * the port in the registration YAML's `url` (read by the homeserver, not by Zooid).
  */
 export interface MatrixTransportConfig {
   type: 'matrix'
@@ -200,22 +199,38 @@ export interface MatrixTransportConfig {
   hs_token: string
   /**
    * Localpart of the AS sender user (the bridge bot).
-   * @default 'zooid'
+   * @default 'zooid', or the workstation slug when `slug` is set
    */
   sender_localpart: string
   /**
    * Regex covering all bot users, e.g. `@.*:example.com`.
-   * @default `@.*:<host>` — host derived from `homeserver`
+   * @default `@.*:<host>`, or slug-scoped `@slug\..*:<host>` when `slug` is set
    */
   user_namespace: string
   /**
-   * AS HTTP listener port. Must match the registration YAML's `url` port —
-   * Zooid never reads the registration, so a mismatch silently sinks every
-   * transaction (the homeserver gets connection refused; you see no error
-   * in Zooid's logs).
-   * @default 9000
+   * AS HTTP listener port. Mutually exclusive with `advertise_url`.
+   * When set, the registration `url` is `http://host.docker.internal:<port>`.
+   * @default 9099 (co-located mode) when neither port nor advertise_url is set
    */
   port?: number
+  /**
+   * Explicit registration URL advertised to the homeserver. Mutually exclusive
+   * with `port`. Use for multi-workstation setups where the homeserver reaches
+   * the daemon via a stable external address.
+   */
+  advertise_url?: string
+  /**
+   * AS mode. `appservice` = push transport (homeserver calls the daemon).
+   * `client` = pull transport (daemon polls /_matrix/client/v3/sync).
+   * @default 'appservice'
+   */
+  mode?: 'appservice' | 'client'
+  /**
+   * Workstation slug derived from the top-level `slug:` in zooid.yaml.
+   * Present only when a slug is declared; absent for the shared-namespace
+   * `zooid dev` profile.
+   */
+  slug?: string
   /**
    * Workforce space localpart. Resolves to alias `#<space>:<server>`.
    * @default 'dev'
@@ -244,6 +259,13 @@ export type TransportConfig = MatrixTransportConfig | HttpTransportConfig
  */
 export interface ZooidConfig {
   runtime: 'local' | 'docker' | 'podman'
+  /**
+   * Workstation identity slug. A short, lowercase, hyphen-separated name that
+   * uniquely identifies this daemon instance (e.g. `laptop`, `ec2-prod`).
+   * When set, the matrix transport derives `sender_localpart` and
+   * `user_namespace` from it, enabling exclusive per-workstation AS namespaces.
+   */
+  slug?: string
   /** Workforce-wide container defaults. Image only — no workforce-level env. Rejected when runtime: local. */
   container?: ZooidContainerConfig
   /** Required. Map of operator-chosen names → transport config. At least one entry. */

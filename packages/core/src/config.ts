@@ -19,6 +19,8 @@ import type {
   ZooidContainerConfig,
 } from './types.js'
 
+const SLUG_RE = /^[a-z0-9-]+$/
+
 export interface LoadZooidConfigOptions {
   /**
    * Directory containing zooid.yaml. Required when any agent uses a
@@ -324,6 +326,7 @@ function parseZooidContainer(raw: unknown): ZooidContainerConfig {
 function parseTransports(
   raw: unknown,
   processEnv: NodeJS.ProcessEnv,
+  slug?: string,
 ): Record<string, TransportConfig> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('transports: must be a mapping with at least one entry')
@@ -335,7 +338,7 @@ function parseTransports(
   }
   const out: Record<string, TransportConfig> = {}
   for (const name of names) {
-    out[name] = parseTransport(name, r[name], processEnv)
+    out[name] = parseTransport(name, r[name], processEnv, slug)
   }
   const matrixEntries = Object.entries(out).filter(
     (e): e is [string, MatrixTransportConfig] => e[1].type === 'matrix',
@@ -379,6 +382,7 @@ function parseTransport(
   name: string,
   raw: unknown,
   processEnv: NodeJS.ProcessEnv,
+  slug?: string,
 ): TransportConfig {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(`transports.${name}: must be a mapping`)
@@ -392,19 +396,46 @@ function parseTransport(
     )
   }
   if (inferredType === 'matrix') {
-    if (r.sender_localpart === undefined) r.sender_localpart = 'zooid'
-    if (r.user_namespace === undefined && typeof r.homeserver === 'string') {
+    // Validate mode first so we can give a clear error.
+    const mode = r.mode ?? 'appservice'
+    if (mode !== 'appservice' && mode !== 'client') {
+      throw new Error(
+        `transports.${name}.mode must be "appservice" or "client" (got ${JSON.stringify(r.mode)})`,
+      )
+    }
+
+    // port xor advertise_url
+    if (r.port !== undefined && r.advertise_url !== undefined) {
+      throw new Error(
+        `transports.${name}: set 'port' or 'advertise_url', not both`,
+      )
+    }
+
+    // Slug-derived defaults: sender_localpart and user_namespace
+    let resolvedHost: string | undefined
+    if (typeof r.homeserver === 'string') {
       try {
-        const host = new URL(
-          interpolateString(r.homeserver as string, processEnv),
-        ).hostname
-        if (host) r.user_namespace = `@.*:${host}`
+        resolvedHost = new URL(interpolateString(r.homeserver as string, processEnv)).hostname
       } catch {
-        // Fall through: the required-fields loop will fire its "must be a
-        // non-empty string" error, which is the same message today's parser
-        // would emit for a bad homeserver URL.
+        // fall through — required-field check below fires the error
       }
     }
+
+    if (slug !== undefined) {
+      if (!SLUG_RE.test(slug)) {
+        throw new Error(`slug must match /^[a-z0-9-]+$/ (got ${JSON.stringify(slug)})`)
+      }
+      if (r.sender_localpart === undefined) r.sender_localpart = slug
+      if (r.user_namespace === undefined && resolvedHost) {
+        r.user_namespace = `@${slug}\\..*:${resolvedHost}`
+      }
+    } else {
+      if (r.sender_localpart === undefined) r.sender_localpart = 'zooid'
+      if (r.user_namespace === undefined && resolvedHost) {
+        r.user_namespace = `@.*:${resolvedHost}`
+      }
+    }
+
     if (r.as_token === undefined) r.as_token = '__INFER__'
     if (r.hs_token === undefined) r.hs_token = '__INFER__'
     const fields = [
@@ -426,7 +457,10 @@ function parseTransport(
       hs_token: interpolateString(r.hs_token as string, processEnv),
       sender_localpart: r.sender_localpart as string,
       user_namespace: r.user_namespace as string,
+      mode: mode as 'appservice' | 'client',
     }
+    if (slug !== undefined) out.slug = slug
+
     if (r.port !== undefined) {
       if (!Number.isInteger(r.port)) {
         throw new Error(
@@ -434,7 +468,16 @@ function parseTransport(
         )
       }
       out.port = r.port as number
+    } else if (r.advertise_url !== undefined) {
+      if (typeof r.advertise_url !== 'string' || r.advertise_url.length === 0) {
+        throw new Error(`transports.${name}.advertise_url must be a non-empty string`)
+      }
+      out.advertise_url = r.advertise_url as string
+    } else {
+      // Neither set — default to co-located port
+      out.port = 9099
     }
+
     if (r.space !== undefined) {
       if (typeof r.space !== 'string' || r.space.length === 0) {
         throw new Error(
@@ -796,7 +839,19 @@ export function loadZooidConfig(
 
   const runtime = parseRuntime(r.runtime)
   const processEnv = process.env
-  const transports = parseTransports(r.transports, processEnv)
+
+  let slug: string | undefined
+  if (r.slug !== undefined) {
+    if (typeof r.slug !== 'string' || r.slug.length === 0) {
+      throw new Error('slug must be a non-empty string')
+    }
+    if (!SLUG_RE.test(r.slug)) {
+      throw new Error(`slug must match /^[a-z0-9-]+$/ (got ${JSON.stringify(r.slug)})`)
+    }
+    slug = r.slug
+  }
+
+  const transports = parseTransports(r.transports, processEnv, slug)
   const hooks = zooidHooks(r)
   const agents = parseAgents(r.agents, runtime, transports, hooks, processEnv, opts.configDir)
 
@@ -806,6 +861,7 @@ export function loadZooidConfig(
     agents,
     hooks,
   }
+  if (slug !== undefined) cfg.slug = slug
   if (r.container !== undefined && r.container !== null) {
     if (runtime === 'local') {
       throw new Error(
