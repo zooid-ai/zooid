@@ -89,14 +89,26 @@ export class BotPool {
                   this.agents,
                   room,
                 )
-                resolved = await this.client.createRoom({
-                  roomAliasName: aliasLocalpart,
-                  invite: opts.adminUserId ? [opts.adminUserId] : [],
-                  senderUserId: sender,
-                  name: aliasLocalpart,
-                  ...(opts.spaceRoomId ? { restrictedToSpaceId: opts.spaceRoomId } : {}),
-                  ...(userPowerLevels ? { userPowerLevels } : {}),
-                })
+                try {
+                  resolved = await this.client.createRoom({
+                    roomAliasName: aliasLocalpart,
+                    invite: opts.adminUserId ? [opts.adminUserId] : [],
+                    senderUserId: sender,
+                    name: aliasLocalpart,
+                    ...(opts.spaceRoomId ? { restrictedToSpaceId: opts.spaceRoomId } : {}),
+                    ...(userPowerLevels ? { userPowerLevels } : {}),
+                  })
+                } catch (err) {
+                  // Another agent — or another daemon process bootstrapping the
+                  // same workforce — may have created this room concurrently, so
+                  // its alias is now taken (createRoom fails with the alias in
+                  // use). Re-resolve and join the existing room rather than
+                  // leaving an orphan. Only rethrow if the alias still doesn't
+                  // resolve (a genuine creation failure).
+                  const raced = await this.client.resolveAlias(room)
+                  if (!raced) throw err
+                  resolved = raced
+                }
               }
               aliasToId.set(room, resolved)
             }

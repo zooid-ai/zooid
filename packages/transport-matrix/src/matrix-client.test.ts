@@ -160,6 +160,49 @@ describe('MatrixClient', () => {
     })
   })
 
+  it('createRoom keeps the creator at PL 100 when a power-level override omits them', async () => {
+    // power_level_content_override.users REPLACES the default { creator: 100 }
+    // map; if the creator is left out they drop to 0 and can't claim the alias.
+    const fetch = fakeFetch(async ({ init }) => {
+      const body = JSON.parse(init.body as string)
+      expect(body.power_level_content_override.users).toEqual({
+        '@zooid:localhost': 100,
+        '@creator:localhost': 100,
+      })
+      return new Response(JSON.stringify({ room_id: '!new:localhost' }), { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await client.createRoom({
+      roomAliasName: 'welcome',
+      invite: [],
+      senderUserId: '@creator:localhost',
+      userPowerLevels: { '@zooid:localhost': 100 },
+    })
+  })
+
+  it('createRoom does not override an explicit power level already set for the creator', async () => {
+    const fetch = fakeFetch(async ({ init }) => {
+      const body = JSON.parse(init.body as string)
+      expect(body.power_level_content_override.users['@creator:localhost']).toBe(50)
+      return new Response(JSON.stringify({ room_id: '!new:localhost' }), { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'https://hs.example.com',
+      asToken: 'as-secret',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await client.createRoom({
+      roomAliasName: 'welcome',
+      invite: [],
+      senderUserId: '@creator:localhost',
+      userPowerLevels: { '@creator:localhost': 50 },
+    })
+  })
+
   it('setDisplayName PUTs the displayname endpoint impersonating the user', async () => {
     const fetch = fakeFetch(async ({ url, init }) => {
       expect(url).toBe(

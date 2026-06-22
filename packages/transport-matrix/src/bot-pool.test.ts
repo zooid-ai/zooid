@@ -107,6 +107,71 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
     ])
   })
 
+  it('joins the existing room when createRoom loses a race (alias taken)', async () => {
+    // Another agent/process created the room first: the alias didn't resolve at
+    // first check, createRoom then fails (alias in use), and a re-resolve finds
+    // it. We must join that room — not leave an orphan.
+    const calls: string[] = []
+    let resolveCount = 0
+    const client = {
+      registerBot: async () => {},
+      setDisplayName: async () => {},
+      resolveAlias: async (a: string) => {
+        resolveCount++
+        // First check: not found (we'll try to create). After the failed
+        // create, the re-resolve finds the room the concurrent creator made.
+        const r = resolveCount === 1 ? null : '!raced:localhost'
+        calls.push(`resolve:${a}->${r ?? 'null'}`)
+        return r
+      },
+      createRoom: async () => {
+        calls.push('create:THROWS(alias in use)')
+        throw new Error('createRoom(welcome) failed: 409 M_ROOM_IN_USE')
+      },
+      joinRoom: async (room: string, asUser: string) => {
+        calls.push(`join:${asUser}->${room}`)
+      },
+    }
+    const pool = new BotPool(client as never, [
+      {
+        name: 'echo',
+        userId: '@echo:localhost',
+        rooms: [{ alias: '#welcome:localhost' }],
+        trigger: 'mention',
+      },
+    ])
+    await pool.bootstrap({ adminUserId: '@admin:localhost' })
+    expect(calls).toEqual([
+      'resolve:#welcome:localhost->null',
+      'create:THROWS(alias in use)',
+      'resolve:#welcome:localhost->!raced:localhost',
+      'join:@echo:localhost->!raced:localhost',
+    ])
+  })
+
+  it('rethrows when createRoom fails and the alias still does not resolve', async () => {
+    const client = {
+      registerBot: async () => {},
+      setDisplayName: async () => {},
+      resolveAlias: async () => null, // never resolves — genuine creation failure
+      createRoom: async () => {
+        throw new Error('createRoom(welcome) failed: 500 boom')
+      },
+      joinRoom: vi.fn(async () => undefined),
+    }
+    const pool = new BotPool(client as never, [
+      {
+        name: 'echo',
+        userId: '@echo:localhost',
+        rooms: [{ alias: '#welcome:localhost' }],
+        trigger: 'mention',
+      },
+    ])
+    // bootstrap swallows per-room errors (logs); the room is never joined.
+    await pool.bootstrap({ adminUserId: '@admin:localhost' })
+    expect(client.joinRoom).not.toHaveBeenCalled()
+  })
+
   it('skips create when the alias already resolves', async () => {
     const calls: string[] = []
     const client = {
