@@ -478,6 +478,29 @@ describe('MatrixClient.leaveRoom', () => {
   })
 })
 
+describe('MatrixClient.sync (impersonated)', () => {
+  it('GETs /sync with ?user_id=, as_token bearer, since + timeout', async () => {
+    const fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ next_batch: 's2', rooms: { join: {} } }), { status: 200 }),
+    )
+    const c = new MatrixClient({
+      homeserver: 'https://zoon.eco',
+      asToken: 'as-tok',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    const out = await c.sync({ asUserId: '@laptop.docs:zoon.eco', since: 's1', timeoutMs: 30000 })
+
+    expect(out.next_batch).toBe('s2')
+    const url = new URL(fetch.mock.calls[0]![0] as string)
+    expect(url.pathname).toBe('/_matrix/client/v3/sync')
+    expect(url.searchParams.get('user_id')).toBe('@laptop.docs:zoon.eco')
+    expect(url.searchParams.get('since')).toBe('s1')
+    expect(url.searchParams.get('timeout')).toBe('30000')
+    const headers = (fetch.mock.calls[0]![1] as RequestInit).headers as Record<string, string>
+    expect(headers.Authorization).toBe('Bearer as-tok')
+  })
+})
+
 describe('MatrixClient.createRoom restricted', () => {
   it('injects a restricted join rule referencing the space when restrictedToSpaceId is set', async () => {
     const fetch = fakeFetch(async ({ url, init }) => {

@@ -19,6 +19,7 @@ import {
   INLINE_IMAGE_MIMES,
 } from './media-client.js'
 import { writeAttachment } from './attachments.js'
+import { SyncLoop } from './sync-loop.js'
 
 export interface MediaClientLike {
   download(input: {
@@ -56,6 +57,16 @@ export interface CreateMatrixTransportOptions {
    *  bindings this forms the set of "our bot users" whose ad-hoc invites are
    *  declined. */
   botUserId?: string
+  /**
+   * Transport ingestion mode.
+   * - `'appservice'` (default): Tuwunel pushes events to the HTTP transaction endpoint.
+   * - `'client'`: daemon polls via impersonated `/sync` per agent (pull mode).
+   */
+  mode?: 'appservice' | 'client'
+  /** Pull mode: load the persisted `since` cursor for an agent user ID. */
+  loadSince?: (agentUserId: string) => string | null
+  /** Pull mode: persist the `since` cursor after each sync poll. */
+  saveSince?: (agentUserId: string, since: string) => void
 }
 
 interface SessionContext {
@@ -223,7 +234,7 @@ function inboundThreadRoot(evt: MatrixEvent): string | undefined {
 }
 
 export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
-  const { agents, approvals, client, bindings, hsToken, adminUserId, botUserId } = opts
+  const { agents, approvals, client, bindings, hsToken, adminUserId, botUserId, mode = 'appservice' } = opts
   const drainQuietMs = opts.drainQuietMs ?? DRAIN_QUIET_MS
   const drainMaxMs = opts.drainMaxMs ?? DRAIN_MAX_MS
   const mediaClient = opts.media
@@ -465,6 +476,249 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     })
   })
 
+  async function handleInboundEvent(evt: MatrixEvent): Promise<void> {
+    if (evt.event_id) {
+      if (seenEventIds.has(evt.event_id)) {
+        return
+      }
+      seenEventIds.add(evt.event_id)
+      if (seenEventIds.size > SEEN_EVENT_CAP) {
+        const first = seenEventIds.values().next().value
+        if (first !== undefined) seenEventIds.delete(first)
+      }
+    }
+    if (
+      evt.origin_server_ts !== undefined &&
+      evt.origin_server_ts < cutoffTs &&
+      evt.type === 'm.room.message'
+    ) {
+      console.log(
+        `[matrix] dropping stale message event ${evt.event_id} ` +
+          `(ts=${evt.origin_server_ts}, daemon started at ${cutoffTs + STARTUP_GRACE_MS})`,
+      )
+      return
+    }
+    if (evt.type === 'm.room.member' && evt.content?.membership === 'invite') {
+      const target = evt.state_key
+      const inviter = evt.sender
+      if (
+        target &&
+        evt.room_id &&
+        ourBotUserIds.has(target) &&
+        (!inviter || !ourBotUserIds.has(inviter))
+      ) {
+        console.log(
+          `[matrix] declining ad-hoc invite for ${target} in ${evt.room_id} ` +
+            `from ${inviter ?? 'unknown'}`,
+        )
+        await client
+          .leaveRoom(evt.room_id, target, { reason: DECLINE_REASON })
+          .catch((err) =>
+            console.warn(`[matrix] leaveRoom(${evt.room_id}, ${target}) failed:`, err),
+          )
+      }
+      return
+    }
+    if (evt.type === 'dev.zooid.session_reset') {
+      // Spec § /clear: room-scope reset is unsupported. Only thread-scoped
+      // resets carry a thread relation; drop bare room-level resets silently.
+      const relates = evt.content?.['m.relates_to'] as
+        | { rel_type?: string; event_id?: string }
+        | undefined
+      const threadRoot =
+        relates?.rel_type === 'm.thread' && relates.event_id ? relates.event_id : undefined
+      if (!threadRoot) {
+        console.log('[matrix] dropping dev.zooid.session_reset without thread relation')
+        return
+      }
+      console.log(`[matrix] inbound dev.zooid.session_reset in ${evt.room_id} thread=${threadRoot}`)
+      for (const a of bindings) {
+        agents.endSession(a.name, threadRoot)
+      }
+      // NB: keep threadStates intact. Per ZOD039 § /clear, only the agent's
+      // session memory is wiped — thread-routing state (participants /
+      // root-mentions) must survive so the next bare reply still routes to
+      // the most-recently-posting agent under the same sessionKey.
+      return
+    }
+    if (evt.type === 'dev.zooid.interrupt') {
+      const content = (evt.content ?? {}) as { session_id?: string; reason?: string }
+      // Thread-relation form (client-friendly): /interrupt in a thread sends
+      // an empty event with `m.relates_to: thread/<root>`. Cancel every
+      // session whose threadRoot matches.
+      const relates = evt.content?.['m.relates_to'] as
+        | { rel_type?: string; event_id?: string }
+        | undefined
+      const threadRoot =
+        relates?.rel_type === 'm.thread' && relates.event_id ? relates.event_id : undefined
+      if (threadRoot) {
+        const targets: Array<{ sessionId: string; agent: string }> = []
+        for (const [sessionId, ctx] of sessions) {
+          if (ctx.threadRoot === threadRoot) {
+            targets.push({ sessionId, agent: ctx.agent.name })
+          }
+        }
+        for (const t of targets) {
+          console.log(
+            `[matrix] interrupt session=${t.sessionId} agent=${t.agent} thread=${threadRoot}` +
+              (content.reason ? ` reason=${content.reason}` : ''),
+          )
+          await agents.cancelSession(t.agent, t.sessionId).catch((err) => {
+            console.error(`[matrix] cancelSession(${t.agent}, ${t.sessionId}) failed:`, err)
+          })
+        }
+        return
+      }
+      // Legacy form: explicit session_id in content.
+      if (!content.session_id) {
+        console.warn(`[matrix] dev.zooid.interrupt missing session_id (event_id=${evt.event_id})`)
+        return
+      }
+      const ctx = sessions.get(content.session_id)
+      if (!ctx) {
+        return
+      }
+      console.log(
+        `[matrix] interrupt session=${content.session_id} agent=${ctx.agent.name}` +
+          (content.reason ? ` reason=${content.reason}` : ''),
+      )
+      await agents.cancelSession(ctx.agent.name, content.session_id).catch((err) => {
+        console.error(`[matrix] cancelSession(${ctx.agent.name}, ${content.session_id}) failed:`, err)
+      })
+      return
+    }
+    if (evt.type === 'dev.zooid.approval_response') {
+      const content = (evt.content ?? {}) as {
+        approval_id?: string
+        session_id?: string
+        decision?: string
+        option_id?: string
+      }
+      if (!content.session_id || !content.approval_id || !content.decision) return
+      const decision = content.option_id
+        ? { decision: content.decision, optionId: content.option_id }
+        : { decision: content.decision }
+      const ok = approvals.resolve(
+        content.session_id,
+        content.approval_id,
+        decision as never,
+      )
+      if (!ok) console.warn(`[matrix] unknown approval ${content.approval_id}`)
+      return
+    }
+    logInbound(evt)
+
+    // Capture media events in the pending store; never route them to agents.
+    if (
+      evt.type === 'm.room.message' &&
+      isMediaMsgtype(evt.content?.msgtype) &&
+      evt.room_id &&
+      evt.event_id &&
+      evt.sender &&
+      evt.content?.url &&
+      !bindings.some((b) => b.userId === evt.sender)
+    ) {
+      pendingMedia.add(evt.room_id, inboundThreadRoot(evt), {
+        eventId: evt.event_id,
+        sender: evt.sender,
+        msgtype: evt.content.msgtype as string,
+        body: (evt.content.body as string | undefined) ?? '',
+        filename: evt.content.filename as string | undefined,
+        url: evt.content.url as string,
+        info: evt.content.info as PendingMediaItem['info'],
+      })
+      return
+    }
+
+    // Agent-promotion: top-level inbound event becomes the thread root.
+    // For in-thread messages the existing root is preserved.
+    const promotedRoot = inboundThreadRoot(evt) ?? evt.event_id
+    // Self-heal: if this is a thread reply but we have no in-memory state
+    // for the root (e.g. daemon was just restarted), reconstruct it by
+    // fetching the thread root + relations from the server.
+    const inboundRel = inboundThreadRoot(evt)
+    if (
+      evt.type === 'm.room.message' &&
+      inboundRel &&
+      !threadStates.has(inboundRel) &&
+      evt.room_id
+    ) {
+      try {
+        const rebuilt = await rebuildThreadState(client, evt.room_id, inboundRel, bindings)
+        threadStates.set(inboundRel, rebuilt)
+        console.log(
+          `[matrix] rebuilt threadState for ${inboundRel}: participants=${rebuilt.participants.join(',')} rootMentions=${rebuilt.rootMentions.join(',')}`,
+        )
+      } catch (err) {
+        console.warn(`[matrix] failed to rebuild threadState for ${inboundRel}:`, err)
+      }
+    }
+    const matches = route(evt, bindings, threadStates)
+    // Suppress the no-match warning for events sent by our own bots.
+    const senderIsBot = bindings.some((b) => b.userId === evt.sender)
+    if (evt.type === 'm.room.message' && matches.length === 0 && !senderIsBot) {
+      console.warn(
+        `[matrix] no agent matched message in ${evt.room_id} from ${evt.sender}` +
+          ` (bindings: ${bindings.map((b) => `${b.name}@${b.userId}[${b.trigger}]`).join(', ')})`,
+      )
+    }
+    // Seed thread state for any agent mentions in this event.
+    if (matches.length > 0 && promotedRoot) {
+      let st = threadStates.get(promotedRoot)
+      if (!st) {
+        st = { participants: [], rootMentions: [] }
+        threadStates.set(promotedRoot, st)
+      }
+      const msgMentions = new Set(extractMentions(evt as never))
+      for (const a of bindings) {
+        if (msgMentions.has(a.userId) && !st.rootMentions.includes(a.name)) {
+          st.rootMentions.push(a.name)
+        }
+      }
+    }
+    for (const a of matches) {
+      console.log(`[matrix] → ${a.name} (${a.userId})`)
+      void runTurn(a, evt)
+        .then(() => {
+          if (!promotedRoot) return
+          let st = threadStates.get(promotedRoot)
+          if (!st) {
+            st = { participants: [], rootMentions: [] }
+            threadStates.set(promotedRoot, st)
+          }
+          if (st.participants.at(-1) !== a.name) st.participants.push(a.name)
+        })
+        .catch((err) => {
+          console.error(`[matrix] runTurn failed for ${a.name}:`, err)
+          const c = classify(err)
+          const threadRoot = inboundThreadRoot(evt) ?? evt.event_id
+          if (!threadRoot || !evt.room_id) return
+          const body = toErrorBody(
+            {
+              kind: 'error',
+              agentId: a.name,
+              sessionId: null,
+              turnId: null,
+              code: c.code,
+              message: err instanceof Error ? err.message : String(err),
+              detail: err instanceof Error && err.stack ? err.stack.slice(0, 2000) : undefined,
+              transient: c.transient,
+              acp_error: c.acp_error,
+            },
+            threadRoot,
+          )
+          void client
+            .sendCustomEvent({
+              roomId: evt.room_id,
+              asUserId: a.userId,
+              eventType: 'dev.zooid.error',
+              content: body,
+            })
+            .catch((e) => console.warn(`[matrix:${a.name}] dev.zooid.error send failed:`, e))
+        })
+    }
+  }
+
   const app = new Hono()
 
   function authOk(authHeader: string | undefined): boolean {
@@ -481,246 +735,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     }
     const body = (await c.req.json().catch(() => ({}))) as { events?: MatrixEvent[] }
     for (const evt of body.events ?? []) {
-      if (evt.event_id) {
-        if (seenEventIds.has(evt.event_id)) {
-          continue
-        }
-        seenEventIds.add(evt.event_id)
-        if (seenEventIds.size > SEEN_EVENT_CAP) {
-          const first = seenEventIds.values().next().value
-          if (first !== undefined) seenEventIds.delete(first)
-        }
-      }
-      if (
-        evt.origin_server_ts !== undefined &&
-        evt.origin_server_ts < cutoffTs &&
-        evt.type === 'm.room.message'
-      ) {
-        console.log(
-          `[matrix] dropping stale message event ${evt.event_id} ` +
-            `(ts=${evt.origin_server_ts}, daemon started at ${cutoffTs + STARTUP_GRACE_MS})`,
-        )
-        continue
-      }
-      if (evt.type === 'm.room.member' && evt.content?.membership === 'invite') {
-        const target = evt.state_key
-        const inviter = evt.sender
-        if (
-          target &&
-          evt.room_id &&
-          ourBotUserIds.has(target) &&
-          (!inviter || !ourBotUserIds.has(inviter))
-        ) {
-          console.log(
-            `[matrix] declining ad-hoc invite for ${target} in ${evt.room_id} ` +
-              `from ${inviter ?? 'unknown'}`,
-          )
-          await client
-            .leaveRoom(evt.room_id, target, { reason: DECLINE_REASON })
-            .catch((err) =>
-              console.warn(`[matrix] leaveRoom(${evt.room_id}, ${target}) failed:`, err),
-            )
-        }
-        continue
-      }
-      if (evt.type === 'dev.zooid.session_reset') {
-        // Spec § /clear: room-scope reset is unsupported. Only thread-scoped
-        // resets carry a thread relation; drop bare room-level resets silently.
-        const relates = evt.content?.['m.relates_to'] as
-          | { rel_type?: string; event_id?: string }
-          | undefined
-        const threadRoot =
-          relates?.rel_type === 'm.thread' && relates.event_id ? relates.event_id : undefined
-        if (!threadRoot) {
-          console.log('[matrix] dropping dev.zooid.session_reset without thread relation')
-          continue
-        }
-        console.log(`[matrix] inbound dev.zooid.session_reset in ${evt.room_id} thread=${threadRoot}`)
-        for (const a of bindings) {
-          agents.endSession(a.name, threadRoot)
-        }
-        // NB: keep threadStates intact. Per ZOD039 § /clear, only the agent's
-        // session memory is wiped — thread-routing state (participants /
-        // root-mentions) must survive so the next bare reply still routes to
-        // the most-recently-posting agent under the same sessionKey.
-        continue
-      }
-      if (evt.type === 'dev.zooid.interrupt') {
-        const content = (evt.content ?? {}) as { session_id?: string; reason?: string }
-        // Thread-relation form (client-friendly): /interrupt in a thread sends
-        // an empty event with `m.relates_to: thread/<root>`. Cancel every
-        // session whose threadRoot matches.
-        const relates = evt.content?.['m.relates_to'] as
-          | { rel_type?: string; event_id?: string }
-          | undefined
-        const threadRoot =
-          relates?.rel_type === 'm.thread' && relates.event_id ? relates.event_id : undefined
-        if (threadRoot) {
-          const targets: Array<{ sessionId: string; agent: string }> = []
-          for (const [sessionId, ctx] of sessions) {
-            if (ctx.threadRoot === threadRoot) {
-              targets.push({ sessionId, agent: ctx.agent.name })
-            }
-          }
-          for (const t of targets) {
-            console.log(
-              `[matrix] interrupt session=${t.sessionId} agent=${t.agent} thread=${threadRoot}` +
-                (content.reason ? ` reason=${content.reason}` : ''),
-            )
-            await agents.cancelSession(t.agent, t.sessionId).catch((err) => {
-              console.error(`[matrix] cancelSession(${t.agent}, ${t.sessionId}) failed:`, err)
-            })
-          }
-          continue
-        }
-        // Legacy form: explicit session_id in content.
-        if (!content.session_id) {
-          console.warn(`[matrix] dev.zooid.interrupt missing session_id (event_id=${evt.event_id})`)
-          continue
-        }
-        const ctx = sessions.get(content.session_id)
-        if (!ctx) {
-          continue
-        }
-        console.log(
-          `[matrix] interrupt session=${content.session_id} agent=${ctx.agent.name}` +
-            (content.reason ? ` reason=${content.reason}` : ''),
-        )
-        await agents.cancelSession(ctx.agent.name, content.session_id).catch((err) => {
-          console.error(`[matrix] cancelSession(${ctx.agent.name}, ${content.session_id}) failed:`, err)
-        })
-        continue
-      }
-      if (evt.type === 'dev.zooid.approval_response') {
-        const content = (evt.content ?? {}) as {
-          approval_id?: string
-          session_id?: string
-          decision?: string
-          option_id?: string
-        }
-        if (!content.session_id || !content.approval_id || !content.decision) continue
-        const decision = content.option_id
-          ? { decision: content.decision, optionId: content.option_id }
-          : { decision: content.decision }
-        const ok = approvals.resolve(
-          content.session_id,
-          content.approval_id,
-          decision as never,
-        )
-        if (!ok) console.warn(`[matrix] unknown approval ${content.approval_id}`)
-        continue
-      }
-      logInbound(evt)
-
-      // Capture media events in the pending store; never route them to agents.
-      if (
-        evt.type === 'm.room.message' &&
-        isMediaMsgtype(evt.content?.msgtype) &&
-        evt.room_id &&
-        evt.event_id &&
-        evt.sender &&
-        evt.content?.url &&
-        !bindings.some((b) => b.userId === evt.sender)
-      ) {
-        pendingMedia.add(evt.room_id, inboundThreadRoot(evt), {
-          eventId: evt.event_id,
-          sender: evt.sender,
-          msgtype: evt.content.msgtype as string,
-          body: (evt.content.body as string | undefined) ?? '',
-          filename: evt.content.filename as string | undefined,
-          url: evt.content.url as string,
-          info: evt.content.info as PendingMediaItem['info'],
-        })
-        continue
-      }
-
-      // Agent-promotion: top-level inbound event becomes the thread root.
-      // For in-thread messages the existing root is preserved.
-      const promotedRoot = inboundThreadRoot(evt) ?? evt.event_id
-      // Self-heal: if this is a thread reply but we have no in-memory state
-      // for the root (e.g. daemon was just restarted), reconstruct it by
-      // fetching the thread root + relations from the server.
-      const inboundRel = inboundThreadRoot(evt)
-      if (
-        evt.type === 'm.room.message' &&
-        inboundRel &&
-        !threadStates.has(inboundRel) &&
-        evt.room_id
-      ) {
-        try {
-          const rebuilt = await rebuildThreadState(client, evt.room_id, inboundRel, bindings)
-          threadStates.set(inboundRel, rebuilt)
-          console.log(
-            `[matrix] rebuilt threadState for ${inboundRel}: participants=${rebuilt.participants.join(',')} rootMentions=${rebuilt.rootMentions.join(',')}`,
-          )
-        } catch (err) {
-          console.warn(`[matrix] failed to rebuild threadState for ${inboundRel}:`, err)
-        }
-      }
-      const matches = route(evt, bindings, threadStates)
-      // Suppress the no-match warning for events sent by our own bots.
-      const senderIsBot = bindings.some((b) => b.userId === evt.sender)
-      if (evt.type === 'm.room.message' && matches.length === 0 && !senderIsBot) {
-        console.warn(
-          `[matrix] no agent matched message in ${evt.room_id} from ${evt.sender}` +
-            ` (bindings: ${bindings.map((b) => `${b.name}@${b.userId}[${b.trigger}]`).join(', ')})`,
-        )
-      }
-      // Seed thread state for any agent mentions in this event.
-      if (matches.length > 0 && promotedRoot) {
-        let st = threadStates.get(promotedRoot)
-        if (!st) {
-          st = { participants: [], rootMentions: [] }
-          threadStates.set(promotedRoot, st)
-        }
-        const msgMentions = new Set(extractMentions(evt as never))
-        for (const a of bindings) {
-          if (msgMentions.has(a.userId) && !st.rootMentions.includes(a.name)) {
-            st.rootMentions.push(a.name)
-          }
-        }
-      }
-      for (const a of matches) {
-        console.log(`[matrix] → ${a.name} (${a.userId})`)
-        void runTurn(a, evt)
-          .then(() => {
-            if (!promotedRoot) return
-            let st = threadStates.get(promotedRoot)
-            if (!st) {
-              st = { participants: [], rootMentions: [] }
-              threadStates.set(promotedRoot, st)
-            }
-            if (st.participants.at(-1) !== a.name) st.participants.push(a.name)
-          })
-          .catch((err) => {
-            console.error(`[matrix] runTurn failed for ${a.name}:`, err)
-            const c = classify(err)
-            const threadRoot = inboundThreadRoot(evt) ?? evt.event_id
-            if (!threadRoot || !evt.room_id) return
-            const body = toErrorBody(
-              {
-                kind: 'error',
-                agentId: a.name,
-                sessionId: null,
-                turnId: null,
-                code: c.code,
-                message: err instanceof Error ? err.message : String(err),
-                detail: err instanceof Error && err.stack ? err.stack.slice(0, 2000) : undefined,
-                transient: c.transient,
-                acp_error: c.acp_error,
-              },
-              threadRoot,
-            )
-            void client
-              .sendCustomEvent({
-                roomId: evt.room_id,
-                asUserId: a.userId,
-                eventType: 'dev.zooid.error',
-                content: body,
-              })
-              .catch((e) => console.warn(`[matrix:${a.name}] dev.zooid.error send failed:`, e))
-          })
-      }
+      await handleInboundEvent(evt)
     }
     return c.json({})
   })
@@ -864,8 +879,23 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     }
   }
 
+  const syncLoops: SyncLoop[] | undefined =
+    mode === 'client'
+      ? bindings.map(
+          (b) =>
+            new SyncLoop({
+              client: client as never,
+              asUserId: b.userId,
+              loadSince: () => opts.loadSince?.(b.userId) ?? null,
+              saveSince: (since) => opts.saveSince?.(b.userId, since),
+              onEvent: (evt) => handleInboundEvent(evt as MatrixEvent),
+            }),
+        )
+      : undefined
+
   return {
     app,
+    syncLoops,
     bootstrap: async (
       bootstrapOpts: {
         spaceRoomId?: string

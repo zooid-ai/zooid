@@ -420,6 +420,38 @@ export class MatrixClient {
     return (await r.json()) as { joined: Record<string, { display_name?: string }> }
   }
 
+  async sync(opts: {
+    asUserId: string
+    since?: string | null
+    timeoutMs?: number
+  }): Promise<{
+    next_batch: string
+    rooms: {
+      join: Record<string, {
+        timeline: { events: Record<string, unknown>[]; prev_batch?: string; limited?: boolean }
+      }>
+    }
+  }> {
+    const params = new URLSearchParams({
+      user_id: opts.asUserId,
+      timeout: String(opts.timeoutMs ?? 30_000),
+    })
+    if (opts.since) params.set('since', opts.since)
+    const url = `${this.homeserver}/_matrix/client/v3/sync?${params.toString()}`
+    const r = await this.fetch(url, {
+      headers: { Authorization: `Bearer ${this.asToken}` },
+    })
+    if (!r.ok) throw new Error(`sync(${opts.asUserId}) failed: ${r.status}`)
+    return r.json() as Promise<{
+      next_batch: string
+      rooms: {
+        join: Record<string, {
+          timeline: { events: Record<string, unknown>[]; prev_batch?: string; limited?: boolean }
+        }>
+      }
+    }>
+  }
+
   async fetchRoomName(roomId: string, asUserId: string): Promise<string | null> {
     const url =
       `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}` +
