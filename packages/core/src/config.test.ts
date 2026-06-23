@@ -1395,11 +1395,11 @@ agents:
   })
 })
 
-// --- ZOD063: workstation slug, mode, port xor advertise_url ---
+// --- ZOD063: workstation, mode, port xor advertise_url ---
 
-const slugBase = (extra: string) => `
+const workstationBase = (extra: string) => `
 runtime: podman
-slug: laptop
+workstation: laptop
 transports:
   matrix:
     homeserver: https://zoon.eco
@@ -1414,11 +1414,11 @@ agents:
 
 describe('ZOD063: transport mode', () => {
   it("defaults mode to 'appservice'", () => {
-    const cfg = loadZooidConfig(slugBase('    port: 9099'))
+    const cfg = loadZooidConfig(workstationBase('    port: 9099'))
     expect(findMatrixTransport(cfg)!.transport.mode).toBe('appservice')
   })
   it('rejects an unknown mode', () => {
-    expect(() => loadZooidConfig(slugBase('    mode: peer\n    port: 9099')))
+    expect(() => loadZooidConfig(workstationBase('    mode: peer\n    port: 9099')))
       .toThrow(/mode.*appservice.*client/i)
   })
 })
@@ -1426,31 +1426,34 @@ describe('ZOD063: transport mode', () => {
 describe('ZOD063: port xor advertise_url', () => {
   it('errors when BOTH are set', () => {
     expect(() =>
-      loadZooidConfig(slugBase('    port: 9099\n    advertise_url: http://10.0.1.5:9099')),
+      loadZooidConfig(workstationBase('    port: 9099\n    advertise_url: http://10.0.1.5:9099')),
     ).toThrow(/port.*advertise_url|advertise_url.*port/i)
   })
   it('defaults to port 9099 when NEITHER is set (co-located mode)', () => {
-    const m = findMatrixTransport(loadZooidConfig(slugBase('')))!.transport
+    const m = findMatrixTransport(loadZooidConfig(workstationBase('')))!.transport
     expect(m.port).toBe(9099)
     expect(m.advertise_url).toBeUndefined()
   })
   it('accepts advertise_url alone', () => {
     const m = findMatrixTransport(
-      loadZooidConfig(slugBase('    advertise_url: http://10.0.1.5:9099')),
+      loadZooidConfig(workstationBase('    advertise_url: http://10.0.1.5:9099')),
     )!.transport
     expect(m.advertise_url).toBe('http://10.0.1.5:9099')
     expect(m.port).toBeUndefined()
   })
 })
 
-describe('ZOD063: slug-derived identity', () => {
-  it('derives sender_localpart and an exclusive slug namespace from top-level slug', () => {
-    const m = findMatrixTransport(loadZooidConfig(slugBase('    port: 9099')))!.transport
+describe('ZOD063: workstation-derived identity', () => {
+  it('derives sender_localpart and an exclusive workstation namespace from top-level workstation', () => {
+    const m = findMatrixTransport(loadZooidConfig(workstationBase('    port: 9099')))!.transport
     expect(m.sender_localpart).toBe('laptop')
     expect(m.user_namespace).toBe('@laptop\\..*:zoon.eco')
   })
-  it('rejects an invalid slug', () => {
-    expect(() => loadZooidConfig(slugBase('    port: 9099').replace('slug: laptop', 'slug: Lap.Top')))
-      .toThrow(/slug/i)
+  it('rejects an invalid workstation', () => {
+    expect(() =>
+      loadZooidConfig(
+        workstationBase('    port: 9099').replace('workstation: laptop', 'workstation: Lap.Top'),
+      ),
+    ).toThrow(/workstation/i)
   })
 })

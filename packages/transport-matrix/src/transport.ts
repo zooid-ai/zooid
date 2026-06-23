@@ -259,9 +259,13 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const sendQueue = new Map<string, Promise<void>>()
   // Thread participation index: keyed by thread root event_id.
   const threadStates = new Map<string, ThreadState>()
-  // Drop events older than this — Tuwunel may replay a backlog after the
-  // daemon was offline, and we don't want yesterday's "@docs hi" to fire now.
-  const cutoffTs = Date.now() - STARTUP_GRACE_MS
+  // Drop events older than this — in push (appservice) mode Tuwunel may replay
+  // a backlog after the daemon was offline, and we don't want yesterday's
+  // "@docs hi" to fire now. In pull (client) mode the persisted `since` cursor
+  // is the authoritative replay boundary (process everything after it — that's
+  // exactly the offline-resume feature), so the timestamp guard must NOT apply:
+  // the missed-while-offline mention is older than startup by design.
+  const cutoffTs = mode === 'client' ? Number.NEGATIVE_INFINITY : Date.now() - STARTUP_GRACE_MS
   // Idempotency: appservice transactions are retried on 4xx/5xx/timeout, and
   // the same event_id can arrive twice. Skip ones we've already taken.
   const seenEventIds = new Set<string>()

@@ -37,9 +37,9 @@ export interface BootstrapConfigsOpts {
   hsToken: string
   senderLocalpart: string
   userNamespace: string
-  /** Workstation slug. When set: registration id = slug, exclusive namespace, url derived from port/advertise_url. */
-  slug?: string
-  /** AS HTTP listener port. Used to derive the registration url when slug is set. */
+  /** Workstation id. When set: registration id = workstation, exclusive namespace, url derived from port/advertise_url. */
+  workstation?: string
+  /** AS HTTP listener port. Used to derive the registration url when workstation is set. */
   port?: number
   /** Explicit registration url override. Mutually exclusive with port. */
   advertiseUrl?: string
@@ -53,11 +53,11 @@ export function writeBootstrapConfigs(opts: BootstrapConfigsOpts): void {
 
   writeFileSync(paths.tuwunelTomlPath, renderTuwunelToml({ serverName }))
 
-  const id = opts.slug ?? 'zooid'
-  const url = opts.slug
+  const id = opts.workstation ?? 'zooid'
+  const url = opts.workstation
     ? deriveRegistrationUrl({ port: opts.port ?? 9099, advertise_url: opts.advertiseUrl })
     : `http://host.docker.internal:9099`
-  const exclusive = !!opts.slug
+  const exclusive = !!opts.workstation
   const registrationPath = join(paths.registrationsDir, `${id}.yaml`)
 
   const yaml = renderRegistration({

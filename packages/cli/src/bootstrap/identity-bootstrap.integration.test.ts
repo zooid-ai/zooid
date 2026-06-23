@@ -9,7 +9,7 @@ import { resolvePaths } from './paths.js'
 
 const YAML = `
 runtime: podman
-slug: laptop
+workstation: laptop
 transports:
   matrix:
     homeserver: http://localhost:8448
@@ -20,11 +20,11 @@ agents:
   docs: { acp: { preset: opencode }, matrix: { rooms: ['#docs'] } }
 `
 
-describe('bootstrap emits a slug-scoped registration', () => {
+describe('bootstrap emits a workstation-scoped registration', () => {
   let dir: string
   afterEach(() => dir && rmSync(dir, { recursive: true, force: true }))
 
-  it('config → registration round-trip is slug-consistent', () => {
+  it('config → registration round-trip is workstation-consistent', () => {
     dir = mkdtempSync(join(tmpdir(), 'zod063-'))
     const dataDir = join(dir, 'data', 'matrix')
     const paths = resolvePaths(dataDir)
@@ -38,7 +38,7 @@ describe('bootstrap emits a slug-scoped registration', () => {
       hsToken: 'hs-x',
       senderLocalpart: m.sender_localpart,
       userNamespace: m.user_namespace,
-      slug: m.slug,
+      workstation: m.workstation,
       port: m.port,
     })
 

@@ -199,12 +199,12 @@ export interface MatrixTransportConfig {
   hs_token: string
   /**
    * Localpart of the AS sender user (the bridge bot).
-   * @default 'zooid', or the workstation slug when `slug` is set
+   * @default 'zooid', or the workstation name when `workstation` is set
    */
   sender_localpart: string
   /**
    * Regex covering all bot users, e.g. `@.*:example.com`.
-   * @default `@.*:<host>`, or slug-scoped `@slug\..*:<host>` when `slug` is set
+   * @default `@.*:<host>`, or workstation-scoped `@<workstation>\..*:<host>` when `workstation` is set
    */
   user_namespace: string
   /**
@@ -226,11 +226,11 @@ export interface MatrixTransportConfig {
    */
   mode?: 'appservice' | 'client'
   /**
-   * Workstation slug derived from the top-level `slug:` in zooid.yaml.
-   * Present only when a slug is declared; absent for the shared-namespace
-   * `zooid dev` profile.
+   * Workstation identity derived from the top-level `workstation:` in
+   * zooid.yaml. Present only when a workstation is declared; absent for the
+   * shared-namespace `zooid dev` profile.
    */
-  slug?: string
+  workstation?: string
   /**
    * Workforce space localpart. Resolves to alias `#<space>:<server>`.
    * @default 'dev'
@@ -260,12 +260,12 @@ export type TransportConfig = MatrixTransportConfig | HttpTransportConfig
 export interface ZooidConfig {
   runtime: 'local' | 'docker' | 'podman'
   /**
-   * Workstation identity slug. A short, lowercase, hyphen-separated name that
+   * Workstation identity. A short, lowercase, hyphen-separated name that
    * uniquely identifies this daemon instance (e.g. `laptop`, `ec2-prod`).
    * When set, the matrix transport derives `sender_localpart` and
    * `user_namespace` from it, enabling exclusive per-workstation AS namespaces.
    */
-  slug?: string
+  workstation?: string
   /** Workforce-wide container defaults. Image only — no workforce-level env. Rejected when runtime: local. */
   container?: ZooidContainerConfig
   /** Required. Map of operator-chosen names → transport config. At least one entry. */

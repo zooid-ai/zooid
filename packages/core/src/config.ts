@@ -326,7 +326,7 @@ function parseZooidContainer(raw: unknown): ZooidContainerConfig {
 function parseTransports(
   raw: unknown,
   processEnv: NodeJS.ProcessEnv,
-  slug?: string,
+  workstation?: string,
 ): Record<string, TransportConfig> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('transports: must be a mapping with at least one entry')
@@ -338,7 +338,7 @@ function parseTransports(
   }
   const out: Record<string, TransportConfig> = {}
   for (const name of names) {
-    out[name] = parseTransport(name, r[name], processEnv, slug)
+    out[name] = parseTransport(name, r[name], processEnv, workstation)
   }
   const matrixEntries = Object.entries(out).filter(
     (e): e is [string, MatrixTransportConfig] => e[1].type === 'matrix',
@@ -382,7 +382,7 @@ function parseTransport(
   name: string,
   raw: unknown,
   processEnv: NodeJS.ProcessEnv,
-  slug?: string,
+  workstation?: string,
 ): TransportConfig {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error(`transports.${name}: must be a mapping`)
@@ -411,7 +411,7 @@ function parseTransport(
       )
     }
 
-    // Slug-derived defaults: sender_localpart and user_namespace
+    // Workstation-derived defaults: sender_localpart and user_namespace
     let resolvedHost: string | undefined
     if (typeof r.homeserver === 'string') {
       try {
@@ -421,13 +421,13 @@ function parseTransport(
       }
     }
 
-    if (slug !== undefined) {
-      if (!SLUG_RE.test(slug)) {
-        throw new Error(`slug must match /^[a-z0-9-]+$/ (got ${JSON.stringify(slug)})`)
+    if (workstation !== undefined) {
+      if (!SLUG_RE.test(workstation)) {
+        throw new Error(`workstation must match /^[a-z0-9-]+$/ (got ${JSON.stringify(workstation)})`)
       }
-      if (r.sender_localpart === undefined) r.sender_localpart = slug
+      if (r.sender_localpart === undefined) r.sender_localpart = workstation
       if (r.user_namespace === undefined && resolvedHost) {
-        r.user_namespace = `@${slug}\\..*:${resolvedHost}`
+        r.user_namespace = `@${workstation}\\..*:${resolvedHost}`
       }
     } else {
       if (r.sender_localpart === undefined) r.sender_localpart = 'zooid'
@@ -459,7 +459,7 @@ function parseTransport(
       user_namespace: r.user_namespace as string,
       mode: mode as 'appservice' | 'client',
     }
-    if (slug !== undefined) out.slug = slug
+    if (workstation !== undefined) out.workstation = workstation
 
     if (r.port !== undefined) {
       if (!Number.isInteger(r.port)) {
@@ -840,18 +840,18 @@ export function loadZooidConfig(
   const runtime = parseRuntime(r.runtime)
   const processEnv = process.env
 
-  let slug: string | undefined
-  if (r.slug !== undefined) {
-    if (typeof r.slug !== 'string' || r.slug.length === 0) {
-      throw new Error('slug must be a non-empty string')
+  let workstation: string | undefined
+  if (r.workstation !== undefined) {
+    if (typeof r.workstation !== 'string' || r.workstation.length === 0) {
+      throw new Error('workstation must be a non-empty string')
     }
-    if (!SLUG_RE.test(r.slug)) {
-      throw new Error(`slug must match /^[a-z0-9-]+$/ (got ${JSON.stringify(r.slug)})`)
+    if (!SLUG_RE.test(r.workstation)) {
+      throw new Error(`workstation must match /^[a-z0-9-]+$/ (got ${JSON.stringify(r.workstation)})`)
     }
-    slug = r.slug
+    workstation = r.workstation
   }
 
-  const transports = parseTransports(r.transports, processEnv, slug)
+  const transports = parseTransports(r.transports, processEnv, workstation)
   const hooks = zooidHooks(r)
   const agents = parseAgents(r.agents, runtime, transports, hooks, processEnv, opts.configDir)
 
@@ -861,7 +861,7 @@ export function loadZooidConfig(
     agents,
     hooks,
   }
-  if (slug !== undefined) cfg.slug = slug
+  if (workstation !== undefined) cfg.workstation = workstation
   if (r.container !== undefined && r.container !== null) {
     if (runtime === 'local') {
       throw new Error(

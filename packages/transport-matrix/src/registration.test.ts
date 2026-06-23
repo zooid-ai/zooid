@@ -41,7 +41,7 @@ describe('renderRegistration', () => {
   })
 })
 
-it('renders a slug-scoped EXCLUSIVE registration', () => {
+it('renders a workstation-scoped EXCLUSIVE registration', () => {
   const y = parse(
     renderRegistration({
       id: 'laptop',

@@ -24,6 +24,7 @@ import {
   startWorkforcePublisher,
   type AgentBinding,
   type PublisherHandle,
+  type SyncLoop,
 } from '@zooid/transport-matrix'
 import {
   SpawnRegistry,
@@ -32,6 +33,8 @@ import {
 } from '@zooid/context-mcp'
 import { buildAcpRegistry } from '../build-registry.js'
 import { prepullImages } from '../prepull-images.js'
+import { makeSyncCursorStore } from './sync-cursors.js'
+import { shouldBindHttpListener } from './pull-wiring.js'
 
 export interface StartDaemonOpts {
   configPath?: string
@@ -66,6 +69,11 @@ export interface StartDaemonOpts {
    * task instead of leaving the user staring at an unmoving spinner.
    */
   prepullLog?: (line: string) => void
+  /**
+   * Override the global fetch used by the daemon's MatrixClient. Test seam for
+   * driving pull mode against canned /sync responses without a homeserver.
+   */
+  fetch?: typeof globalThis.fetch
 }
 
 export interface DaemonHandle {
@@ -149,6 +157,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   )
 
   let server: ServerType | null = null
+  let syncLoops: SyncLoop[] | undefined
   let stopped = false
   let resolveStopped!: () => void
   const whenStopped = new Promise<void>((r) => {
@@ -159,9 +168,17 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   let port: number
 
   if (matrix) {
+    const mode = matrix.transport.mode ?? 'appservice'
+    // Pull (client) mode persists a per-agent `since` cursor for offline resume,
+    // so it needs a data dir. Push mode doesn't.
+    if (mode === 'client' && !opts.agentsDir) {
+      throw new Error('matrix client (pull) mode requires a data dir for since-cursor persistence')
+    }
+    const cursors = opts.agentsDir ? makeSyncCursorStore(opts.agentsDir) : undefined
     const client = new MatrixClient({
       homeserver: matrix.transport.homeserver,
       asToken: matrix.transport.as_token,
+      ...(opts.fetch ? { fetch: opts.fetch } : {}),
     })
     const mediaClient = new MediaClient({
       homeserver: matrix.transport.homeserver,
@@ -191,6 +208,9 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       matrix.transport.user_namespace.split(':').slice(1).join(':').replace(/\\?\)?$/, '') ||
       new URL(matrix.transport.homeserver).hostname
     const asUserId = `@${matrix.transport.sender_localpart}:${serverName}`
+    // Pull mode's loadSince/saveSince are keyed by MXID; the cursor store is
+    // keyed by agent name. Translate via the bindings we just built.
+    const nameByUserId = new Map(bindings.map((b) => [b.userId, b.name]))
     const transport = createMatrixTransport({
       agents: registry,
       approvals,
@@ -200,13 +220,27 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       adminUserId: opts.adminUserId,
       botUserId: asUserId,
       media: mediaClient,
+      mode,
+      loadSince: (uid) => {
+        const name = nameByUserId.get(uid)
+        return name && cursors ? cursors.loadSince(name) : null
+      },
+      saveSince: (uid, since) => {
+        const name = nameByUserId.get(uid)
+        if (name && cursors) cursors.saveSince(name, since)
+      },
     })
-    const requestedPort = matrix.transport.port ?? 9000
-    // Bind 0.0.0.0 explicitly — @hono/node-server defaults to IPv6-only on
-    // macOS, which Docker's NAT bridge can't reach when Tuwunel pushes AS
-    // events back to host.docker.internal:<port>.
-    server = serve({ fetch: transport.app.fetch, port: requestedPort, hostname: '0.0.0.0' })
-    port = await listenAsync(server)
+    if (shouldBindHttpListener(mode)) {
+      const requestedPort = matrix.transport.port ?? 9000
+      // Bind 0.0.0.0 explicitly — @hono/node-server defaults to IPv6-only on
+      // macOS, which Docker's NAT bridge can't reach when Tuwunel pushes AS
+      // events back to host.docker.internal:<port>.
+      server = serve({ fetch: transport.app.fetch, port: requestedPort, hostname: '0.0.0.0' })
+      port = await listenAsync(server)
+    } else {
+      // Pull (client) mode runs outbound /sync loops; no inbound listener.
+      port = 0
+    }
     const spaceLocalpart = matrix.transport.space ?? 'dev'
     const adminUserIds = opts.adminUserId ? [opts.adminUserId] : []
     let spaceRoomId: string | undefined
@@ -232,6 +266,14 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     // *after* the space exists so BotPool can attach each agent room as
     // m.space.child while joining it.
     await transport.bootstrap({ spaceRoomId, asUserId, adminUserIds })
+
+    // Pull mode: start the outbound /sync loops after bootstrap so the rooms
+    // each agent syncs already exist. Loops long-poll until stop().
+    syncLoops = transport.syncLoops
+    if (syncLoops?.length) {
+      for (const loop of syncLoops) void loop.run()
+      console.log(`[matrix] pull mode: ${syncLoops.length} sync loop(s) running`)
+    }
 
     if (spaceRoomId) {
       try {
@@ -272,6 +314,11 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   const stop = async (): Promise<void> => {
     if (stopped) return whenStopped
     stopped = true
+    try {
+      if (syncLoops) for (const loop of syncLoops) loop.stop()
+    } catch {
+      // swallow
+    }
     try {
       if (server) await closeAsync(server)
     } catch {
