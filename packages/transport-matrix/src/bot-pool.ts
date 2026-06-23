@@ -82,7 +82,13 @@ export class BotPool {
               } else {
                 const colon = room.indexOf(':')
                 const aliasLocalpart = colon > 1 ? room.slice(1, colon) : room.slice(1)
-                const sender = opts.adminUserId ?? a.userId
+                // Workstation-created rooms are owned by the AS sender bot (PL
+                // 100, already seeded in the power override below). Agents join
+                // as plain members and must never be room admins. The human
+                // operator is invited + seeded at PL 100, but can't be the
+                // creator under a workstation-scoped namespace — the AS token
+                // can't impersonate a non-namespaced human.
+                const sender = opts.asUserId ?? opts.adminUserId ?? a.userId
                 const userPowerLevels = buildUserPowerLevels(
                   opts.asUserId,
                   opts.adminUserIds,

@@ -248,8 +248,14 @@ describe('BotPool.bootstrap workforce-space attachment', () => {
       ],
     )
     await pool.bootstrap({ spaceRoomId: '!space:zoon.local', asUserId: '@zooid:zoon.local' })
+    // Created BY the AS sender bot (room owner/admin), never by the agent —
+    // agents join as plain members, never room admins.
     expect(createRoom).toHaveBeenCalledWith(
-      expect.objectContaining({ roomAliasName: 'design', restrictedToSpaceId: '!space:zoon.local' }),
+      expect.objectContaining({
+        roomAliasName: 'design',
+        restrictedToSpaceId: '!space:zoon.local',
+        senderUserId: '@zooid:zoon.local',
+      }),
     )
   })
 
