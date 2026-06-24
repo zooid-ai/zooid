@@ -15,6 +15,7 @@ describe('generateZooidYaml', () => {
       model: 'claude-sonnet-4-6',
     })
     expect(out).toContain('runtime: local')
+    expect(out).toContain('workstation: dev')
     expect(out).toContain('homeserver: http://localhost:8448')
     expect(out).toContain('port: 9099')
     expect(out).toContain('zooid-assistant:')
@@ -25,6 +26,12 @@ describe('generateZooidYaml', () => {
     expect(out).not.toContain('user_id:')
     expect(out).not.toContain('workdir:')
     expect(out).not.toContain('transport: matrix')
+  })
+
+  it('includes a comment pointing at pull mode for remote/NAT setups', () => {
+    const out = generateZooidYaml({ preset: 'claude', model: 'claude-sonnet-4-6' })
+    expect(out).toContain('mode: client')
+    expect(out).toMatch(/pull mode/i)
   })
 
   it('omits model on the acp block for opencode (model lives in opencode.json)', () => {

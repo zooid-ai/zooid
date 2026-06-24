@@ -10,6 +10,12 @@ export function generateZooidYaml(opts: ZooidYamlOpts): string {
       ? `    acp: { preset: opencode }`
       : `    acp:\n      preset: ${opts.preset}\n      model: ${opts.model}`
   return `runtime: local
+workstation: dev
+
+# This daemon connects in push mode: the homeserver reaches the listener on
+# \`port\` below. To run it against a homeserver it can't open a port to —
+# e.g. on your laptop, behind NAT — switch to pull mode: set \`mode: client\`
+# under transports.matrix and drop \`port\`. Agents are reachable either way.
 
 transports:
   matrix:

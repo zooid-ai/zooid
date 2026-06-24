@@ -596,10 +596,16 @@ function parseTransportBinding(
     }
     const serverName = deriveServerName(refTransport.user_namespace)
 
+    // When the referenced transport is workstationed (ZOD063), an agent with no
+    // explicit user_id gets the workstation-scoped MXID @{workstation}.{name},
+    // so it lands inside the AS's exclusive @{workstation}\..* namespace.
+    // Without this it would default to @{name} and be rejected (M_EXCLUSIVE).
     const rawUserId =
       typeof block.user_id === 'string' && block.user_id.length > 0
         ? block.user_id
-        : `@${name}`
+        : refTransport.workstation
+          ? `@${refTransport.workstation}.${name}`
+          : `@${name}`
     let userId = rawUserId
     if (!userId.includes(':') && MATRIX_USER_LOCALPART_RE.test(userId)) {
       userId = `${userId}:${serverName}`
