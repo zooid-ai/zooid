@@ -300,7 +300,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
     [
       '',
       chalk.bold('Tuwunel is up.') + ` ${homeserver}`,
-      chalk.bold('UI:        ') + ` http://localhost:${flags.uiPort}`,
+      chalk.bold('UI:        ') + ` http://localhost:${(ctx.uiServer?.address() as { port?: number } | null)?.port ?? flags.uiPort}`,
       `  ${chalk.cyan('admin user:')} ${flags.adminUser} / ${flags.adminPassword}`,
       `  ${chalk.cyan('data dir:')} ${layout.dataRoot}`,
       ...(ctx.webWatch
