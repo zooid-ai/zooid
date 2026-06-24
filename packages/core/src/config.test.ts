@@ -1457,3 +1457,42 @@ describe('ZOD063: workstation-derived identity', () => {
     ).toThrow(/workstation/i)
   })
 })
+
+describe('ZOD067: workstation-derived agent MXID default', () => {
+  // workstationBase declares `workstation: laptop`, homeserver zoon.eco, and an
+  // agent `docs` with no explicit user_id — exactly the derivation case.
+  it('derives @{workstation}.{name} when a workstation is set and user_id is omitted', () => {
+    const cfg = loadZooidConfig(workstationBase('    port: 9099'))
+    expect(cfg.agents.docs!.matrix?.user_id).toBe('@laptop.docs:zoon.eco')
+  })
+
+  it('derives an in-namespace MXID — it matches the transport user_namespace', () => {
+    const cfg = loadZooidConfig(workstationBase('    port: 9099'))
+    // user_namespace is @laptop\..*:zoon.eco — the derived MXID must satisfy it,
+    // which is exactly what avoids M_EXCLUSIVE at impersonation time.
+    const ns = findMatrixTransport(cfg)!.transport.user_namespace
+    expect(new RegExp(`^${ns}$`).test(cfg.agents.docs!.matrix!.user_id)).toBe(true)
+  })
+
+  it('still honors an explicit user_id over the derived default', () => {
+    const yaml = workstationBase('    port: 9099').replace(
+      "matrix: { rooms: ['#docs'] }",
+      "matrix: { user_id: '@laptop.custom:zoon.eco', rooms: ['#docs'] }",
+    )
+    expect(loadZooidConfig(yaml).agents.docs!.matrix?.user_id).toBe('@laptop.custom:zoon.eco')
+  })
+
+  it('leaves the flat @{name} default unchanged when no workstation is declared', () => {
+    const cfg = loadZooidConfig(`
+runtime: local
+${MATRIX_TRANSPORT.trimStart()}
+agents:
+  zooid-assistant:
+    acp: { preset: claude }
+    matrix:
+      transport: matrix-local
+      rooms: ['#zooid']
+`)
+    expect(cfg.agents['zooid-assistant']!.matrix?.user_id).toBe('@zooid-assistant:localhost')
+  })
+})
