@@ -9,27 +9,30 @@ import {
 } from './generators.js'
 
 describe('generateZooidYaml', () => {
-  it('produces the short post-ZOD048 shape for claude + model', () => {
-    const out = generateZooidYaml({
-      preset: 'claude',
-      model: 'claude-sonnet-4-6',
-    })
+  it('produces the short shape for claude with NO model (harness default)', () => {
+    const out = generateZooidYaml({ preset: 'claude' })
     expect(out).toContain('runtime: local')
     expect(out).toContain('workstation: dev')
     expect(out).toContain('homeserver: http://localhost:8448')
     expect(out).toContain('port: 9099')
     expect(out).toContain('zooid-assistant:')
-    expect(out).toContain('preset: claude')
-    expect(out).toContain('model: claude-sonnet-4-6')
+    expect(out).toContain('acp: { preset: claude }')
     expect(out).toContain("display_name: 'Zooid Assistant'")
     expect(out).toContain("rooms: ['#zooid']")
+    expect(out).not.toContain('model:')
     expect(out).not.toContain('user_id:')
     expect(out).not.toContain('workdir:')
     expect(out).not.toContain('transport: matrix')
   })
 
+  it('expands the acp block to carry a model only when one is pinned', () => {
+    const out = generateZooidYaml({ preset: 'claude', model: 'claude-opus-4-8' })
+    expect(out).toContain('preset: claude')
+    expect(out).toContain('model: claude-opus-4-8')
+  })
+
   it('includes a comment pointing at pull mode for remote/NAT setups', () => {
-    const out = generateZooidYaml({ preset: 'claude', model: 'claude-sonnet-4-6' })
+    const out = generateZooidYaml({ preset: 'claude' })
     expect(out).toContain('mode: client')
     expect(out).toMatch(/pull mode/i)
   })
@@ -66,22 +69,30 @@ describe('generateClaudeSettings', () => {
 })
 
 describe('generateOpencodeJson', () => {
-  it('produces opencode-go/<model> with the OPENCODE_API_KEY env reference', () => {
+  it('omits model by default (opencode picks its own) but keeps provider + apiKey', () => {
+    const out = generateOpencodeJson({
+      provider: 'opencode-go',
+      apiKeyEnvVar: 'OPENCODE_API_KEY',
+    })
+    const parsed = JSON.parse(out)
+    expect(parsed).not.toHaveProperty('model')
+    expect(parsed.provider['opencode-go'].options.apiKey).toBe('{env:OPENCODE_API_KEY}')
+    expect(parsed.permission.webfetch).toBe('allow')
+  })
+
+  it('writes provider/model only when a model is pinned', () => {
     const out = generateOpencodeJson({
       provider: 'opencode-go',
       model: 'kimi-k2.6',
       apiKeyEnvVar: 'OPENCODE_API_KEY',
     })
-    const parsed = JSON.parse(out)
-    expect(parsed.model).toBe('opencode-go/kimi-k2.6')
-    expect(parsed.provider['opencode-go'].options.apiKey).toBe('{env:OPENCODE_API_KEY}')
-    expect(parsed.permission.webfetch).toBe('allow')
+    expect(JSON.parse(out).model).toBe('opencode-go/kimi-k2.6')
   })
 
-  it('produces a TODO stub for the custom provider', () => {
+  it('produces a model-less TODO stub for the custom provider', () => {
     const out = generateOpencodeJson({ provider: 'custom' })
     const parsed = JSON.parse(out)
-    expect(parsed.model).toMatch(/TODO/)
+    expect(parsed).not.toHaveProperty('model')
     expect(parsed.provider).toHaveProperty('TODO')
   })
 })

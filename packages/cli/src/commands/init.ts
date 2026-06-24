@@ -21,9 +21,9 @@ export interface InitOptions {
   preset: 'claude' | 'codex' | 'opencode'
   /** Required for claude/codex; ignored for opencode. */
   auth?: 'subscription' | 'api-key'
-  /** Required for claude/codex; required for opencode (paired with `provider`). */
+  /** Optional model pin. Omitted by default — the harness uses its own default. */
   model?: string
-  /** Required for opencode. */
+  /** opencode provider id; defaults to `opencode-go` in the wizard. */
   provider?: string
   /** Required on api-key path; required for opencode. */
   apiKey?: string
@@ -68,7 +68,6 @@ export async function runInit(opts: InitOptions): Promise<void> {
   const writes: WriteSpec[] = []
 
   if (opts.preset === 'claude' || opts.preset === 'codex') {
-    if (!opts.model) throw new Error(`--model is required for preset ${opts.preset}`)
     if (!opts.auth) throw new Error('--auth (subscription|api-key) is required for claude/codex')
     const meta = findSimplePreset(opts.preset)!
 
@@ -101,7 +100,6 @@ export async function runInit(opts: InitOptions): Promise<void> {
     const isCustom = opts.provider === 'custom'
     const providerMeta = isCustom ? undefined : findOpencodeProvider(opts.provider)
     if (!isCustom && !providerMeta) throw new Error(`unknown opencode provider: ${opts.provider}`)
-    if (!isCustom && !opts.model) throw new Error('--model is required (paired with --provider)')
     if (!isCustom && !opts.apiKey) throw new Error('--api-key is required for opencode')
 
     writes.push({ path: 'zooid.yaml', content: generateZooidYaml({ preset: 'opencode' }) })

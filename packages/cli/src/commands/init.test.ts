@@ -19,12 +19,11 @@ function loadYaml(path: string): unknown {
 }
 
 describe('runInit — claude subscription path', () => {
-  it('writes yaml + AGENTS.md + .claude/settings.json + .gitignore (no .env, no opencode.json)', async () => {
+  it('writes yaml + AGENTS.md + .claude/settings.json + .gitignore (no model, no .env, no opencode.json)', async () => {
     await runInit({
       dir,
       preset: 'claude',
       auth: 'subscription',
-      model: 'claude-sonnet-4-6',
     })
 
     expect(existsSync(join(dir, 'zooid.yaml'))).toBe(true)
@@ -36,11 +35,20 @@ describe('runInit — claude subscription path', () => {
     expect(existsSync(join(dir, 'agents/zooid-assistant/opencode.json'))).toBe(false)
 
     const cfg = loadYaml(join(dir, 'zooid.yaml')) as {
-      agents: { 'zooid-assistant': { acp: { preset: string; model: string } } }
+      agents: { 'zooid-assistant': { acp: { preset: string; model?: string } } }
+    }
+    // No model — the harness chooses its own default.
+    expect(cfg.agents['zooid-assistant'].acp).toEqual({ preset: 'claude' })
+  })
+
+  it('pins a model when --model is passed', async () => {
+    await runInit({ dir, preset: 'claude', auth: 'subscription', model: 'claude-opus-4-8' })
+    const cfg = loadYaml(join(dir, 'zooid.yaml')) as {
+      agents: { 'zooid-assistant': { acp: { preset: string; model?: string } } }
     }
     expect(cfg.agents['zooid-assistant'].acp).toEqual({
       preset: 'claude',
-      model: 'claude-sonnet-4-6',
+      model: 'claude-opus-4-8',
     })
   })
 })
@@ -51,7 +59,6 @@ describe('runInit — claude api-key path', () => {
       dir,
       preset: 'claude',
       auth: 'api-key',
-      model: 'claude-sonnet-4-6',
       apiKey: 'sk-ant-xyz',
     })
 
@@ -60,12 +67,11 @@ describe('runInit — claude api-key path', () => {
 })
 
 describe('runInit — opencode opencode-go path', () => {
-  it('writes opencode.json with opencode-go provider + env-interpolated apiKey', async () => {
+  it('writes opencode.json with opencode-go provider + env-interpolated apiKey, no model', async () => {
     await runInit({
       dir,
       preset: 'opencode',
       provider: 'opencode-go',
-      model: 'kimi-k2.6',
       apiKey: 'sk-opencode-zzz',
     })
 
@@ -73,7 +79,8 @@ describe('runInit — opencode opencode-go path', () => {
     const oc = JSON.parse(
       readFileSync(join(dir, 'agents/zooid-assistant/opencode.json'), 'utf8'),
     )
-    expect(oc.model).toBe('opencode-go/kimi-k2.6')
+    // No model — opencode picks its own default (e.g. bigpickle).
+    expect(oc).not.toHaveProperty('model')
     expect(oc.provider['opencode-go'].options.apiKey).toBe('{env:OPENCODE_API_KEY}')
     expect(oc.permission.webfetch).toBe('allow')
 
@@ -90,7 +97,7 @@ describe('runInit — idempotency', () => {
   it('errors on non-empty dir without --force', async () => {
     writeFileSync(join(dir, 'preexisting.txt'), 'x')
     await expect(
-      runInit({ dir, preset: 'claude', auth: 'subscription', model: 'claude-sonnet-4-6' }),
+      runInit({ dir, preset: 'claude', auth: 'subscription' }),
     ).rejects.toThrow(/non-empty/i)
   })
 
@@ -99,7 +106,7 @@ describe('runInit — idempotency', () => {
     writeFileSync(join(dir, 'pnpm-lock.yaml'), 'lockfileVersion: 9')
     require('node:fs').mkdirSync(join(dir, 'node_modules'))
     require('node:fs').mkdirSync(join(dir, '.git'))
-    await runInit({ dir, preset: 'claude', auth: 'subscription', model: 'claude-sonnet-4-6' })
+    await runInit({ dir, preset: 'claude', auth: 'subscription' })
     expect(existsSync(join(dir, 'zooid.yaml'))).toBe(true)
   })
 
@@ -109,7 +116,6 @@ describe('runInit — idempotency', () => {
       dir,
       preset: 'claude',
       auth: 'subscription',
-      model: 'claude-sonnet-4-6',
       force: true,
     })
     expect(readFileSync(join(dir, 'zooid.yaml'), 'utf8')).toContain('preexisting: true')
@@ -122,7 +128,6 @@ describe('runInit — idempotency', () => {
       dir,
       preset: 'claude',
       auth: 'subscription',
-      model: 'claude-sonnet-4-6',
       force: true,
       overwrite: true,
     })

@@ -15,7 +15,7 @@ describe('zooid init scaffold round-trips into an in-namespace agent MXID', () =
   })
 
   it('the generated workstation scaffold parses to @dev.zooid-assistant inside the exclusive namespace', () => {
-    const yaml = generateZooidYaml({ preset: 'claude', model: 'claude-sonnet-4-6' })
+    const yaml = generateZooidYaml({ preset: 'claude' })
     const config = loadZooidConfig(yaml)
 
     // Workstation drove the registration namespace...

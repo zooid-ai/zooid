@@ -7,11 +7,11 @@ import {
 } from './registry.js'
 
 describe('init registry', () => {
-  it('SIMPLE_PRESETS contains claude and codex with non-empty model lists', () => {
+  it('SIMPLE_PRESETS contains claude and codex (no model lists to maintain)', () => {
     const names = SIMPLE_PRESETS.map((p) => p.preset)
     expect(names).toEqual(['claude', 'codex'])
     for (const p of SIMPLE_PRESETS) {
-      expect(p.models.length).toBeGreaterThan(0)
+      expect(p).not.toHaveProperty('models')
       expect(p.apiKeyEnvVar).toMatch(/^[A-Z_]+_API_KEY$/)
       expect(p.credentialDir.length).toBeGreaterThan(0)
     }

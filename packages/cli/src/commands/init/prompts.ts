@@ -1,9 +1,5 @@
 import { select, password } from '@inquirer/prompts'
-import {
-  OPENCODE_PROVIDERS,
-  findOpencodeProvider,
-  findSimplePreset,
-} from './registry.js'
+import { findOpencodeProvider, findSimplePreset } from './registry.js'
 import type { InitOptions } from '../init.js'
 
 export interface PromptInput {
@@ -38,19 +34,10 @@ export async function resolveOptions(flags: PromptInput): Promise<InitOptions> {
   ))
 
   if (preset === 'opencode') {
-    const provider = flags.provider ?? (await ask(
-      () => select({
-        message: 'Which provider?',
-        choices: [
-          ...OPENCODE_PROVIDERS.map((p) => ({
-            name: `${p.label}  (${p.description})`,
-            value: p.id,
-          })),
-          { name: 'custom (write your own opencode.json block)', value: 'custom' },
-        ],
-      }),
-      () => '--provider is required for opencode',
-    ))
+    // The interactive wizard never asks which provider/model — it defaults to
+    // opencode-go (the recommended subscription) and just collects the API key.
+    // Other providers and a pinned model are reachable via --provider / --model.
+    const provider = flags.provider ?? 'opencode-go'
     if (provider === 'custom') {
       return {
         dir: flags.dir,
@@ -62,13 +49,6 @@ export async function resolveOptions(flags: PromptInput): Promise<InitOptions> {
     }
     const meta = findOpencodeProvider(provider)
     if (!meta) throw new Error(`unknown opencode provider: ${provider}`)
-    const model = flags.model ?? (await ask(
-      () => select({
-        message: 'Which model?',
-        choices: meta.models.map((m) => ({ name: m, value: m })),
-      }),
-      () => '--model is required',
-    ))
     const apiKey = flags.apiKey ?? (await ask(
       () => password({ message: `${meta.label} API key:` }),
       () => '--api-key is required',
@@ -77,7 +57,7 @@ export async function resolveOptions(flags: PromptInput): Promise<InitOptions> {
       dir: flags.dir,
       preset,
       provider,
-      model,
+      model: flags.model,
       apiKey,
       force: flags.force,
       overwrite: flags.overwrite,
@@ -96,13 +76,8 @@ export async function resolveOptions(flags: PromptInput): Promise<InitOptions> {
     }),
     () => '--auth is required (subscription | api-key)',
   ))
-  const model = flags.model ?? (await ask(
-    () => select({
-      message: 'Which model?',
-      choices: meta.models.map((m) => ({ name: m, value: m })),
-    }),
-    () => '--model is required',
-  ))
+  // No model prompt — Claude Code / Codex use their own current default.
+  // `--model` pins one for those who want it.
   const apiKey =
     auth === 'api-key'
       ? flags.apiKey ?? (await ask(
@@ -115,7 +90,7 @@ export async function resolveOptions(flags: PromptInput): Promise<InitOptions> {
     dir: flags.dir,
     preset,
     auth,
-    model,
+    model: flags.model,
     apiKey,
     force: flags.force,
     overwrite: flags.overwrite,

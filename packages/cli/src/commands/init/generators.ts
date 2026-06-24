@@ -1,13 +1,19 @@
 export interface ZooidYamlOpts {
   preset: 'claude' | 'codex' | 'opencode'
-  /** Only set for claude / codex; opencode reads its own opencode.json. */
+  /**
+   * Optional model pin. Omitted by default — the harness picks its own current
+   * default. Only set when the user passes `--model` (claude / codex); opencode
+   * reads its own opencode.json.
+   */
   model?: string
 }
 
 export function generateZooidYaml(opts: ZooidYamlOpts): string {
+  // No model by default: the harness chooses. A `--model` pin (claude/codex
+  // only) expands the block to carry it.
   const acpBlock =
-    opts.preset === 'opencode'
-      ? `    acp: { preset: opencode }`
+    opts.preset === 'opencode' || !opts.model
+      ? `    acp: { preset: ${opts.preset} }`
       : `    acp:\n      preset: ${opts.preset}\n      model: ${opts.model}`
   return `runtime: local
 workstation: dev
@@ -89,7 +95,6 @@ export function generateOpencodeJson(opts: OpencodeJsonOpts): string {
       JSON.stringify(
         {
           $schema: 'https://opencode.ai/config.json',
-          model: 'TODO/your-model',
           provider: { TODO: { options: {} } },
         },
         null,
@@ -97,16 +102,16 @@ export function generateOpencodeJson(opts: OpencodeJsonOpts): string {
       ) + '\n'
     )
   }
-  const cfg = {
-    $schema: 'https://opencode.ai/config.json',
-    model: `${opts.provider}/${opts.model}`,
-    provider: {
-      [opts.provider]: {
-        options: { apiKey: `{env:${opts.apiKeyEnvVar}}` },
-      },
+  // No `model` by default — opencode picks its own default. A `--model` pin
+  // writes the `provider/model` route.
+  const cfg: Record<string, unknown> = { $schema: 'https://opencode.ai/config.json' }
+  if (opts.model) cfg.model = `${opts.provider}/${opts.model}`
+  cfg.provider = {
+    [opts.provider]: {
+      options: { apiKey: `{env:${opts.apiKeyEnvVar}}` },
     },
-    permission: { webfetch: 'allow' as const },
   }
+  cfg.permission = { webfetch: 'allow' as const }
   return JSON.stringify(cfg, null, 2) + '\n'
 }
 
