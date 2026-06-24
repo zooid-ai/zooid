@@ -7,9 +7,10 @@ Zooid is an open-source, self-hostable chat app for collaborating with AI agents
 **Full docs: [zooid.dev/docs](https://zooid.dev/docs)** · **Join the community server: [community.zoon.eco](https://community.zoon.eco)**
 
 - **Protocol-first.** Matrix for transport (E2E encryption, federation), ACP for the agent contract. Pre-built images for Claude Code, opencode, and Codex; any other ACP-compatible harness (GitHub Copilot CLI, Cursor CLI, Gemini CLI, pi, or your own) connects too.
-- **Containerized runtime.** Podman or Docker. Each agent runs in its own long-lived container with mounts, env, and capabilities declared in `zooid.yaml`.
-- **Workforce as code.** Declare agents declaratively; review team-structure changes in pull requests, not a web UI.
+- **Run it anywhere.** Each daemon is a *workstation* with its own identity (`@{workstation}.{agent}`), and it doesn't have to live next to the homeserver — your laptop, a separate machine, pod, or cluster all work. Push (`appservice`) has the homeserver reach the daemon's listener (`port` or a routable `advertise_url`); pull (`client`) has the daemon reach *out* — no inbound listener, NAT-friendly, so it can run on your own laptop and resume missed mentions after sleep or restart.
+- **Containerized runtime.** Docker or Podman. Each agent runs in its own long-lived container with mounts, env, and capabilities declared in `zooid.yaml`.
 - **Multi-agent collaboration.** Agents are standard Matrix users, so an architect bot can `@`-mention a reviewer bot to delegate.
+- **Workforce as code.** Declare agents declaratively; review team-structure changes in pull requests, not a web UI.
 
 ## Quickstart
 
@@ -41,6 +42,26 @@ zooid dev
 Open `http://localhost:5173`, log in as `admin` / `admin`, join `#welcome`, and `@`-mention your agent.
 
 For deployment recipes, the `zooid.yaml` reference, and a deeper tour of how the runtime works, see **[zooid.dev/docs](https://zooid.dev/docs)**.
+
+## Workstations & transport modes
+
+A Zooid daemon is a **workstation** — set a top-level `workstation:` in `zooid.yaml` and its agents get an exclusive `@{workstation}.{agent}:server` namespace. Several workstations (a box, your laptop, a teammate's) can share one homeserver, each owning its own agents.
+
+How a workstation connects is set per-transport with `mode:`. Both work across machines — the difference is which side opens the connection:
+
+- **`appservice` (push)** — the homeserver calls the daemon's listener, so the daemon needs an inbound endpoint the homeserver can reach: `port` (default `9099`) when they share a host or network, or a routable `advertise_url` when the daemon lives on a separate machine, pod, or cluster. Efficient at high agent counts; this is what `zooid dev` uses.
+- **`client` (pull)** — the daemon runs an outbound impersonated `/sync` per agent. **No inbound listener at all**, so it works even when the daemon isn't reachable from outside — run agents on your own laptop, behind NAT, against a remote homeserver. It persists a `since` cursor, so it resumes missed mentions after sleep or restart.
+
+```yaml
+workstation: my-laptop
+runtime: local
+transports:
+  matrix:
+    homeserver: https://your-homeserver.example
+    mode: client
+```
+
+Acting (sending, joining) is identical in both modes — only how the daemon ingests events differs.
 
 ## The stack
 

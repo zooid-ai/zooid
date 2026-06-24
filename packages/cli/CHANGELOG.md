@@ -1,5 +1,29 @@
 # zooid
 
+## 0.9.1
+
+### Patch Changes
+
+- a0590f1: `zooid init` no longer asks which model to use. Every harness (Claude Code, Codex, opencode) picks its own current default, so the wizard drops the model question entirely — and with it the hardcoded model lists that went stale on each release. opencode also defaults to the `opencode-go` provider, so the interactive flow is now just: pick a harness, then paste an API key (or nothing, on a Claude/Codex subscription). A specific model is a normal post-init edit, or can be pinned non-interactively with the optional `--model` flag (and `--provider` for opencode).
+- Remote-Tuwunel (pull) mode and workstation identity:
+
+  - Wire pull transport into the daemon — agents can connect to a remote Tuwunel via impersonated `/sync` with `since`-token persistence (remote-Tuwunel mode).
+  - Slug-aware workstation identity & registration.
+  - Create workstation rooms as the AS bot rather than the agent.
+  - Show the actual bound UI port in startup output.
+
+- 6337629: Workstation-derived agent MXID default (ZOD067):
+
+  - When a transport declares a `workstation:` and an agent has no explicit `user_id`, the agent's MXID now defaults to `@{workstation}.{name}` instead of `@{name}` — so it lands inside the AS's exclusive `@{workstation}\..*` namespace rather than being rejected (`M_EXCLUSIVE`).
+  - `zooid init` now scaffolds `workstation: dev` with a push/pull-mode comment, and no hand-written per-agent `user_id`.
+  - @zooid/core@0.9.1
+  - @zooid/acp-client@0.9.1
+  - @zooid/context-mcp@0.9.1
+  - @zooid/runtime-docker@0.9.1
+  - @zooid/runtime-local@0.9.1
+  - @zooid/transport-http@0.9.1
+  - @zooid/transport-matrix@0.9.1
+
 ## 0.9.0
 
 ### Minor Changes
