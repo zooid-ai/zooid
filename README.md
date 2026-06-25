@@ -7,10 +7,11 @@ Zooid is an open-source, self-hostable chat app for collaborating with AI agents
 **Full docs: [zooid.dev/docs](https://zooid.dev/docs)** · **Join the community server: [community.zoon.eco](https://community.zoon.eco)**
 
 - **Protocol-first.** Matrix for transport (E2E encryption, federation), ACP for the agent contract. Pre-built images for Claude Code, opencode, and Codex; any other ACP-compatible harness (GitHub Copilot CLI, Cursor CLI, Gemini CLI, pi, or your own) connects too.
-- **Run it anywhere.** Each daemon is a *workstation* with its own identity (`@{workstation}.{agent}`), and it doesn't have to live next to the homeserver — your laptop, a separate machine, pod, or cluster all work. Push (`appservice`) has the homeserver reach the daemon's listener (`port` or a routable `advertise_url`); pull (`client`) has the daemon reach *out* — no inbound listener, NAT-friendly, so it can run on your own laptop and resume missed mentions after sleep or restart.
+- **Run it anywhere.** Each daemon is a *workstation* with its own identity, running as many agents as you like — put it on your laptop, a box, a pod, or a cluster; it doesn't have to live next to the homeserver. Several workstations can share one homeserver.
 - **Containerized runtime.** Docker or Podman. Each agent runs in its own long-lived container with mounts, env, and capabilities declared in `zooid.yaml`.
 - **Multi-agent collaboration.** Agents are standard Matrix users, so an architect bot can `@`-mention a reviewer bot to delegate.
 - **Workforce as code.** Declare agents declaratively; review team-structure changes in pull requests, not a web UI.
+- **Push or pull.** Pick how the daemon and server connect. *Push* suits a cloud deployment running many agents at high throughput — the server pushes messages straight to the daemon, which advertises a URL. *Pull* has the daemon fetch them itself, nothing to expose — so it runs behind a firewall or on your laptop and catches up on whatever it missed while off.
 
 ## Quickstart
 
@@ -45,12 +46,12 @@ For deployment recipes, the `zooid.yaml` reference, and a deeper tour of how the
 
 ## Workstations & transport modes
 
-A Zooid daemon is a **workstation** — set a top-level `workstation:` in `zooid.yaml` and its agents get an exclusive `@{workstation}.{agent}:server` namespace. Several workstations (a box, your laptop, a teammate's) can share one homeserver, each owning its own agents.
+A Zooid daemon is a **workstation** — set a top-level `workstation:` in `zooid.yaml` and its agents get an exclusive `@{workstation}.{agent}:server` namespace. Several workstations (a box, your laptop, a teammate's) can connect to a single homeserver, each owning its own agents.
 
-How a workstation connects is set per-transport with `mode:`. Both work across machines — the difference is which side opens the connection:
+How a workstation connects is set per-transport with `mode:` — the two choices (push/pull above), named by the value you put in the YAML:
 
-- **`appservice` (push)** — the homeserver calls the daemon's listener, so the daemon needs an inbound endpoint the homeserver can reach: `port` (default `9099`) when they share a host or network, or a routable `advertise_url` when the daemon lives on a separate machine, pod, or cluster. Efficient at high agent counts; this is what `zooid dev` uses.
-- **`client` (pull)** — the daemon runs an outbound impersonated `/sync` per agent. **No inbound listener at all**, so it works even when the daemon isn't reachable from outside — run agents on your own laptop, behind NAT, against a remote homeserver. It persists a `since` cursor, so it resumes missed mentions after sleep or restart.
+- **`appservice` (push)** — the homeserver delivers events to the daemon, so the daemon advertises an address the homeserver can reach: `port` (default `9099`) when they share a host or network, or an `advertise_url` when the daemon lives on a separate machine, pod, or cluster. Best for cloud deployments running many agents; this is what `zooid dev` uses.
+- **`client` (pull)** — the daemon fetches events itself, one outbound sync per agent, with nothing to expose. Runs behind a firewall or on your laptop against a remote homeserver, and catches up on whatever it missed after sleep or restart.
 
 ```yaml
 workstation: my-laptop

@@ -69,8 +69,8 @@ export interface ContainerConfig {
 }
 
 /**
- * Workforce-level container defaults. Currently `image` only — see
- * [ZOD043] §Non-goals on workforce-level env.
+ * Workforce-level container defaults. Currently `image` only — workforce-level
+ * env is intentionally unsupported (set env per-agent under `container.env`).
  */
 export interface ZooidContainerConfig {
   image?: string
