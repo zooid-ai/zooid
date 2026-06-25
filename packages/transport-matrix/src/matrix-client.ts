@@ -115,7 +115,14 @@ export class MatrixClient {
       ]
     }
     if (opts.userPowerLevels && Object.keys(opts.userPowerLevels).length > 0) {
-      body.power_level_content_override = { users: opts.userPowerLevels }
+      // `power_level_content_override.users` REPLACES the default `{ creator: 100 }`
+      // map rather than merging into it. If the creator (senderUserId) is omitted
+      // here they drop to `users_default` (0) and can't set `m.room.canonical_alias`
+      // (PL 50) during creation — the createRoom call then 403s and leaves an
+      // aliasless orphan room. Always keep the creator at admin power.
+      const users = { ...opts.userPowerLevels }
+      if (users[opts.senderUserId] === undefined) users[opts.senderUserId] = 100
+      body.power_level_content_override = { users }
     }
     const r = await this.fetch(
       `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.senderUserId)}`,

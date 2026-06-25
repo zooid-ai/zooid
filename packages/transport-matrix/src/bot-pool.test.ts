@@ -107,6 +107,129 @@ describe('BotPool.bootstrap — create-if-missing rooms', () => {
     ])
   })
 
+  it('joins the existing room when createRoom loses a race (alias taken)', async () => {
+    // Another agent/process created the room first: the alias didn't resolve at
+    // first check, createRoom then fails (alias in use), and a re-resolve finds
+    // it. We must join that room — not leave an orphan.
+    const calls: string[] = []
+    let resolveCount = 0
+    const client = {
+      registerBot: async () => {},
+      setDisplayName: async () => {},
+      resolveAlias: async (a: string) => {
+        resolveCount++
+        // First check: not found (we'll try to create). After the failed
+        // create, the re-resolve finds the room the concurrent creator made.
+        const r = resolveCount === 1 ? null : '!raced:localhost'
+        calls.push(`resolve:${a}->${r ?? 'null'}`)
+        return r
+      },
+      createRoom: async () => {
+        calls.push('create:THROWS(alias in use)')
+        throw new Error('createRoom(welcome) failed: 409 M_ROOM_IN_USE')
+      },
+      joinRoom: async (room: string, asUser: string) => {
+        calls.push(`join:${asUser}->${room}`)
+      },
+    }
+    const pool = new BotPool(client as never, [
+      {
+        name: 'echo',
+        userId: '@echo:localhost',
+        rooms: [{ alias: '#welcome:localhost' }],
+        trigger: 'mention',
+      },
+    ])
+    await pool.bootstrap({ adminUserId: '@admin:localhost' })
+    expect(calls).toEqual([
+      'resolve:#welcome:localhost->null',
+      'create:THROWS(alias in use)',
+      'resolve:#welcome:localhost->!raced:localhost',
+      'join:@echo:localhost->!raced:localhost',
+    ])
+  })
+
+  it('two pools racing the same room → exactly one room, both join it, no orphans', async () => {
+    // Models the real bug: two agents in *separate* daemon processes bootstrap
+    // the same workforce concurrently. They share one stateful homeserver where
+    // an alias can be claimed exactly once. Each pool's first directory read is
+    // stale (returns null — it read before anyone claimed), so both proceed to
+    // createRoom; the second create loses (alias in use) and must recover by
+    // re-resolving and joining, not orphaning.
+    const aliasToRoom = new Map<string, string>()
+    let roomsCreated = 0
+    let n = 0
+    const makeClient = () => {
+      let staleRead = true
+      const joins: string[] = []
+      return {
+        joins,
+        registerBot: async () => {},
+        setDisplayName: async () => {},
+        invite: async () => {},
+        sendStateEvent: async () => ({ event_id: '$x' }),
+        resolveAlias: async (a: string) => {
+          if (staleRead) {
+            staleRead = false
+            return null
+          }
+          return aliasToRoom.get(a) ?? null
+        },
+        createRoom: async (o: { roomAliasName: string }) => {
+          const alias = `#${o.roomAliasName}:s`
+          if (aliasToRoom.has(alias)) throw new Error('createRoom(shared) failed: 409 M_ROOM_IN_USE')
+          const id = `!room${++n}:s`
+          aliasToRoom.set(alias, id)
+          roomsCreated++
+          return id
+        },
+        joinRoom: async (room: string, user: string) => {
+          joins.push(`${user}->${room}`)
+        },
+      }
+    }
+    const a = makeClient()
+    const b = makeClient()
+    const poolA = new BotPool(a as never, [
+      { name: 'a', userId: '@a:s', rooms: [{ alias: '#shared:s' }], trigger: 'mention' },
+    ])
+    const poolB = new BotPool(b as never, [
+      { name: 'b', userId: '@b:s', rooms: [{ alias: '#shared:s' }], trigger: 'mention' },
+    ])
+    await poolA.bootstrap({ adminUserId: '@admin:s' })
+    await poolB.bootstrap({ adminUserId: '@admin:s' })
+
+    // Exactly one room exists — the loser recovered instead of orphaning.
+    expect(roomsCreated).toBe(1)
+    const theRoom = aliasToRoom.get('#shared:s')
+    // Both agents joined that one room.
+    expect(a.joins).toEqual([`@a:s->${theRoom}`])
+    expect(b.joins).toEqual([`@b:s->${theRoom}`])
+  })
+
+  it('rethrows when createRoom fails and the alias still does not resolve', async () => {
+    const client = {
+      registerBot: async () => {},
+      setDisplayName: async () => {},
+      resolveAlias: async () => null, // never resolves — genuine creation failure
+      createRoom: async () => {
+        throw new Error('createRoom(welcome) failed: 500 boom')
+      },
+      joinRoom: vi.fn(async () => undefined),
+    }
+    const pool = new BotPool(client as never, [
+      {
+        name: 'echo',
+        userId: '@echo:localhost',
+        rooms: [{ alias: '#welcome:localhost' }],
+        trigger: 'mention',
+      },
+    ])
+    // bootstrap swallows per-room errors (logs); the room is never joined.
+    await pool.bootstrap({ adminUserId: '@admin:localhost' })
+    expect(client.joinRoom).not.toHaveBeenCalled()
+  })
+
   it('skips create when the alias already resolves', async () => {
     const calls: string[] = []
     const client = {
