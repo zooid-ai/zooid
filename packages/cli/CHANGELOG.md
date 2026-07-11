@@ -1,5 +1,26 @@
 # zooid
 
+## 0.11.0
+
+### Minor Changes
+
+- Run the transport-context MCP server in container runtimes (docker/podman).
+  Previously `zooid-context` only worked under `runtime: local`; containerized
+  agents silently saw no context tool because the emitted `mcpServers` spec used
+  host paths unreachable inside the agent container. The daemon now bind-mounts a
+  self-contained context-mcp bin (read-only) and the daemon socket (read-write)
+  into each context-enabled agent's container and emits a container-resolved spec.
+
+### Patch Changes
+
+- @zooid/core@0.11.0
+- @zooid/acp-client@0.11.0
+- @zooid/context-mcp@0.11.0
+- @zooid/runtime-docker@0.11.0
+- @zooid/runtime-local@0.11.0
+- @zooid/transport-http@0.11.0
+- @zooid/transport-matrix@0.11.0
+
 ## 0.10.0
 
 ### Minor Changes

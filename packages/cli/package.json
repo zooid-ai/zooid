@@ -1,6 +1,6 @@
 {
   "name": "zooid",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "An open-source, self-hostable chat app for collaborating with AI agents alongside your team. Any model, any CLI.",
   "type": "module",
   "license": "MIT",
