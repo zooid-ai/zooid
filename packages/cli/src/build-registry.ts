@@ -14,7 +14,7 @@ import {
   type TransportContextProvider,
 } from '@zooid/core'
 import { MatrixClient, MatrixContextProvider } from '@zooid/transport-matrix'
-import { SpawnRegistry, buildContextServerSpec } from '@zooid/context-mcp'
+import { SpawnRegistry, buildContextServerSpec, contextContainerMounts } from '@zooid/context-mcp'
 import { PRESETS, type PresetMount, type PresetName } from '@zooid/acp-client'
 
 export interface BuildAcpRegistryOptions {
@@ -271,6 +271,20 @@ export function buildAcpRegistry(
 
   const contextSpawns = buildContextSpawns(cfg, opts)
 
+  // Container runtimes: opencode spawns the zooid-context MCP subprocess INSIDE
+  // its container, so the daemon socket + the (self-contained) bin must be
+  // bind-mounted in. Local runtime needs neither — the host spec resolves
+  // directly. Only agents that actually got a context factory get the mounts.
+  if (cfg.runtime !== 'local' && opts.daemonSockPath && contextSpawns) {
+    for (const name of Object.keys(cfg.agents)) {
+      if (!contextSpawns[name]) continue
+      mountsByAgent[name] = [
+        ...(mountsByAgent[name] ?? []),
+        ...contextContainerMounts({ sockPath: opts.daemonSockPath }),
+      ]
+    }
+  }
+
   return new AcpAgentRegistry({
     runtime,
     agents: cfg.agents,
@@ -322,7 +336,11 @@ function buildContextSpawns(
           threadRef: { channelId: channelId ?? threadId, threadId },
           provider,
         })
-        return buildContextServerSpec({ spawnId, sockPath })
+        return buildContextServerSpec({
+          spawnId,
+          sockPath,
+          containerize: cfg.runtime !== 'local',
+        })
       }
     } else {
       result[name] = undefined
