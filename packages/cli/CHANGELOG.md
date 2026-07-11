@@ -1,5 +1,27 @@
 # zooid
 
+## 0.10.0
+
+### Minor Changes
+
+- Directional agent-to-agent thread handoffs (ZOD069). An agent's bare reply in a
+  thread now routes only _up_ to the agent that @mentioned it (its caller), never
+  back down to a callee — modeling the agent call graph as a tree rooted at the
+  human. This closes the ping-pong loop hole where two agents alternating bare
+  acks in a thread would trigger each other forever. Human bare replies keep the
+  existing most-recent-poster behavior. Also pins the bundled web client to
+  @zooid/web@0.9.0.
+
+### Patch Changes
+
+- @zooid/core@0.10.0
+- @zooid/acp-client@0.10.0
+- @zooid/context-mcp@0.10.0
+- @zooid/runtime-docker@0.10.0
+- @zooid/runtime-local@0.10.0
+- @zooid/transport-http@0.10.0
+- @zooid/transport-matrix@0.10.0
+
 ## 0.9.1
 
 ### Patch Changes
