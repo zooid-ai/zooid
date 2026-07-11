@@ -670,14 +670,16 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     if (matches.length > 0 && promotedRoot) {
       let st = threadStates.get(promotedRoot)
       if (!st) {
-        st = { participants: [], rootMentions: [] }
+        st = { participants: [], rootMentions: [], callers: {} }
         threadStates.set(promotedRoot, st)
       }
       const msgMentions = new Set(extractMentions(evt as never))
+      const senderAgent = bindings.find((b) => b.userId === evt.sender)
       for (const a of bindings) {
-        if (msgMentions.has(a.userId) && !st.rootMentions.includes(a.name)) {
-          st.rootMentions.push(a.name)
-        }
+        if (!msgMentions.has(a.userId)) continue
+        if (!st.rootMentions.includes(a.name)) st.rootMentions.push(a.name)
+        // Call edge: the (agent) sender is the caller of every agent it @mentions.
+        if (senderAgent && a.name !== senderAgent.name) st.callers[a.name] = senderAgent.name
       }
     }
     for (const a of matches) {
@@ -687,7 +689,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           if (!promotedRoot) return
           let st = threadStates.get(promotedRoot)
           if (!st) {
-            st = { participants: [], rootMentions: [] }
+            st = { participants: [], rootMentions: [], callers: {} }
             threadStates.set(promotedRoot, st)
           }
           if (st.participants.at(-1) !== a.name) st.participants.push(a.name)
@@ -932,7 +934,7 @@ export async function rebuildThreadState(
   rootEventId: string,
   bindings: AgentBinding[],
 ): Promise<ThreadState> {
-  const state: ThreadState = { participants: [], rootMentions: [] }
+  const state: ThreadState = { participants: [], rootMentions: [], callers: {} }
   // Impersonate an agent that's actually a member of this room (AS reads
   // require room membership). Falling through to the first binding would
   // 403 if that agent never joined the target room.
@@ -942,10 +944,12 @@ export async function rebuildThreadState(
   const root = await client.fetchEvent(roomId, rootEventId, asUser)
   if (root) {
     const rootMentions = new Set(extractMentions(root as never))
+    const rootSender = (root as { sender?: string }).sender
+    const rootSenderAgent = rootSender ? bindings.find((b) => b.userId === rootSender) : undefined
     for (const a of bindings) {
-      if (rootMentions.has(a.userId) && !state.rootMentions.includes(a.name)) {
-        state.rootMentions.push(a.name)
-      }
+      if (!rootMentions.has(a.userId)) continue
+      if (!state.rootMentions.includes(a.name)) state.rootMentions.push(a.name)
+      if (rootSenderAgent && a.name !== rootSenderAgent.name) state.callers[a.name] = rootSenderAgent.name
     }
   }
 
@@ -957,15 +961,16 @@ export async function rebuildThreadState(
   // Also seed root-mentions from any subsequent agent @mentions in the thread.
   for (const ev of thread) {
     const mentions = new Set(extractMentions(ev as never))
+    const evSender = (ev as { sender?: string }).sender
+    const evSenderAgent = evSender ? bindings.find((b) => b.userId === evSender) : undefined
     for (const a of bindings) {
-      if (mentions.has(a.userId) && !state.rootMentions.includes(a.name)) {
-        state.rootMentions.push(a.name)
-      }
+      if (!mentions.has(a.userId)) continue
+      if (!state.rootMentions.includes(a.name)) state.rootMentions.push(a.name)
+      if (evSenderAgent && a.name !== evSenderAgent.name) state.callers[a.name] = evSenderAgent.name
     }
-    const sender = (ev as { sender?: string }).sender
     const type = (ev as { type?: string }).type
-    if (type === 'm.room.message' && sender) {
-      const a = bindings.find((b) => b.userId === sender)
+    if (type === 'm.room.message' && evSender) {
+      const a = bindings.find((b) => b.userId === evSender)
       if (a && state.participants.at(-1) !== a.name) state.participants.push(a.name)
     }
   }
