@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { route, isMediaMsgtype, type AgentBinding } from './router.js'
+import { route, isMediaMsgtype, type AgentBinding, type ThreadState } from './router.js'
 
 const agents: AgentBinding[] = [
   {
@@ -106,6 +106,122 @@ describe('media events', () => {
       content: { msgtype: 'm.image', body: 'dog.jpg', url: 'mxc://localhost/abc' },
     }
     const matches = route(mediaEvent, agents)
+    expect(matches).toEqual([])
+  })
+})
+
+describe('directional thread continuation (agent-to-agent handoffs)', () => {
+  const parent: AgentBinding = {
+    name: 'parent',
+    userId: '@parent:example.com',
+    rooms: [{ alias: '!room1:example.com' }],
+    trigger: 'mention',
+  }
+  const sub: AgentBinding = {
+    name: 'sub',
+    userId: '@sub:example.com',
+    rooms: [{ alias: '!room1:example.com' }],
+    trigger: 'mention',
+  }
+  const pair = [parent, sub]
+
+  // A bare (or mentioning) reply inside the thread rooted at $root.
+  function threadMsg(o: { sender: string; mentions?: string[] }) {
+    return {
+      type: 'm.room.message',
+      room_id: '!room1:example.com',
+      sender: o.sender,
+      event_id: '$evt',
+      content: {
+        msgtype: 'm.text',
+        body: 'reply',
+        'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+        ...(o.mentions ? { 'm.mentions': { user_ids: o.mentions } } : {}),
+      },
+    }
+  }
+
+  function states(s: Partial<ThreadState>): Map<string, ThreadState> {
+    return new Map([['$root', { participants: [], rootMentions: [], callers: {}, ...s }]])
+  }
+
+  it("routes a sub's bare reply up to its caller (parent notified)", () => {
+    const matches = route(
+      threadMsg({ sender: '@sub:example.com' }),
+      pair,
+      states({ participants: ['parent'], callers: { sub: 'parent' } }),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['parent'])
+  })
+
+  it('does NOT re-trigger a callee when its parent posts a bare reply (loop guard)', () => {
+    // parent is the sender; sub is its callee. parent has no caller of its own,
+    // so its bare reply routes to nobody — the loop dies here.
+    const matches = route(
+      threadMsg({ sender: '@parent:example.com' }),
+      pair,
+      states({ participants: ['parent', 'sub'], callers: { sub: 'parent' } }),
+    )
+    expect(matches).toEqual([])
+  })
+
+  it('an explicit @mention still re-engages the sub (rule 1 wins)', () => {
+    const matches = route(
+      threadMsg({ sender: '@parent:example.com', mentions: ['@sub:example.com'] }),
+      pair,
+      states({ participants: ['parent', 'sub'], callers: { sub: 'parent' } }),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['sub'])
+  })
+
+  it('dedupes: a sub reply that also @mentions its caller triggers the caller once', () => {
+    const matches = route(
+      threadMsg({ sender: '@sub:example.com', mentions: ['@parent:example.com'] }),
+      pair,
+      states({ participants: ['parent'], callers: { sub: 'parent' } }),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['parent'])
+  })
+
+  it('bubbles a 3-level chain one hop at a time (grandchild → child, not parent)', () => {
+    const child: AgentBinding = {
+      name: 'child',
+      userId: '@child:example.com',
+      rooms: [{ alias: '!room1:example.com' }],
+      trigger: 'mention',
+    }
+    const grand: AgentBinding = {
+      name: 'grand',
+      userId: '@grand:example.com',
+      rooms: [{ alias: '!room1:example.com' }],
+      trigger: 'mention',
+    }
+    const matches = route(
+      threadMsg({ sender: '@grand:example.com' }),
+      [parent, child, grand],
+      states({
+        participants: ['parent', 'child'],
+        callers: { child: 'parent', grand: 'child' },
+      }),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['child'])
+  })
+
+  it('a human bare reply still continues with the most-recent-posting agent (unchanged)', () => {
+    const matches = route(
+      threadMsg({ sender: '@alice:example.com' }),
+      pair,
+      states({ participants: ['parent', 'sub'], callers: { sub: 'parent' } }),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['sub'])
+  })
+
+  it('an agent with no caller (human-initiated) returns to nobody', () => {
+    const matches = route(
+      threadMsg({ sender: '@parent:example.com' }),
+      pair,
+      states({ participants: ['parent'], callers: {} }),
+    )
     expect(matches).toEqual([])
   })
 })

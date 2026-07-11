@@ -33,6 +33,14 @@ export interface ThreadState {
   participants: string[]
   /** Agent names @mentioned in the thread root event (or subsequently). */
   rootMentions: string[]
+  /**
+   * Agent-to-agent call edges: sub-agent name → the agent that @mentioned
+   * (called) it in this thread. A sub's bare reply bubbles up to its caller;
+   * a caller never implicitly re-triggers its callee. Makes agent↔agent
+   * acknowledgement loops structurally impossible. See [[ZOD039]] §
+   * Implicit triggers → Directional continuation.
+   */
+  callers: Record<string, string>
 }
 
 interface MaybeEvent {
@@ -77,14 +85,24 @@ export function route(
       matches.push(a)
       continue
     }
-    // Implicit trigger in a thread: most-recent-poster, or root-mention
-    // inheritance if no agent has posted yet.
+    // Implicit trigger in a thread.
     if (threadState) {
-      const lastPoster = threadState.participants.at(-1)
-      if (lastPoster) {
-        if (lastPoster === a.name) matches.push(a)
-      } else if (threadState.rootMentions.includes(a.name)) {
-        matches.push(a)
+      const senderAgent = agents.find((x) => x.userId === event.sender)
+      if (senderAgent) {
+        // Agent reply = a "return": route only to the agent that called the
+        // sender (its caller), never to a callee. Directional continuation
+        // keeps agent↔agent handoffs from looping — the call graph is a tree
+        // rooted at the human, so returns only ever walk up.
+        if (threadState.callers[senderAgent.name] === a.name) matches.push(a)
+      } else {
+        // Human (or non-agent) follow-up: continue with the most-recent-posting
+        // agent, or inherit the root mention if no agent has posted yet.
+        const lastPoster = threadState.participants.at(-1)
+        if (lastPoster) {
+          if (lastPoster === a.name) matches.push(a)
+        } else if (threadState.rootMentions.includes(a.name)) {
+          matches.push(a)
+        }
       }
     }
   }

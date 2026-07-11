@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
-import { createMatrixTransport } from './transport.js'
+import { createMatrixTransport, rebuildThreadState } from './transport.js'
 
 function fakeRegistry() {
   let resolvePrompt: (() => void) | undefined
@@ -1681,5 +1681,111 @@ describe('ad-hoc bot invite declines', () => {
     const { transport, client } = makeTransport()
     await postTxn(transport.app, { events: [invite('@dave:example.com', '@zongshan:example.com')] })
     expect(client.leaveRoom).not.toHaveBeenCalled()
+  })
+})
+
+describe('directional agent-to-agent handoffs', () => {
+  const parentSub = [
+    {
+      name: 'parent',
+      userId: '@parent:example.com',
+      rooms: [{ alias: '!r:example.com' }],
+      trigger: 'mention' as const,
+    },
+    {
+      name: 'sub',
+      userId: '@sub:example.com',
+      rooms: [{ alias: '!r:example.com' }],
+      trigger: 'mention' as const,
+    },
+  ]
+
+  function makePairTransport() {
+    const { reg } = fakeRegistry()
+    const approvals = fakeApprovals()
+    const client = fakeClient()
+    // Resolve prompts immediately so runTurn completes and `participants` append.
+    reg.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+    const transport = createMatrixTransport({
+      agents: reg as never,
+      approvals: approvals as never,
+      client: client as never,
+      bindings: parentSub,
+      hsToken: 'hs-secret',
+      botUserId: '@zooid:example.com',
+      drainQuietMs: 0,
+    })
+    return { transport, agents: reg, client }
+  }
+
+  // Post one m.room.message. Top-level unless `root` is given (then it's a
+  // thread reply on that root). `mentions` sets m.mentions.user_ids.
+  function post(
+    transport: ReturnType<typeof makePairTransport>['transport'],
+    o: { id: string; sender: string; root?: string; mentions?: string[] },
+  ) {
+    const content: Record<string, unknown> = { msgtype: 'm.text', body: 'x' }
+    if (o.mentions) content['m.mentions'] = { user_ids: o.mentions }
+    if (o.root) content['m.relates_to'] = { rel_type: 'm.thread', event_id: o.root }
+    return postTxn(transport.app, {
+      events: [
+        { type: 'm.room.message', event_id: o.id, room_id: '!r:example.com', sender: o.sender, content },
+      ],
+    })
+  }
+
+  it("a parent's ack does not re-trigger the sub, but the sub's reply notifies the parent", async () => {
+    const { transport, agents } = makePairTransport()
+
+    // 1. Human @mentions parent (top-level) → thread root is $root.
+    await post(transport, { id: '$root', sender: '@alice:example.com', mentions: ['@parent:example.com'] })
+    await settleTurn()
+
+    // 2. Parent replies in-thread @mentioning sub → sub is called; caller[sub]=parent.
+    await post(transport, { id: '$p1', sender: '@parent:example.com', root: '$root', mentions: ['@sub:example.com'] })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledWith('sub', '$root', '!r:example.com')
+
+    agents.ensureSession.mockClear()
+
+    // 3. Sub replies bare → bubbles UP to its caller (parent), nobody else.
+    await post(transport, { id: '$s1', sender: '@sub:example.com', root: '$root' })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com')
+    expect(agents.ensureSession).not.toHaveBeenCalledWith('sub', '$root', '!r:example.com')
+
+    agents.ensureSession.mockClear()
+
+    // 4. Parent replies bare (the "ack") → parent has no caller → routes to NOBODY.
+    //    This is the loop guard: sub is NOT re-triggered.
+    await post(transport, { id: '$p2', sender: '@parent:example.com', root: '$root' })
+    await settleTurn()
+    expect(agents.ensureSession).not.toHaveBeenCalled()
+  })
+
+  it('rebuildThreadState reconstructs caller[] from the timeline after a restart', async () => {
+    const client = {
+      // root: human @mentions parent (no caller — human sender).
+      fetchEvent: vi.fn(async () => ({
+        type: 'm.room.message',
+        sender: '@alice:example.com',
+        content: { 'm.mentions': { user_ids: ['@parent:example.com'] } },
+      })),
+      // thread: parent @mentions sub (caller[sub]=parent), then sub replies bare.
+      fetchThreadRelations: vi.fn(async () => ({
+        chunk: [
+          {
+            type: 'm.room.message',
+            sender: '@parent:example.com',
+            content: { 'm.mentions': { user_ids: ['@sub:example.com'] } },
+          },
+          { type: 'm.room.message', sender: '@sub:example.com', content: { body: 'ack' } },
+        ],
+      })),
+    }
+    const state = await rebuildThreadState(client as never, '!r:example.com', '$root', parentSub)
+    expect(state.callers).toEqual({ sub: 'parent' })
+    expect(state.rootMentions).toEqual(['parent', 'sub'])
+    expect(state.participants).toEqual(['parent', 'sub'])
   })
 })
