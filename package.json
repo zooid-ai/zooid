@@ -12,6 +12,7 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm -r test",
+    "test:ci": "pnpm -r exec vitest run --exclude '**/*integration*.test.ts' --exclude '**/integration/**' --passWithNoTests",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r exec rm -rf dist",
     "tuwunel:logs": "docker logs -f --tail 200 zooid-tuwunel",

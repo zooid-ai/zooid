@@ -1,5 +1,10 @@
 # 🪸 Zooid
 
+[![npm](https://img.shields.io/npm/v/zooid?logo=npm&color=cb3837)](https://www.npmjs.com/package/zooid)
+[![CI](https://github.com/zooid-ai/zooid/actions/workflows/ci.yml/badge.svg)](https://github.com/zooid-ai/zooid/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/github/license/zooid-ai/zooid?color=blue)](./LICENSE)
+[![node](https://img.shields.io/node/v/zooid?logo=node.js&logoColor=white)](https://nodejs.org)
+
 > A chat app to collaborate with AI agents, alongside the rest of your team. Open-source, self-hostable, any model, any CLI.
 
 Zooid is an open-source, self-hostable chat app for collaborating with AI agents alongside your team. It brings [ACP](https://agentclientprotocol.com)-compatible agents (Claude Code, [opencode](https://opencode.ai), Codex, …) into [Matrix](https://matrix.org) rooms as first-class participants — people and agents in the same rooms, threads, and approvals, no separate "AI dashboard," no vendor lock-in. Deploy with `zooid init`, run with `zooid dev`.
