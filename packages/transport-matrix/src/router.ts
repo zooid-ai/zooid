@@ -41,6 +41,13 @@ export interface ThreadState {
    * Implicit triggers → Directional continuation.
    */
   callers: Record<string, string>
+  /**
+   * Handoff arcs per sub-agent: the event ids of the agent→agent @mention
+   * messages that called it, in timeline order (last = current arc). Each
+   * call opens a fresh ACP session keyed `threadRoot|callEventId`
+   * ([[ZOD071]]). Append-only; rebuilt from the timeline after a restart.
+   */
+  handoffs: Record<string, string[]>
 }
 
 interface MaybeEvent {

@@ -48,6 +48,12 @@ export interface PromptInput {
    * transport-context provider sees the real room.
    */
   channelId?: string
+  /**
+   * The real thread root when `threadId` is a composed handoff-arc session
+   * key ([[ZOD071]]). Feeds the transport-context spawn so history reads
+   * target the real thread. Defaults to `threadId`.
+   */
+  contextThreadId?: string
   content: ContentBlock[]
 }
 

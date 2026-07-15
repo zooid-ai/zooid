@@ -37,7 +37,12 @@ export interface AcpRegistry {
   hasContextSpawn(name: string): boolean
   /** Per-agent approval timeout from zooid.yaml. 0 means no timeout. */
   getApprovalTimeoutMs(name: string): number
-  ensureSession(name: string, threadId: string, channelId?: string): Promise<string>
+  ensureSession(
+    name: string,
+    threadId: string,
+    channelId?: string,
+    contextThreadId?: string,
+  ): Promise<string>
   /** Drop the in-memory session for (agent, threadId). Next prompt re-creates one. */
   endSession(name: string, threadId: string): void
   prompt(name: string, input: PromptInput): Promise<PromptResult>
@@ -184,10 +189,15 @@ export class AcpAgentRegistry implements AcpRegistry {
     return this.opts.agents[name]?.approval_timeout_ms ?? 0
   }
 
-  async ensureSession(name: string, threadId: string, channelId?: string): Promise<string> {
+  async ensureSession(
+    name: string,
+    threadId: string,
+    channelId?: string,
+    contextThreadId?: string,
+  ): Promise<string> {
     if (!this.hasAgent(name)) throw new Error(`unknown agent: ${name}`)
     const client = await this.ensureClient(name)
-    return client.ensureSession(threadId, channelId)
+    return client.ensureSession(threadId, channelId, contextThreadId)
   }
 
   endSession(name: string, threadId: string): void {

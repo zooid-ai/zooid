@@ -107,7 +107,12 @@ describe('pull transport (mode: client)', () => {
     await settleTurn()
 
     expect(agents.prompt).toHaveBeenCalledOnce()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$mention-1', '!r:example.com')
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'architect',
+      '$mention-1',
+      '!r:example.com',
+      '$mention-1',
+    )
     expect(store.get('@architect:example.com')).toBe('s1')
   })
 

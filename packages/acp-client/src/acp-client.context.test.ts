@@ -90,4 +90,44 @@ describe('AcpClient — context MCP wiring', () => {
     }
     expect(params.mcpServers.map((s) => s.name)).toEqual(['zooid-context'])
   })
+
+  it('passes contextThreadId — not the composed session key — to contextSpawn', async () => {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const contextSpawn = vi.fn(async (threadId: string) => ({
+      name: 'zooid-context' as const,
+      command: 'node',
+      args: ['/bin/zooid-context-mcp.js', '--spawn-id', `spawn-${threadId}`],
+      env: [{ name: 'ZOOID_DAEMON_SOCK', value: '/run/zooid/test.sock' }],
+    }))
+    const client = new AcpClient({
+      agent: { id: 'bebop', command: 'x', args: [] },
+      onEvent: () => {},
+      onApprovalRequest: async () => ({ decision: 'allow', optionId: 'allow' }),
+      contextSpawn,
+    })
+    injectConnection(client, calls)
+    // Handoff-arc session: key is composed, context ref is the real root —
+    // zooid_get_history must read the real Matrix thread.
+    await client.ensureSession('$root|$p1', '!r:example.com', '$root')
+    expect(contextSpawn).toHaveBeenCalledWith('$root', '!r:example.com')
+  })
+
+  it('defaults the context ref to the session key when contextThreadId is omitted (back-compat)', async () => {
+    const calls: Array<{ method: string; params: unknown }> = []
+    const contextSpawn = vi.fn(async (threadId: string) => ({
+      name: 'zooid-context' as const,
+      command: 'node',
+      args: ['/bin/zooid-context-mcp.js', '--spawn-id', `spawn-${threadId}`],
+      env: [{ name: 'ZOOID_DAEMON_SOCK', value: '/run/zooid/test.sock' }],
+    }))
+    const client = new AcpClient({
+      agent: { id: 'bebop', command: 'x', args: [] },
+      onEvent: () => {},
+      onApprovalRequest: async () => ({ decision: 'allow', optionId: 'allow' }),
+      contextSpawn,
+    })
+    injectConnection(client, calls)
+    await client.ensureSession('$root', '!r:example.com')
+    expect(contextSpawn).toHaveBeenCalledWith('$root', '!r:example.com')
+  })
 })

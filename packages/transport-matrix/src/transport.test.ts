@@ -139,7 +139,7 @@ describe('matrix transport /transactions', () => {
     expect(res.status).toBe(200)
     await settleTurn()
     // Agent-promotion: sessionKey is the inbound event_id, NOT the room.
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
     // The reply threads against the user's message.
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -229,7 +229,7 @@ describe('matrix transport /transactions', () => {
     })
     await postTxn(transport.app, { events })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ threadRoot: '$root' }),
     )
@@ -425,7 +425,7 @@ describe('thread implicit triggers', () => {
     await settleTurn()
 
     // architect should be triggered implicitly because they posted in the thread.
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
   })
 
   it("inherits the thread root's @mentions when no agent has posted yet", async () => {
@@ -468,7 +468,7 @@ describe('thread implicit triggers', () => {
     })
     await settleTurn()
     // Inherits the root's @mention of architect.
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
   })
 
   it('does not trigger any agent for a bare top-level message', async () => {
@@ -533,7 +533,7 @@ describe('thread implicit triggers', () => {
       ],
     })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
   })
 })
 
@@ -634,7 +634,7 @@ describe('dev.zooid.session_reset', () => {
       ],
     })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
   })
 })
 
@@ -1391,7 +1391,7 @@ describe('full loop integration', () => {
       }],
     })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com')
+    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ threadRoot: '$root' }),
     )
@@ -1742,17 +1742,18 @@ describe('directional agent-to-agent handoffs', () => {
     await settleTurn()
 
     // 2. Parent replies in-thread @mentioning sub → sub is called; caller[sub]=parent.
+    //    [[ZOD071]]: this call opens a fresh handoff arc for sub, keyed by $p1.
     await post(transport, { id: '$p1', sender: '@parent:example.com', root: '$root', mentions: ['@sub:example.com'] })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('sub', '$root', '!r:example.com')
+    expect(agents.ensureSession).toHaveBeenCalledWith('sub', '$root|$p1', '!r:example.com', '$root')
 
     agents.ensureSession.mockClear()
 
     // 3. Sub replies bare → bubbles UP to its caller (parent), nobody else.
     await post(transport, { id: '$s1', sender: '@sub:example.com', root: '$root' })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com')
-    expect(agents.ensureSession).not.toHaveBeenCalledWith('sub', '$root', '!r:example.com')
+    expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com', '$root')
+    expect(agents.ensureSession.mock.calls.map((c) => c[0])).not.toContain('sub')
 
     agents.ensureSession.mockClear()
 
@@ -1787,5 +1788,333 @@ describe('directional agent-to-agent handoffs', () => {
     expect(state.callers).toEqual({ sub: 'parent' })
     expect(state.rootMentions).toEqual(['parent', 'sub'])
     expect(state.participants).toEqual(['parent', 'sub'])
+  })
+})
+
+describe('per-handoff session isolation ([[ZOD071]])', () => {
+  const mkBinding = (name: string) => ({
+    name,
+    userId: `@${name}:example.com`,
+    rooms: [{ alias: '!r:example.com' }],
+    trigger: 'mention' as const,
+  })
+  const trio = [mkBinding('parent'), mkBinding('bebop'), mkBinding('rocksteady')]
+
+  function makeTrioTransport() {
+    const { reg } = fakeRegistry()
+    const approvals = fakeApprovals()
+    const client = fakeClient()
+    // Session ids must be unique per (agent, key) — the shared-prompt default
+    // fake returns `sess-${threadId}`, which would collide for two subs
+    // called by the same event (same composed key, different agent).
+    reg.ensureSession.mockImplementation(
+      async (name: string, threadId: string) => `sess-${name}-${threadId}`,
+    )
+    // Per-agent prompt gates: parent turns resolve immediately; sub turns stay
+    // open until released, so both arcs are provably IN FLIGHT at once.
+    const gates = new Map<string, () => void>()
+    reg.prompt.mockImplementation(async (name: string) => {
+      if (name === 'parent') return { stopReason: 'end_turn' as const }
+      return new Promise<{ stopReason: 'end_turn' }>((res) =>
+        gates.set(name, () => res({ stopReason: 'end_turn' as const })),
+      )
+    })
+    const transport = createMatrixTransport({
+      agents: reg as never,
+      approvals: approvals as never,
+      client: client as never,
+      bindings: trio,
+      hsToken: 'hs-secret',
+      botUserId: '@zooid:example.com',
+      drainQuietMs: 0,
+    })
+    return { transport, agents: reg, client, gates }
+  }
+
+  function post(
+    transport: ReturnType<typeof makeTrioTransport>['transport'],
+    o: { id: string; sender: string; root?: string; mentions?: string[] },
+  ) {
+    const content: Record<string, unknown> = { msgtype: 'm.text', body: 'x' }
+    if (o.mentions) content['m.mentions'] = { user_ids: o.mentions }
+    if (o.root) content['m.relates_to'] = { rel_type: 'm.thread', event_id: o.root }
+    return postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: o.id,
+          room_id: '!r:example.com',
+          sender: o.sender,
+          content,
+        },
+      ],
+    })
+  }
+
+  const agentsCalled = (reg: ReturnType<typeof fakeRegistry>['reg']) =>
+    reg.ensureSession.mock.calls.map((c) => c[0] as string)
+
+  it('fans out to two subs on one call event, runs their arcs concurrently with interleaved completion, and returns control to the parent once per sub', async () => {
+    const { transport, agents, gates } = makeTrioTransport()
+
+    // 1. Human @parent (top-level, $root) → parent gets the THREAD-LEVEL
+    //    session; the real threadRoot rides along as the context ref.
+    await post(transport, {
+      id: '$root',
+      sender: '@alice:example.com',
+      mentions: ['@parent:example.com'],
+    })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'parent',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
+
+    // 2. Parent calls BOTH subs in ONE message ($p1). Each sub gets a fresh
+    //    arc session keyed by the same call event id — the composed key
+    //    string is identical; the sessions are distinct via the agent
+    //    dimension (per-agent client/store).
+    await post(transport, {
+      id: '$p1',
+      sender: '@parent:example.com',
+      root: '$root',
+      mentions: ['@bebop:example.com', '@rocksteady:example.com'],
+    })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'bebop',
+      '$root|$p1',
+      '!r:example.com',
+      '$root',
+    )
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'rocksteady',
+      '$root|$p1',
+      '!r:example.com',
+      '$root',
+    )
+    // Both sub turns are open simultaneously — the arcs are concurrent, not
+    // queued. Their thread events will interleave; that's the point.
+    expect(gates.size).toBe(2)
+
+    agents.ensureSession.mockClear()
+
+    // 3. Rocksteady finishes FIRST (reverse of call order — interleaved).
+    //    Its bare return routes ONLY to parent, resuming parent's continuous
+    //    thread-level session; the sibling is untouched.
+    gates.get('rocksteady')!()
+    await settleTurn()
+    await post(transport, { id: '$r1', sender: '@rocksteady:example.com', root: '$root' })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'parent',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
+    expect(agentsCalled(agents)).not.toContain('bebop')
+
+    agents.ensureSession.mockClear()
+
+    // 4. Bebop finishes second — same story, sibling untouched. Parent has
+    //    now been handed control exactly once per sub, both times in the
+    //    SAME thread-level session (it aggregates the two results).
+    gates.get('bebop')!()
+    await settleTurn()
+    await post(transport, { id: '$b1', sender: '@bebop:example.com', root: '$root' })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'parent',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
+    expect(agentsCalled(agents)).not.toContain('rocksteady')
+  })
+
+  it('re-delegating to the same sub opens a FRESH session (Option A: cold re-invoke)', async () => {
+    const { transport, agents, gates } = makeTrioTransport()
+
+    await post(transport, {
+      id: '$root',
+      sender: '@alice:example.com',
+      mentions: ['@parent:example.com'],
+    })
+    await settleTurn()
+
+    // First delegation: arc $p1.
+    await post(transport, {
+      id: '$p1',
+      sender: '@parent:example.com',
+      root: '$root',
+      mentions: ['@bebop:example.com'],
+    })
+    await settleTurn()
+    gates.get('bebop')!()
+    await settleTurn()
+    await post(transport, { id: '$b1', sender: '@bebop:example.com', root: '$root' })
+    await settleTurn()
+
+    // Second delegation: arc $p2 — a NEW session key, not a resume.
+    await post(transport, {
+      id: '$p2',
+      sender: '@parent:example.com',
+      root: '$root',
+      mentions: ['@bebop:example.com'],
+    })
+    await settleTurn()
+    gates.get('bebop')!()
+    await settleTurn()
+
+    const bebopKeys = agents.ensureSession.mock.calls
+      .filter((c) => c[0] === 'bebop')
+      .map((c) => c[1])
+    expect(bebopKeys).toEqual(['$root|$p1', '$root|$p2'])
+  })
+
+  it("a human bare reply to the last-posting sub resumes the sub's current arc", async () => {
+    const { transport, agents, gates } = makeTrioTransport()
+
+    await post(transport, {
+      id: '$root',
+      sender: '@alice:example.com',
+      mentions: ['@parent:example.com'],
+    })
+    await settleTurn()
+    await post(transport, {
+      id: '$p1',
+      sender: '@parent:example.com',
+      root: '$root',
+      mentions: ['@bebop:example.com'],
+    })
+    await settleTurn()
+    gates.get('bebop')!()
+    await settleTurn() // participants: [parent, bebop] — bebop is last poster
+
+    agents.ensureSession.mockClear()
+
+    // Human "why did you do X?" — routes to bebop (last poster) and lands in
+    // the session that DID the work, not a cold thread-level one.
+    await post(transport, { id: '$h1', sender: '@alice:example.com', root: '$root' })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'bebop',
+      '$root|$p1',
+      '!r:example.com',
+      '$root',
+    )
+  })
+
+  it('/clear (session_reset) ends the thread-level session AND every handoff arc', async () => {
+    const { transport, agents, gates } = makeTrioTransport()
+
+    await post(transport, {
+      id: '$root',
+      sender: '@alice:example.com',
+      mentions: ['@parent:example.com'],
+    })
+    await settleTurn()
+    await post(transport, {
+      id: '$p1',
+      sender: '@parent:example.com',
+      root: '$root',
+      mentions: ['@bebop:example.com', '@rocksteady:example.com'],
+    })
+    await settleTurn()
+    gates.get('bebop')!()
+    gates.get('rocksteady')!()
+    await settleTurn()
+
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'dev.zooid.session_reset',
+          event_id: '$reset',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: { 'm.relates_to': { rel_type: 'm.thread', event_id: '$root' } },
+        },
+      ],
+    })
+    await settleTurn()
+
+    const ended = agents.endSession.mock.calls.map((c) => `${c[0]}:${c[1]}`)
+    expect(ended).toContain('parent:$root')
+    expect(ended).toContain('bebop:$root')
+    expect(ended).toContain('rocksteady:$root')
+    expect(ended).toContain('bebop:$root|$p1')
+    expect(ended).toContain('rocksteady:$root|$p1')
+  })
+
+  it('/clear right after a restart rebuilds thread state so arc sessions are still ended', async () => {
+    const { transport, agents, client } = makeTrioTransport()
+    // No prior inbound events — simulate a daemon restart: threadStates is
+    // empty, but the timeline (via the client fetchers) knows the arc.
+    ;(client as unknown as Record<string, unknown>).fetchEvent = vi.fn(async () => ({
+      type: 'm.room.message',
+      sender: '@alice:example.com',
+      content: { 'm.mentions': { user_ids: ['@parent:example.com'] } },
+    }))
+    ;(client as unknown as Record<string, unknown>).fetchThreadRelations = vi.fn(async () => ({
+      chunk: [
+        {
+          type: 'm.room.message',
+          event_id: '$p1',
+          sender: '@parent:example.com',
+          content: { 'm.mentions': { user_ids: ['@bebop:example.com'] } },
+        },
+      ],
+    }))
+
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'dev.zooid.session_reset',
+          event_id: '$reset',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: { 'm.relates_to': { rel_type: 'm.thread', event_id: '$root' } },
+        },
+      ],
+    })
+    await settleTurn()
+
+    const ended = agents.endSession.mock.calls.map((c) => `${c[0]}:${c[1]}`)
+    expect(ended).toContain('bebop:$root')
+    expect(ended).toContain('bebop:$root|$p1')
+  })
+
+  it('rebuildThreadState reconstructs handoff arcs (multi-sub + re-delegation) from the timeline', async () => {
+    const client = {
+      fetchEvent: vi.fn(async () => ({
+        type: 'm.room.message',
+        sender: '@alice:example.com',
+        content: { 'm.mentions': { user_ids: ['@parent:example.com'] } },
+      })),
+      fetchThreadRelations: vi.fn(async () => ({
+        chunk: [
+          {
+            type: 'm.room.message',
+            event_id: '$p1',
+            sender: '@parent:example.com',
+            content: {
+              'm.mentions': { user_ids: ['@bebop:example.com', '@rocksteady:example.com'] },
+            },
+          },
+          { type: 'm.room.message', event_id: '$b1', sender: '@bebop:example.com', content: { body: 'done' } },
+          {
+            type: 'm.room.message',
+            event_id: '$p2',
+            sender: '@parent:example.com',
+            content: { 'm.mentions': { user_ids: ['@bebop:example.com'] } },
+          },
+        ],
+      })),
+    }
+    const state = await rebuildThreadState(client as never, '!r:example.com', '$root', trio)
+    expect(state.handoffs).toEqual({ bebop: ['$p1', '$p2'], rocksteady: ['$p1'] })
+    expect(state.callers).toEqual({ bebop: 'parent', rocksteady: 'parent' })
   })
 })

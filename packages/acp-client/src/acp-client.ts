@@ -162,7 +162,11 @@ export class AcpClient {
     this.initialized = false
   }
 
-  async ensureSession(threadId: string, channelId?: string): Promise<string> {
+  async ensureSession(
+    threadId: string,
+    channelId?: string,
+    contextThreadId?: string,
+  ): Promise<string> {
     if (!this.connection || !this.initialized) {
       throw new Error('AcpClient.start() must be called before ensureSession()')
     }
@@ -173,7 +177,7 @@ export class AcpClient {
     if (cached) return cached.sessionId
 
     const mcpServers = this.options.contextSpawn
-      ? [await this.options.contextSpawn(threadId, channelId)]
+      ? [await this.options.contextSpawn(contextThreadId ?? threadId, channelId)]
       : []
     process.stderr.write(
       `[acp-client:${this.options.agent.id}] ensureSession(${threadId}) mcpServers=${
@@ -260,7 +264,11 @@ export class AcpClient {
     let sessionId: string | null = null
     let turnId: string | null = null
     try {
-      sessionId = await this.ensureSession(input.threadId, input.channelId)
+      sessionId = await this.ensureSession(
+        input.threadId,
+        input.channelId,
+        input.contextThreadId,
+      )
       const promptText = stringifyPromptForLog(input.content)
       turnId = this.turns?.startTurn({ sessionId, promptText }) ?? null
       debugLog(this.options.agent.id, 'prompt →', { sessionId, content: input.content })

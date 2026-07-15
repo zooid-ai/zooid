@@ -5,6 +5,7 @@ import type { AgentEvent, ContentBlock } from '@zooid/acp-client'
 import { MatrixClient } from './matrix-client.js'
 import { BotPool } from './bot-pool.js'
 import { route, isMediaMsgtype, type AgentBinding, type ThreadState } from './router.js'
+import { sessionKeyFor, composeHandoffKey } from './session-keys.js'
 import { stripMention, extractMentions } from './mentions.js'
 import { toToolCallBody, toUpdateBody, toPlanBody, toAvailableCommandsBody, toErrorBody } from './event-encoders.js'
 import { classify } from '@zooid/acp-client'
@@ -536,8 +537,26 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         return
       }
       console.log(`[matrix] inbound dev.zooid.session_reset in ${evt.room_id} thread=${threadRoot}`)
+      // [[ZOD071]]: a thread's sessions are the thread-level one plus one per
+      // handoff arc — end them all. Reset events aren't m.room.message, so
+      // the self-heal rebuild above doesn't cover them; rebuild here if the
+      // daemon restarted since the arcs were minted.
+      if (!threadStates.has(threadRoot) && evt.room_id) {
+        try {
+          threadStates.set(
+            threadRoot,
+            await rebuildThreadState(client, evt.room_id, threadRoot, bindings),
+          )
+        } catch (err) {
+          console.warn(`[matrix] failed to rebuild threadState for reset ${threadRoot}:`, err)
+        }
+      }
+      const st = threadStates.get(threadRoot)
       for (const a of bindings) {
         agents.endSession(a.name, threadRoot)
+        for (const arc of st?.handoffs[a.name] ?? []) {
+          agents.endSession(a.name, composeHandoffKey(threadRoot, arc))
+        }
       }
       // NB: keep threadStates intact. Per ZOD039 § /clear, only the agent's
       // session memory is wiped — thread-routing state (participants /
@@ -670,7 +689,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     if (matches.length > 0 && promotedRoot) {
       let st = threadStates.get(promotedRoot)
       if (!st) {
-        st = { participants: [], rootMentions: [], callers: {} }
+        st = { participants: [], rootMentions: [], callers: {}, handoffs: {} }
         threadStates.set(promotedRoot, st)
       }
       const msgMentions = new Set(extractMentions(evt as never))
@@ -679,7 +698,17 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         if (!msgMentions.has(a.userId)) continue
         if (!st.rootMentions.includes(a.name)) st.rootMentions.push(a.name)
         // Call edge: the (agent) sender is the caller of every agent it @mentions.
-        if (senderAgent && a.name !== senderAgent.name) st.callers[a.name] = senderAgent.name
+        if (senderAgent && a.name !== senderAgent.name) {
+          st.callers[a.name] = senderAgent.name
+          // [[ZOD071]] handoff arc: every agent→agent call opens a fresh
+          // session for the callee, keyed by this call event. Recorded before
+          // runTurn dispatch so sessionKeyFor resolves the just-minted arc.
+          // Deduped: homeservers may redeliver a transaction.
+          if (evt.event_id) {
+            const arcs = (st.handoffs[a.name] ??= [])
+            if (!arcs.includes(evt.event_id)) arcs.push(evt.event_id)
+          }
+        }
       }
     }
     for (const a of matches) {
@@ -689,7 +718,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           if (!promotedRoot) return
           let st = threadStates.get(promotedRoot)
           if (!st) {
-            st = { participants: [], rootMentions: [], callers: {} }
+            st = { participants: [], rootMentions: [], callers: {}, handoffs: {} }
             threadStates.set(promotedRoot, st)
           }
           if (st.participants.at(-1) !== a.name) st.participants.push(a.name)
@@ -770,10 +799,14 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     if (!evt.room_id || !evt.event_id) return
     const inbound = inboundThreadRoot(evt)
     // Agent-promotion: top-level inbound becomes a thread root via the agent's
-    // first reply. sessionKey is always a thread root id, never the room id.
+    // first reply.
     const threadRoot = inbound ?? evt.event_id
-    const sessionKey = threadRoot
-    const sessionId = await agents.ensureSession(agent.name, sessionKey, evt.room_id)
+    // [[ZOD071]]: the session key is the agent's current handoff arc when it
+    // has one, else the thread-level key. The raw threadRoot still travels
+    // separately: outbound events relate to it, and it is the context ref so
+    // zooid_get_history reads the real thread.
+    const sessionKey = sessionKeyFor(agent.name, threadRoot, threadStates.get(threadRoot))
+    const sessionId = await agents.ensureSession(agent.name, sessionKey, evt.room_id, threadRoot)
     sessions.set(sessionId, { agent, roomId: evt.room_id, threadRoot })
     buffers.set(sessionId, '')
     bufferMessageIds.delete(sessionId)
@@ -836,6 +869,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       await agents.prompt(agent.name, {
         threadId: sessionKey,
         channelId: evt.room_id,
+        contextThreadId: threadRoot,
         content: [...blocks, { type: 'text', text: fullPromptText }],
       })
       // Drain: the prompt promise resolves on the stopReason response, but
@@ -934,7 +968,7 @@ export async function rebuildThreadState(
   rootEventId: string,
   bindings: AgentBinding[],
 ): Promise<ThreadState> {
-  const state: ThreadState = { participants: [], rootMentions: [], callers: {} }
+  const state: ThreadState = { participants: [], rootMentions: [], callers: {}, handoffs: {} }
   // Impersonate an agent that's actually a member of this room (AS reads
   // require room membership). Falling through to the first binding would
   // 403 if that agent never joined the target room.
@@ -949,7 +983,11 @@ export async function rebuildThreadState(
     for (const a of bindings) {
       if (!rootMentions.has(a.userId)) continue
       if (!state.rootMentions.includes(a.name)) state.rootMentions.push(a.name)
-      if (rootSenderAgent && a.name !== rootSenderAgent.name) state.callers[a.name] = rootSenderAgent.name
+      if (rootSenderAgent && a.name !== rootSenderAgent.name) {
+        state.callers[a.name] = rootSenderAgent.name
+        const arcs = (state.handoffs[a.name] ??= [])
+        if (!arcs.includes(rootEventId)) arcs.push(rootEventId)
+      }
     }
   }
 
@@ -963,10 +1001,17 @@ export async function rebuildThreadState(
     const mentions = new Set(extractMentions(ev as never))
     const evSender = (ev as { sender?: string }).sender
     const evSenderAgent = evSender ? bindings.find((b) => b.userId === evSender) : undefined
+    const evId = (ev as { event_id?: string }).event_id
     for (const a of bindings) {
       if (!mentions.has(a.userId)) continue
       if (!state.rootMentions.includes(a.name)) state.rootMentions.push(a.name)
-      if (evSenderAgent && a.name !== evSenderAgent.name) state.callers[a.name] = evSenderAgent.name
+      if (evSenderAgent && a.name !== evSenderAgent.name) {
+        state.callers[a.name] = evSenderAgent.name
+        if (evId) {
+          const arcs = (state.handoffs[a.name] ??= [])
+          if (!arcs.includes(evId)) arcs.push(evId)
+        }
+      }
     }
     const type = (ev as { type?: string }).type
     if (type === 'm.room.message' && evSender) {

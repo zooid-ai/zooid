@@ -142,7 +142,9 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
   }
 
   function states(s: Partial<ThreadState>): Map<string, ThreadState> {
-    return new Map([['$root', { participants: [], rootMentions: [], callers: {}, ...s }]])
+    return new Map([
+      ['$root', { participants: [], rootMentions: [], callers: {}, handoffs: {}, ...s }],
+    ])
   }
 
   it("routes a sub's bare reply up to its caller (parent notified)", () => {
@@ -223,5 +225,75 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
       states({ participants: ['parent'], callers: {} }),
     )
     expect(matches).toEqual([])
+  })
+})
+
+describe('fan-out: two subs called in one message ([[ZOD071]] acceptance)', () => {
+  const mk = (name: string): AgentBinding => ({
+    name,
+    userId: `@${name}:example.com`,
+    rooms: [{ alias: '!room1:example.com' }],
+    trigger: 'mention',
+  })
+  const parent = mk('parent')
+  const bebop = mk('bebop')
+  const rocksteady = mk('rocksteady')
+  const trio = [parent, bebop, rocksteady]
+
+  function threadMsg(o: { sender: string; mentions?: string[] }) {
+    return {
+      type: 'm.room.message',
+      room_id: '!room1:example.com',
+      sender: o.sender,
+      event_id: '$evt',
+      content: {
+        msgtype: 'm.text',
+        body: 'reply',
+        'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+        ...(o.mentions ? { 'm.mentions': { user_ids: o.mentions } } : {}),
+      },
+    }
+  }
+
+  function states(s: Partial<ThreadState>): Map<string, ThreadState> {
+    return new Map([
+      ['$root', { participants: [], rootMentions: [], callers: {}, handoffs: {}, ...s }],
+    ])
+  }
+
+  it('a single message @mentioning both subs triggers both (fan-out)', () => {
+    const matches = route(
+      threadMsg({
+        sender: '@parent:example.com',
+        mentions: ['@bebop:example.com', '@rocksteady:example.com'],
+      }),
+      trio,
+      states({ participants: ['parent'] }),
+    )
+    expect(matches.map((m) => m.name).sort()).toEqual(['bebop', 'rocksteady'])
+  })
+
+  it("bebop's bare return triggers only parent — never its sibling", () => {
+    const matches = route(
+      threadMsg({ sender: '@bebop:example.com' }),
+      trio,
+      states({
+        participants: ['parent', 'rocksteady', 'bebop'],
+        callers: { bebop: 'parent', rocksteady: 'parent' },
+      }),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['parent'])
+  })
+
+  it("rocksteady's bare return likewise routes only up", () => {
+    const matches = route(
+      threadMsg({ sender: '@rocksteady:example.com' }),
+      trio,
+      states({
+        participants: ['parent', 'bebop', 'rocksteady'],
+        callers: { bebop: 'parent', rocksteady: 'parent' },
+      }),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['parent'])
   })
 })
