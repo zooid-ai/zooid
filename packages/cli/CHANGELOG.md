@@ -1,5 +1,18 @@
 # zooid
 
+## 0.11.1
+
+### Patch Changes
+
+- Serve `@zooid/web@0.9.1`, which fixes avatars never rendering. The web client requested avatars from the legacy unauthenticated `/_matrix/media/v3` thumbnail endpoint, which Matrix 1.11 homeservers refuse ("Unauthenticated media is disabled"), so every uploaded avatar silently fell back to the generated placeholder. `zooid dev` now serves a client that fetches them over authenticated media.
+  - @zooid/core@0.11.1
+  - @zooid/acp-client@0.11.1
+  - @zooid/context-mcp@0.11.1
+  - @zooid/runtime-docker@0.11.1
+  - @zooid/runtime-local@0.11.1
+  - @zooid/transport-http@0.11.1
+  - @zooid/transport-matrix@0.11.1
+
 ## 0.11.0
 
 ### Minor Changes
