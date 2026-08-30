@@ -1,6 +1,6 @@
 {
   "name": "@zooid/transport-matrix",
-  "version": "0.11.1",
+  "version": "0.11.2",
   "description": "Matrix Application Service transport for zooid. Routes inbound Matrix messages to ACP agents and posts replies plus approval custom events back to threads.",
   "type": "module",
   "license": "MIT",

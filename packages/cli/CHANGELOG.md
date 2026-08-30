@@ -1,5 +1,18 @@
 # zooid
 
+## 0.11.2
+
+### Patch Changes
+
+- Pin the bundled `@zooid/web` to 0.10.0: fixes room history getting lost after idle gaps and inside threads, auto-selects the sole joined space when the workforce space doesn't resolve, clarifies the thread-exit button and adds a typing-gated Stop button, and repairs the e2e specs.
+  - @zooid/core@0.11.2
+  - @zooid/acp-client@0.11.2
+  - @zooid/context-mcp@0.11.2
+  - @zooid/runtime-docker@0.11.2
+  - @zooid/runtime-local@0.11.2
+  - @zooid/transport-http@0.11.2
+  - @zooid/transport-matrix@0.11.2
+
 ## 0.11.1
 
 ### Patch Changes

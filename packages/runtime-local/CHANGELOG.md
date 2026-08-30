@@ -1,5 +1,11 @@
 # @zooid/runtime-local
 
+## 0.11.2
+
+### Patch Changes
+
+- @zooid/core@0.11.2
+
 ## 0.11.1
 
 ### Patch Changes
