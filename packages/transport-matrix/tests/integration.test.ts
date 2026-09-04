@@ -51,10 +51,20 @@ describe.skipIf(!dockerAvailable())('matrix transport against tuwunel', () => {
     HS = tuwunel.homeserver
   }, 120_000)
 
-  afterAll(() => {
-    daemon?.kill('SIGTERM')
-    tuwunel?.down()
-  }, 30_000)
+  // Same budget as beforeAll: teardown contends for the same docker daemon
+  // that setup does, and three integration files tear their stacks down at
+  // once. 30s was arbitrary and lost that race routinely.
+  afterAll(async () => {
+    if (daemon) {
+      const exited = new Promise<void>((r) => daemon!.once('exit', () => r()))
+      daemon.kill('SIGTERM')
+      // Let the daemon close its /sync long-polls before the homeserver goes
+      // away — yanking the container out from under a live client is what
+      // makes `compose down` crawl.
+      await Promise.race([exited, new Promise((r) => setTimeout(r, 5_000))])
+    }
+    await tuwunel?.down()
+  }, 120_000)
 
   it('smoke: single agent, single room, trigger=any — message produces a reply', async () => {
     const alice = await registerUser('alice', 'alicepw')

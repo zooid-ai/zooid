@@ -59,7 +59,7 @@ describe.skipIf(!dockerAvailable())('media repo via AS token + user_id impersona
     if (!r.ok) throw new Error(`AS register failed: ${r.status} ${await r.text()}`)
   }, 120_000)
 
-  afterAll(() => tuwunel?.down(), 30_000)
+  afterAll(async () => await tuwunel?.down(), 120_000)
 
   it('uploads as the impersonated agent and downloads via authenticated v1 media', async () => {
     const media = new MediaClient({ homeserver: HS, asToken: AS_TOKEN })

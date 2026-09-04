@@ -66,9 +66,9 @@ describe.skipIf(!dockerAvailable())('MatrixContextProvider against tuwunel', () 
     HS = tuwunel.homeserver
   }, 120_000)
 
-  afterAll(() => {
-    tuwunel?.down()
-  }, 30_000)
+  afterAll(async () => {
+    await tuwunel?.down()
+  }, 120_000)
 
   it('reads room timeline + thread overview + thread drilldown for a bot impersonated by the AS', async () => {
     // Set up: Alice (human) creates room, bot user (AS-owned) joins.
