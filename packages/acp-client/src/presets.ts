@@ -102,6 +102,27 @@ const PRESETS_INTERNAL = {
       },
     ],
   },
+  // pi (ZOD073). Vendored-shim category: `pi-acp` is an adapter that speaks ACP
+  // on pi's behalf and spawns `pi --mode rpc` as a child. No flags — its
+  // published Zed config is `args: []`, and the only documented flag
+  // (--terminal-login) is an interactive auth path with no place in a daemon.
+  pi: {
+    command: 'npx',
+    args: ['-y', 'pi-acp'],
+    image: 'ghcr.io/zooid-ai/agent-pi:latest',
+    mounts: (ctx: PresetMountContext): PresetMount[] => [
+      {
+        // Single tree: agent/sessions, agent/prompts, and the adapter's
+        // pi-acp/session-map.json. Project config lives in <cwd>/.pi, which is
+        // already inside the workspace mount.
+        id: 'home',
+        host: `${ctx.daemonHome}/.pi`,
+        target: '/root/.pi',
+        mode: 'rw',
+        create: false,
+      },
+    ],
+  },
 } as const satisfies Record<string, PresetInternal>
 
 export type PresetName = keyof typeof PRESETS_INTERNAL

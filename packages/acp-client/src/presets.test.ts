@@ -86,6 +86,46 @@ describe('resolvePreset', () => {
   })
 })
 
+describe('pi preset (ZOD073)', () => {
+  it('is a known preset', () => {
+    expect(isPreset('pi')).toBe(true)
+  })
+
+  it('resolves to the npx-invoked pi-acp adapter with no flags', () => {
+    expect(resolvePreset('pi')).toEqual({
+      command: 'npx',
+      args: ['-y', 'pi-acp'],
+    })
+  })
+
+  it('ships the first-party agent-pi image', () => {
+    expect(PRESETS.pi.image).toBe('ghcr.io/zooid-ai/agent-pi:latest')
+  })
+
+  it('returns a fresh args array each call', () => {
+    const a = resolvePreset('pi')
+    const b = resolvePreset('pi')
+    expect(a.args).not.toBe(b.args)
+    a.args.push('mutated')
+    expect(b.args).toEqual(['-y', 'pi-acp'])
+  })
+
+  // ZOD073 Design/"Model selection": pi-acp publishes no --model flag and
+  // whether it forwards one to the `pi --mode rpc` child is undocumented, so
+  // pi is omitted from MODEL_ARGS_PER_PRESET. This test pins that decision so
+  // wiring --model later is a visible change, not a silent one.
+  it('ignores opts.model — pi has no verified model flag', () => {
+    expect(resolvePreset('pi', { model: 'claude-sonnet-4-6' })).toEqual({
+      command: 'npx',
+      args: ['-y', 'pi-acp'],
+    })
+  })
+
+  it('is listed in the unknown-preset error message', () => {
+    expect(() => resolvePreset('made-up')).toThrow(/\bpi\b/)
+  })
+})
+
 describe('isPreset', () => {
   it('returns true for known names', () => {
     expect(isPreset('claude')).toBe(true)

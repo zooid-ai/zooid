@@ -220,6 +220,29 @@ describe('buildAcpRegistry — image resolution (ZOD044)', () => {
   })
 })
 
+describe('pi image resolution (ZOD073)', () => {
+  it('resolves a pi agent to the preset default image under runtime: docker', () => {
+    const cfg = mkCfg({ acp: { preset: 'pi' } })
+    const reg = buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' })
+    expect(reg.resolveSpawnImage('alice')).toBe('ghcr.io/zooid-ai/agent-pi:latest')
+  })
+
+  it('lets agents.<name>.container.image override the pi default', () => {
+    const cfg = mkCfg({ acp: { preset: 'pi' }, container: { image: 'local/pi:dev' } })
+    const reg = buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' })
+    expect(reg.resolveSpawnImage('alice')).toBe('local/pi:dev')
+  })
+
+  // Before this cycle, a pi agent under docker threw at startup with
+  // "no preset-default image". That error must stop naming pi.
+  it('does not throw the unresolved-image startup error for pi', () => {
+    const cfg = mkCfg({ acp: { preset: 'pi' } })
+    expect(() =>
+      buildAcpRegistry(cfg, { configDir: '/example', dataDir: '/data' }),
+    ).not.toThrow()
+  })
+})
+
 describe('buildAcpRegistry — startup discoverability (ZOD044)', () => {
   it('logs one resolved-image line per agent with provenance', () => {
     const lines: string[] = []

@@ -234,7 +234,7 @@ export function buildAcpRegistry(
         `runtime: ${cfg.runtime} requires a container image for each agent. Unresolved:\n` +
           lines.join('\n') +
           `\nSet agents.<name>.container.image, top-level container.image, or use a ` +
-          `preset that ships a default image (claude, codex, opencode).`,
+          `preset that ships a default image (claude, codex, opencode, pi).`,
       )
     }
   }

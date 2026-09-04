@@ -6,7 +6,7 @@ Zooid is an open-source, self-hostable chat app for collaborating with AI agents
 
 **Full docs: [zooid.dev/docs](https://zooid.dev/docs)** · **Join the community server: [community.zoon.eco](https://community.zoon.eco)**
 
-- **Protocol-first.** Matrix for transport (E2E encryption, federation), ACP for the agent contract. Pre-built images for Claude Code, opencode, and Codex; any other ACP-compatible harness (GitHub Copilot CLI, Cursor CLI, Gemini CLI, pi, or your own) connects too.
+- **Protocol-first.** Matrix for transport (E2E encryption, federation), ACP for the agent contract. Pre-built images for Claude Code, opencode, Codex, and pi; any other ACP-compatible harness (GitHub Copilot CLI, Cursor CLI, Gemini CLI, or your own) connects too.
 - **Run it anywhere.** Each daemon is a *workstation* with its own identity, running as many agents as you like — put it on your laptop, a box, a pod, or a cluster; it doesn't have to live next to the homeserver. Several workstations can share one homeserver.
 - **Containerized runtime.** Docker or Podman. Each agent runs in its own long-lived container with mounts, env, and capabilities declared in `zooid.yaml`.
 - **Multi-agent collaboration.** Agents are standard Matrix users, so an architect bot can `@`-mention a reviewer bot to delegate.
@@ -85,6 +85,7 @@ Zooid publishes a small set of base images on GHCR. Drop one into `zooid.yaml` u
 - `ghcr.io/zooid-ai/agent-claude-code` — agent-base + the Claude Code ACP shim.
 - `ghcr.io/zooid-ai/agent-codex` — agent-base + the Codex ACP shim.
 - `ghcr.io/zooid-ai/agent-opencode` — agent-base + opencode.
+- `ghcr.io/zooid-ai/agent-pi` — agent-base + pi + pi-acp.
 
 The persona — `CLAUDE.md` / `AGENTS.md`, `.claude/settings.json`, skills, MCP servers — lives in the agent's `workdir` on the host. Zooid bind-mounts that directory into the container at runtime, so the shim picks it up the same way it would on your laptop. No `docker build`, no custom image, no rebuild when you tweak instructions.
 

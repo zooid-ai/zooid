@@ -67,6 +67,32 @@ describe('preset mount declarations — home / data / config', () => {
   })
 })
 
+describe('pi mount declarations (ZOD073)', () => {
+  it('declares a single `home` mount at ${daemonHome}/.pi', () => {
+    const mounts = PRESETS.pi.mounts!(ctx)
+    expect(mounts).toHaveLength(1)
+    expect(mounts[0]).toMatchObject({
+      id: 'home',
+      host: '/home/zooid/.pi',
+      target: '/root/.pi',
+      mode: 'rw',
+      create: false,
+    })
+  })
+
+  // The adapter writes ~/.pi/pi-acp/session-map.json on every new session;
+  // a read-only mount would lose session/load across container restarts.
+  it('mounts rw so pi-acp can persist its session map', () => {
+    expect(PRESETS.pi.mounts!(ctx)[0].mode).toBe('rw')
+  })
+
+  it('does not reference ctx.agentDataDir', () => {
+    for (const m of PRESETS.pi.mounts!(ctx)) {
+      expect(m.host).not.toContain('/data/agents/alice')
+    }
+  })
+})
+
 describe('preset default images (unchanged from cycle 1)', () => {
   it('claude, codex, opencode declare a default ghcr image', () => {
     expect(PRESETS.claude.image).toBe('ghcr.io/zooid-ai/agent-claude-code:latest')
