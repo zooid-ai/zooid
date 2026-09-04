@@ -1,5 +1,6 @@
 import { select, password } from '@inquirer/prompts'
-import { findOpencodeProvider, findSimplePreset } from './registry.js'
+import { findOpencodeProvider, findPiProvider, findSimplePreset, PI_DEFAULT_PROVIDER } from './registry.js'
+import { sniffCredentials } from './sniff.js'
 import type { InitOptions } from '../init.js'
 
 export interface PromptInput {
@@ -28,9 +29,10 @@ export async function resolveOptions(flags: PromptInput): Promise<InitOptions> {
         { name: 'claude (Claude Code)', value: 'claude' as const },
         { name: 'codex (OpenAI Codex)', value: 'codex' as const },
         { name: 'opencode', value: 'opencode' as const },
+        { name: 'pi', value: 'pi' as const },
       ],
     }),
-    () => '--preset is required (claude | codex | opencode)',
+    () => '--preset is required (claude | codex | opencode | pi)',
   ))
 
   if (preset === 'opencode') {
@@ -56,6 +58,55 @@ export async function resolveOptions(flags: PromptInput): Promise<InitOptions> {
     return {
       dir: flags.dir,
       preset,
+      provider,
+      model: flags.model,
+      apiKey,
+      force: flags.force,
+      overwrite: flags.overwrite,
+    }
+  }
+
+  if (preset === 'pi') {
+    // Offer, never infer: detecting a login only ever adds a question, it
+    // never silently decides the answer.
+    const loginFound = sniffCredentials('pi').found
+    const auth =
+      (flags.auth as 'subscription' | 'api-key') ??
+      (loginFound
+        ? await ask(
+            () =>
+              select({
+                message: 'A pi login was found. How should the agent authenticate?',
+                choices: [
+                  { name: 'Share my pi login (agent uses my existing subscription)', value: 'subscription' as const },
+                  { name: "Give the agent its own key (billed and revoked separately)", value: 'api-key' as const },
+                ],
+              }),
+            () => '--auth is required (subscription | api-key)',
+          )
+        : ('api-key' as const))
+
+    if (auth === 'subscription') {
+      return {
+        dir: flags.dir,
+        preset,
+        auth,
+        force: flags.force,
+        overwrite: flags.overwrite,
+      }
+    }
+
+    const provider = flags.provider ?? PI_DEFAULT_PROVIDER
+    const providerMeta = findPiProvider(provider)
+    if (!providerMeta) throw new Error(`unknown pi provider: ${provider}`)
+    const apiKey = flags.apiKey ?? (await ask(
+      () => password({ message: `${providerMeta.label} API key:` }),
+      () => '--api-key is required',
+    ))
+    return {
+      dir: flags.dir,
+      preset,
+      auth,
       provider,
       model: flags.model,
       apiKey,

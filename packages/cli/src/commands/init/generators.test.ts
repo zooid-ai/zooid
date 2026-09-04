@@ -6,6 +6,7 @@ import {
   generateOpencodeJson,
   generateEnv,
   generateGitignore,
+  generatePiSettings,
 } from './generators.js'
 
 describe('generateZooidYaml', () => {
@@ -111,5 +112,47 @@ describe('generateGitignore', () => {
     expect(out).toContain('.env')
     expect(out).toContain('node_modules/')
     expect(out).toContain('data/')
+  })
+})
+
+describe('generatePiSettings (ZOD075)', () => {
+  it('writes only the two keys pi needs to boot', () => {
+    const parsed = JSON.parse(
+      generatePiSettings({ provider: 'openrouter', model: 'deepseek/deepseek-v4-pro' }),
+    )
+    expect(parsed).toEqual({
+      defaultProvider: 'openrouter',
+      defaultModel: 'deepseek/deepseek-v4-pro',
+    })
+  })
+
+  it('ends with a newline like every other generator', () => {
+    expect(generatePiSettings({ provider: 'openrouter', model: 'm' })).toMatch(/\n$/)
+  })
+})
+
+describe('generateZooidYaml — pi (ZOD075)', () => {
+  it('emits acp preset pi', () => {
+    expect(generateZooidYaml({ preset: 'pi' })).toContain('acp: { preset: pi }')
+  })
+
+  // pi is the wizard's ONE pinned model (see registry.ts comment): its own
+  // default returned an empty turn. The pin lives in .pi-agent/settings.json,
+  // NOT in acp.model — acp.model is unwired for pi (ZOD073 non-goal).
+  it('does not pin the model via acp.model even when one is supplied', () => {
+    const yaml = generateZooidYaml({ preset: 'pi', model: 'deepseek/deepseek-v4-pro' })
+    expect(yaml).not.toContain('model: deepseek')
+  })
+})
+
+describe('generateGitignore — pi (ZOD075)', () => {
+  // .pi-agent holds settings and, on the shared-credential path, a link to a
+  // 600-mode token file. It must never be committable.
+  it('ignores the pi agent dir', () => {
+    expect(generateGitignore().split('\n')).toContain('.pi-agent/')
+  })
+
+  it('still ignores .env', () => {
+    expect(generateGitignore().split('\n')).toContain('.env')
   })
 })

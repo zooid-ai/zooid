@@ -87,10 +87,10 @@ cli
 
 cli
   .command('init [dir]', 'Scaffold a new zooid workforce in the current (or named) directory')
-  .option('--preset <name>', 'claude | codex | opencode')
-  .option('--auth <mode>', 'subscription | api-key (claude/codex only)')
+  .option('--preset <name>', 'claude | codex | opencode | pi')
+  .option('--auth <mode>', 'subscription | api-key (claude/codex/pi only)')
   .option('--model <id>', 'Model identifier')
-  .option('--provider <id>', 'opencode provider: opencode-go | opencode | anthropic | openrouter | custom')
+  .option('--provider <id>', 'opencode provider: opencode-go | opencode | anthropic | openrouter | custom; pi provider: openrouter | anthropic | openai')
   .option('--api-key <value>', 'API key (api-key path; opencode always)')
   .option('--force', 'Allow scaffolding into a non-empty directory')
   .option('--overwrite', 'With --force, overwrite existing files')
