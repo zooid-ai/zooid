@@ -15,6 +15,7 @@
     "test:ci": "pnpm -r exec vitest run --exclude '**/*integration*.test.ts' --exclude '**/integration/**' --passWithNoTests",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r exec rm -rf dist",
+    "agent-images:check": "pnpm -C packages/runtime-docker exec tsx src/image-versions-cli.ts",
     "tuwunel:logs": "docker logs -f --tail 200 zooid-tuwunel",
     "tuwunel:errors": "docker logs zooid-tuwunel 2>&1 | grep -E 'ERROR|WARN' | tail -40",
     "tuwunel:as": "docker logs zooid-tuwunel 2>&1 | grep -i appservice | tail -40",

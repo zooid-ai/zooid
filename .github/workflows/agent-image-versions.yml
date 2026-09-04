@@ -1,0 +1,44 @@
+name: Agent image versions
+
+on:
+  schedule:
+    # Mondays 06:00 UTC — before the week's work, after the weekend's releases.
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Exits 1 when something is outdated, which is the normal path here.
+      - name: Check and rewrite pins
+        run: pnpm agent-images:check --write || true
+
+      - name: Open bump PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: chore/agent-image-versions
+          title: 'chore(images): bump pinned agent CLI versions'
+          commit-message: 'chore(images): bump pinned agent CLI versions'
+          body: |
+            Automated by `.github/workflows/agent-image-versions.yml` (ZOD074).
+
+            Pinned CLI versions in `packages/runtime-docker/docker/*/Dockerfile`
+            are behind the npm `latest` dist-tag. Merging republishes the
+            affected `:latest` images.
+
+            This PR proves the versions exist on the registry — **not** that the
+            agents still complete a turn. Smoke one before merging.
+          labels: dependencies
+          delete-branch: true

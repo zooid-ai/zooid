@@ -2,6 +2,9 @@ name: Publish agent images
 
 on:
   push:
+    branches: [main]
+    paths:
+      - 'packages/runtime-docker/docker/**'
     tags:
       - 'agent-v*'
   workflow_dispatch:
@@ -22,8 +25,11 @@ jobs:
         run: |
           if [ -n "${{ github.event.inputs.version }}" ]; then
             echo "version=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
-          else
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
             echo "version=${GITHUB_REF_NAME#agent-v}" >> "$GITHUB_OUTPUT"
+          else
+            # Branch push (a merged bump): refresh :latest only.
+            echo "version=latest" >> "$GITHUB_OUTPUT"
           fi
 
   agent-base:

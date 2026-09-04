@@ -1,0 +1,15 @@
+{
+  "agent-claude-code": {
+    "CLAUDE_AGENT_ACP_VERSION": "@agentclientprotocol/claude-agent-acp"
+  },
+  "agent-codex": {
+    "CODEX_ACP_VERSION": "@zed-industries/codex-acp"
+  },
+  "agent-opencode": {
+    "OPENCODE_VERSION": "opencode-ai"
+  },
+  "agent-pi": {
+    "PI_VERSION": "@earendil-works/pi-coding-agent",
+    "PI_ACP_VERSION": "pi-acp"
+  }
+}
