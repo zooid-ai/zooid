@@ -1,5 +1,19 @@
 # @zooid/runtime-docker
 
+## 0.12.0
+
+### Minor Changes
+
+- Pin each agent image's npm CLI version as a Dockerfile ARG default, indexed by
+  `docker/versions.json`, with a drift test that fails CI if the two disagree.
+  `pnpm agent-images:check [--write]` diffs the pins against the npm registry and
+  rewrites stale ones; a weekly workflow runs it and opens a bump PR, and merging
+  one rebuilds `:latest`.
+
+### Patch Changes
+
+- @zooid/core@0.12.0
+
 ## 0.11.2
 
 ### Patch Changes

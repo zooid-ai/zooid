@@ -1,5 +1,38 @@
 # zooid
 
+## 0.12.0
+
+### Minor Changes
+
+- Add `pi` as a first-party agent preset, end to end.
+
+  `acp: { preset: pi }` now resolves to the `pi-acp` adapter and the
+  `ghcr.io/zooid-ai/agent-pi` image, with a `~/.pi` home mount so a host login
+  carries into a container.
+
+  `zooid init` offers `pi` as a fourth choice. Because pi ignores project-level
+  settings under `pi-acp`, the wizard relocates the agent's config directory into
+  the project (`PI_CODING_AGENT_DIR=.pi-agent`) rather than writing to your
+  `~/.pi`, and seeds it with a working provider/model — inherited from your own
+  `~/.pi/agent/settings.json` when you have one, since a pair you already run
+  beats any default we could guess. If a pi login is detected, the wizard _offers_
+  to share it, linking `auth.json` rather than copying it so the agent stays on
+  the same token lineage as your rotations; choosing a separate API key is always
+  available, and is the default when no login is found.
+
+### Patch Changes
+
+- Updated dependencies
+- Updated dependencies
+- Updated dependencies
+  - @zooid/runtime-docker@0.12.0
+  - @zooid/transport-matrix@0.12.0
+  - @zooid/acp-client@0.12.0
+  - @zooid/core@0.12.0
+  - @zooid/runtime-local@0.12.0
+  - @zooid/transport-http@0.12.0
+  - @zooid/context-mcp@0.12.0
+
 ## 0.11.2
 
 ### Patch Changes

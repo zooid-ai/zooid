@@ -1,5 +1,20 @@
 # @zooid/transport-matrix
 
+## 0.12.0
+
+### Patch Changes
+
+- Fix the flaky Tuwunel integration teardown and the containers it leaked.
+  Teardown now runs via `execFile` instead of `execSync`, so Vitest can actually
+  apply its hook timeout; setup and teardown share a 120s budget, since both
+  contend for the same Docker daemon; and a lost `findFreePort` race retries on a
+  fresh port instead of stranding a container in `created` state forever. The
+  compose service also gets `init: true`, so tuwunel can't zombie into something
+  Docker refuses to kill.
+- Updated dependencies
+  - @zooid/acp-client@0.12.0
+  - @zooid/core@0.12.0
+
 ## 0.11.2
 
 ### Patch Changes

@@ -1,6 +1,6 @@
 {
   "name": "@zooid/acp-client",
-  "version": "0.11.2",
+  "version": "0.12.0",
   "description": "Zooid's ACP client: spawn agent subprocesses, drive them via Agent Client Protocol, route events and permission requests through callbacks.",
   "type": "module",
   "license": "MIT",
