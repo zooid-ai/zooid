@@ -91,7 +91,11 @@ type ErrorTap = Extract<TapEvent, { kind: 'error' }>
 export function toErrorBody(evt: ErrorTap, threadRoot: string): Record<string, unknown> {
   const msg = evt.message.slice(0, 250)
   const out: Record<string, unknown> = {
-    msgtype: 'm.notice',
+    // No msgtype: dev.zooid.error is not m.room.message, so the field is
+    // meaningless here — it was a vestige of copying the message-body shape.
+    // Its presence used to force careful push-rule `before` positioning
+    // (ZNC025 §10); that positioning is kept regardless, since it also
+    // protects rules for event types that never carried the field.
     body: `⚠ [${evt.code}] ${msg}`,
     code: evt.code,
     message: msg,
@@ -115,9 +119,9 @@ export interface TurnEnd {
 
 /**
  * Turn-boundary marker for [[ZOD076]] and push notifications. Carries no
- * `msgtype` — unlike `toErrorBody`'s vestigial `m.notice`, that field would
- * collide with `.m.rule.suppress_notices`'s type-agnostic match and silently
- * swallow the event before the [[ZNC025]] agent push rule ever sees it.
+ * `msgtype` — a vestigial one (as `toErrorBody` used to carry) would collide
+ * with `.m.rule.suppress_notices`'s type-agnostic match and silently swallow
+ * the event before the [[ZNC025]] agent push rule ever sees it.
  */
 export function toTurnEndBody(evt: TurnEnd, threadRoot: string): Record<string, unknown> {
   return {

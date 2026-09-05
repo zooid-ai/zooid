@@ -166,7 +166,6 @@ describe('toErrorBody', () => {
       threadRoot,
     )
     expect(body).toMatchObject({
-      msgtype: 'm.notice',
       body: '⚠ [auth_missing] Authentication required',
       session_id: 'sess-1',
       turn_id: 'turn-1',
@@ -178,6 +177,14 @@ describe('toErrorBody', () => {
       'm.relates_to': { rel_type: 'm.thread', event_id: '$root-event-id' },
     })
     expect(body.recovery).toMatch(/^https:\/\/zooid\.dev\/docs\//)
+  })
+
+  it('carries no msgtype — dev.zooid.error is not m.room.message, so the field is meaningless', () => {
+    const body = toErrorBody(
+      { kind: 'error', agentId: 'a', sessionId: 's', turnId: 't', code: 'auth_missing', message: 'x', transient: false },
+      threadRoot,
+    )
+    expect(body).not.toHaveProperty('msgtype')
   })
 
   it('truncates message to 250 chars and detail to 2000 chars', () => {
