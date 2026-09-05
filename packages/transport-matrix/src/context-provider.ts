@@ -32,7 +32,18 @@ interface MatrixMessageEvent {
 
 export interface MatrixContextProviderOpts {
   client: MatrixClient
-  /** AS sender_localpart user (read access). */
+  /**
+   * The **agent's own** Matrix user (`@{workstation}.{name}:server`), which
+   * every read is impersonated as via `?user_id=`. Not the AS bot: that would
+   * read every room on the homeserver and make this class the only thing
+   * standing between an agent and someone else's conversation.
+   *
+   * This is load-bearing. It is what makes the homeserver — not our own
+   * bookkeeping — the authorization boundary for context reads, so a room or
+   * thread the agent is not in fails at Matrix with 403/404. Anything that
+   * widens who can name a room (a CLI, a new tool parameter) is safe only
+   * while this holds.
+   */
   asUserId: string
   /** Map of Matrix user IDs → agent names, for is_agent / agent_name flags. */
   agentBots: Map<string, string>
