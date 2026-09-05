@@ -348,3 +348,72 @@ describe('MatrixContextProvider', () => {
     expect(byId.get('$file')?.text).toBe('[file: report.pdf]')
   })
 })
+
+// The authorization boundary for context reads is the homeserver, not this
+// class: every read is impersonated as the *agent's own* Matrix user, so a room
+// or thread the agent isn't in fails at Matrix. Nothing asserted that, and a
+// stale doc comment claimed the opposite (that asUserId was the AS bot, which
+// can read every room) — so a refactor could have quietly swapped in the AS
+// user and turned a homeserver-enforced boundary into an honour system.
+describe('MatrixContextProvider — reads are impersonated as the agent', () => {
+  const AGENT = '@dev.assistant:hs'
+
+  function provider(overrides: Partial<MatrixClient>) {
+    return new MatrixContextProvider({
+      client: fakeClient(overrides),
+      asUserId: AGENT,
+      agentBots: new Map(),
+    })
+  }
+
+  it('threads the agent user through every read, never a different user', async () => {
+    const fetchRoomMessages = vi.fn().mockResolvedValue({ chunk: [], end: undefined })
+    const getJoinedMembers = vi.fn().mockResolvedValue({ joined: {} })
+    const fetchRoomName = vi.fn().mockResolvedValue('room')
+    const fetchEvent = vi.fn().mockResolvedValue(null)
+    const fetchThreadRelations = vi.fn().mockResolvedValue({ chunk: [], next_batch: undefined })
+    const p = provider({
+      fetchRoomMessages,
+      getJoinedMembers,
+      fetchRoomName,
+      fetchEvent,
+      fetchThreadRelations,
+    } as unknown as Partial<MatrixClient>)
+
+    await p.getRoomHistory('!room:hs', { limit: 10 })
+    await p.getRecentThreads('!room:hs', { limit: 10 })
+    await p.getThreadHistory('!room:hs', '$root', { limit: 10 })
+    await p.getChannelMembers('!room:hs')
+    await p.getChannelInfo('!room:hs')
+
+    expect(fetchRoomMessages.mock.calls.every(([a]) => a.asUserId === AGENT)).toBe(true)
+    expect(fetchThreadRelations).toHaveBeenCalledWith(expect.objectContaining({ asUserId: AGENT }))
+    // These two take the user as a positional argument, not a field.
+    expect(getJoinedMembers).toHaveBeenCalledWith('!room:hs', AGENT)
+    expect(fetchRoomName).toHaveBeenCalledWith('!room:hs', AGENT)
+    expect(fetchEvent).toHaveBeenCalledWith('!room:hs', '$root', AGENT)
+  })
+
+  // An agent naming a room it isn't in must fail loudly. Swallowing the error
+  // and returning `{ messages: [] }` would read as "empty room" to the model —
+  // indistinguishable from a real empty room, and it would hide the refusal.
+  it('propagates a homeserver refusal instead of returning an empty page', async () => {
+    const forbidden = new Error('fetchRoomMessages(!private:hs) failed: 403')
+    const p = provider({
+      fetchRoomMessages: vi.fn().mockRejectedValue(forbidden),
+    } as unknown as Partial<MatrixClient>)
+
+    await expect(p.getRoomHistory('!private:hs', { limit: 10 })).rejects.toThrow('403')
+  })
+
+  it('propagates a refusal on the thread path too', async () => {
+    const p = provider({
+      fetchEvent: vi.fn().mockResolvedValue(null),
+      fetchThreadRelations: vi
+        .fn()
+        .mockRejectedValue(new Error('fetchThreadRelations($x) failed: 403')),
+    } as unknown as Partial<MatrixClient>)
+
+    await expect(p.getThreadHistory('!private:hs', '$x', { limit: 10 })).rejects.toThrow('403')
+  })
+})
