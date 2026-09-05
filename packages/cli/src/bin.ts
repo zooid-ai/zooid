@@ -6,6 +6,7 @@ import { resolveOptions } from './commands/init/prompts.js'
 import { runLogs } from './commands/logs.js'
 import { runStart } from './commands/start.js'
 import { runStatus } from './commands/status.js'
+import { CLI_VERSION } from './version.js'
 
 const cli = cac('zooid')
 
@@ -111,5 +112,5 @@ cli
   })
 
 cli.help()
-cli.version('0.0.1')
+cli.version(CLI_VERSION)
 cli.parse()
