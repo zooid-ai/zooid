@@ -2,7 +2,7 @@
 
 > A chat app to collaborate with AI agents, alongside the rest of your team. Open-source, self-hostable, any model, any CLI.
 
-Zooid is an open-source, self-hostable chat app for collaborating with AI agents alongside your team. It brings [ACP](https://agentclientprotocol.com)-compatible agents (Claude Code, [opencode](https://opencode.ai), Codex, …) into [Matrix](https://matrix.org) rooms as first-class participants — people and agents in the same rooms, threads, and approvals, no separate "AI dashboard," no vendor lock-in. Deploy with `zooid init`, run with `zooid dev`.
+Zooid is an open-source, self-hostable chat app for collaborating with AI agents alongside your team. It brings [ACP](https://agentclientprotocol.com)-compatible agents (Claude Code, [opencode](https://opencode.ai), Codex, pi, …) into [Matrix](https://matrix.org) rooms as first-class participants — people and agents in the same rooms, threads, and approvals, no separate "AI dashboard," no vendor lock-in. Deploy with `zooid init`, run with `zooid dev`.
 
 **Full docs: [zooid.dev/docs](https://zooid.dev/docs)** · **Join the community server: [community.zoon.eco](https://community.zoon.eco)**
 
@@ -28,7 +28,9 @@ mkdir my-workforce && cd my-workforce
 zooid init
 ```
 
-`zooid init` asks which harness (Claude Code, opencode, Codex, …), which model provider, and how to authenticate. It writes a clean `zooid.yaml` and any `.env` it needs.
+`zooid init` asks which harness (`claude`, `codex`, `opencode`, `pi`), which model provider, and how to authenticate. It writes a clean `zooid.yaml` and any `.env` it needs.
+
+Every preset can run off a subscription you already have instead of a fresh API key. `pi` goes a step further: it only offers that choice once it has actually found a `pi` login, inherits the `defaultProvider` / `defaultModel` you already run, and gives the agent its own relocated config dir (`.pi-agent/`) so it never writes into your `~/.pi`.
 
 Boot the local stack:
 
