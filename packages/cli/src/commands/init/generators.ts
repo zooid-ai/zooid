@@ -1,18 +1,19 @@
 export interface ZooidYamlOpts {
-  preset: 'claude' | 'codex' | 'opencode'
+  preset: 'claude' | 'codex' | 'opencode' | 'pi'
   /**
    * Optional model pin. Omitted by default — the harness picks its own current
    * default. Only set when the user passes `--model` (claude / codex); opencode
-   * reads its own opencode.json.
+   * and pi read their own config files instead (opencode.json / settings.json).
    */
   model?: string
 }
 
 export function generateZooidYaml(opts: ZooidYamlOpts): string {
   // No model by default: the harness chooses. A `--model` pin (claude/codex
-  // only) expands the block to carry it.
+  // only) expands the block to carry it. pi is never expanded here — its pin
+  // lives in .pi-agent/settings.json; acp.model is unwired for pi (ZOD073).
   const acpBlock =
-    opts.preset === 'opencode' || !opts.model
+    opts.preset === 'opencode' || opts.preset === 'pi' || !opts.model
       ? `    acp: { preset: ${opts.preset} }`
       : `    acp:\n      preset: ${opts.preset}\n      model: ${opts.model}`
   return `runtime: local
@@ -125,7 +126,25 @@ export function generateEnv(opts: EnvOpts): string {
 }
 
 export function generateGitignore(): string {
-  return ['.env', 'node_modules/', 'data/', ''].join('\n')
+  // .pi-agent carries pi's settings and, on the shared-credential path, a link
+  // to a 600-mode token file. Never committable.
+  return ['.env', '.pi-agent/', 'node_modules/', 'data/', ''].join('\n')
+}
+
+export interface PiSettingsOpts {
+  provider: string
+  model: string
+}
+
+/**
+ * ZOD075. pi's *global* settings, relocated into the project by
+ * PI_CODING_AGENT_DIR. Only the two boot keys — theme and the rest stay the
+ * operator's business, and copying more would age badly.
+ */
+export function generatePiSettings(opts: PiSettingsOpts): string {
+  return (
+    JSON.stringify({ defaultProvider: opts.provider, defaultModel: opts.model }, null, 2) + '\n'
+  )
 }
 
 export function generateOpencodeReadme(): string {
