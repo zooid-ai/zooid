@@ -106,3 +106,25 @@ export function toErrorBody(evt: ErrorTap, threadRoot: string): Record<string, u
   if (recovery) out.recovery = recovery
   return out
 }
+
+export interface TurnEnd {
+  agentId: string
+  sessionId: string
+  producedOutput: boolean
+}
+
+/**
+ * Turn-boundary marker for [[ZOD076]] and push notifications. Carries no
+ * `msgtype` — unlike `toErrorBody`'s vestigial `m.notice`, that field would
+ * collide with `.m.rule.suppress_notices`'s type-agnostic match and silently
+ * swallow the event before the [[ZNC025]] agent push rule ever sees it.
+ */
+export function toTurnEndBody(evt: TurnEnd, threadRoot: string): Record<string, unknown> {
+  return {
+    body: evt.producedOutput ? `${evt.agentId} finished` : `${evt.agentId} finished without output`,
+    agent_id: evt.agentId,
+    session_id: evt.sessionId,
+    produced_output: evt.producedOutput,
+    'm.relates_to': { rel_type: 'm.thread', event_id: threadRoot },
+  }
+}

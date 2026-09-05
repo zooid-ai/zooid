@@ -95,7 +95,14 @@ export class MatrixContextProvider implements TransportContextProvider {
     const threads: ThreadOverview[] = []
     for (const ev of chunk as unknown as MatrixMessageEvent[]) {
       if (ev.type !== 'm.room.message') continue
-      if (ev.content?.msgtype !== 'm.text' || typeof ev.content.body !== 'string') continue
+      // m.notice: agent prose sends as m.notice so
+      // .m.rule.suppress_notices silences the chunk storm server-side
+      // (ZNC025 §10) — a thread root sent by an agent must still surface here.
+      if (
+        (ev.content?.msgtype !== 'm.text' && ev.content?.msgtype !== 'm.notice') ||
+        typeof ev.content.body !== 'string'
+      )
+        continue
       const relatesTo = ev.content['m.relates_to']
       if (relatesTo?.rel_type === 'm.thread') continue // skip thread replies
       const agent = this.opts.agentBots.get(ev.sender)
@@ -180,7 +187,8 @@ export class MatrixContextProvider implements TransportContextProvider {
       }
     }
 
-    if (msgtype !== 'm.text' || typeof body !== 'string') return null
+    // Agent prose sends as m.notice (ZNC025 §10); m.text is human prose.
+    if ((msgtype !== 'm.text' && msgtype !== 'm.notice') || typeof body !== 'string') return null
     return {
       id: ev.event_id,
       sender: ev.sender,

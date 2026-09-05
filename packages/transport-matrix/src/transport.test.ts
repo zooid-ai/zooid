@@ -146,7 +146,7 @@ describe('matrix transport /transactions', () => {
         roomId: '!r:example.com',
         asUserId: '@architect:example.com',
         threadRoot: '$root',
-        content: expect.objectContaining({ msgtype: 'm.text', body: 'hello back' }),
+        content: expect.objectContaining({ msgtype: 'm.notice', body: 'hello back' }),
       }),
     )
   })
@@ -273,7 +273,7 @@ describe('matrix transport /transactions', () => {
         formatted_body?: string
       }
     }
-    expect(call.content.msgtype).toBe('m.text')
+    expect(call.content.msgtype).toBe('m.notice')
     expect(call.content.body).toBe('**bold** _italic_\n\n```ts\nconst x = 1\n```')
     expect(call.content.format).toBe('org.matrix.custom.html')
     expect(typeof call.content.formatted_body).toBe('string')
@@ -314,6 +314,37 @@ describe('matrix transport /transactions', () => {
     expect(call.content.body).toBe('just plain text')
     expect(call.content).not.toHaveProperty('formatted_body')
     expect(call.content).not.toHaveProperty('format')
+  })
+
+  it('sends agent prose as m.notice so .m.rule.suppress_notices silences the chunk storm server-side', async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: { type: 'text', text: 'hello' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$root',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    expect(client.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.objectContaining({ msgtype: 'm.notice' }) }),
+    )
   })
 
   it('emits dev.zooid.approval_request when an approval is registered', async () => {
@@ -372,6 +403,95 @@ describe('matrix transport /transactions', () => {
       'a1',
       { decision: 'allow', optionId: 'allow_once' },
     )
+  })
+})
+
+describe('dev.zooid.turn.end', () => {
+  function topLevelMention() {
+    return {
+      type: 'm.room.message',
+      event_id: '$root',
+      room_id: '!r:example.com',
+      sender: '@alice:example.com',
+      content: {
+        msgtype: 'm.text',
+        body: 'hi',
+        'm.mentions': { user_ids: ['@architect:example.com'] },
+      },
+    }
+  }
+
+  it('is sent once per turn, after the final flush has settled', async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: { type: 'text', text: 'hello back' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, { events: [topLevelMention()] })
+    await settleTurn()
+
+    const sendMessageOrder = client.sendMessage.mock.invocationCallOrder[0]!
+    const turnEndCall = client.sendCustomEvent.mock.calls.find(
+      (c) => (c[0] as { eventType: string }).eventType === 'dev.zooid.turn.end',
+    )
+    expect(turnEndCall).toBeDefined()
+    const turnEndIdx = client.sendCustomEvent.mock.calls.indexOf(turnEndCall!)
+    const turnEndOrder = client.sendCustomEvent.mock.invocationCallOrder[turnEndIdx]!
+    // Ordering matters: a turn.end that lands before the prose would notify
+    // the user to look at a room that has nothing in it yet.
+    expect(turnEndOrder).toBeGreaterThan(sendMessageOrder)
+    expect(turnEndCall![0]).toMatchObject({
+      roomId: '!r:example.com',
+      asUserId: '@architect:example.com',
+      content: expect.objectContaining({ produced_output: true }),
+    })
+  })
+
+  it('reports produced_output: false for a silent turn', async () => {
+    const { transport, agents, client } = makeTransport()
+    // The agent emits no chunks at all — this is exactly ZOD076's case.
+    agents.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+    await postTxn(transport.app, { events: [topLevelMention()] })
+    await settleTurn()
+
+    const turnEndCall = client.sendCustomEvent.mock.calls.find(
+      (c) => (c[0] as { eventType: string }).eventType === 'dev.zooid.turn.end',
+    )
+    expect(turnEndCall![0]).toMatchObject({
+      content: expect.objectContaining({ produced_output: false }),
+    })
+  })
+
+  it('is still sent when the turn throws, so the room never hangs on a spinner', async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockImplementation(async () => {
+      throw new Error('boom')
+    })
+    await postTxn(transport.app, { events: [topLevelMention()] })
+    await settleTurn()
+
+    const turnEndCall = client.sendCustomEvent.mock.calls.find(
+      (c) => (c[0] as { eventType: string }).eventType === 'dev.zooid.turn.end',
+    )
+    expect(turnEndCall).toBeDefined()
+  })
+
+  it('threads to the turn root', async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+    await postTxn(transport.app, { events: [topLevelMention()] })
+    await settleTurn()
+
+    const turnEndCall = client.sendCustomEvent.mock.calls.find(
+      (c) => (c[0] as { eventType: string }).eventType === 'dev.zooid.turn.end',
+    )
+    expect(
+      (turnEndCall![0] as { content: { 'm.relates_to': unknown } }).content['m.relates_to'],
+    ).toEqual({ rel_type: 'm.thread', event_id: '$root' })
   })
 })
 

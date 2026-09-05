@@ -10,6 +10,7 @@ import {
   toPlanBody,
   toErrorBody,
   toAvailableCommandsBody,
+  toTurnEndBody,
 } from './event-encoders.js'
 
 describe('toToolCallBody', () => {
@@ -228,5 +229,31 @@ describe('toErrorBody', () => {
       threadRoot,
     )
     expect(body.session_id).toBeUndefined()
+  })
+})
+
+describe('toTurnEndBody', () => {
+  it('carries the produced_output flag ZOD076 reads', () => {
+    expect(toTurnEndBody({ agentId: 'claude', sessionId: 's1', producedOutput: true }, '$root')).toEqual({
+      body: 'claude finished',
+      agent_id: 'claude',
+      session_id: 's1',
+      produced_output: true,
+      'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+    })
+  })
+
+  it('marks an empty turn', () => {
+    const out = toTurnEndBody(
+      { agentId: 'claude', sessionId: 's1', producedOutput: false },
+      '$root',
+    )
+    expect(out.produced_output).toBe(false)
+    expect(out.body).toBe('claude finished without output')
+  })
+
+  it('carries no msgtype — a vestigial m.notice here would collide with .m.rule.suppress_notices', () => {
+    const out = toTurnEndBody({ agentId: 'a', sessionId: 's', producedOutput: true }, '$r')
+    expect(out).not.toHaveProperty('msgtype')
   })
 })

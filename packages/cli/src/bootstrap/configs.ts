@@ -26,6 +26,15 @@ export function renderTuwunelToml(opts: TuwunelTomlOpts): string {
     'allow_local_presence = true',
     'address = ["0.0.0.0"]',
     `port = [${TUWUNEL_INTERNAL_PORT}]`,
+    // Push rules ([[ZNC025]]) already gate what notifies; don't also push to
+    // a device actively looking at the room.
+    'suppress_push_when_active = true',
+    // DEV ONLY — disables an SSRF guard. Tuwunel is in Podman and the push
+    // gateway runs on the host, so the default ip_range_denylist (127/8,
+    // 10/8, 172.16/12, 192.168/16, ::1) silently drops every pusher delivery.
+    // Never set on a box: there the gateway is reached at the public
+    // hostname through Caddy.
+    'ip_range_denylist = []',
     '',
   ].join('\n')
 }

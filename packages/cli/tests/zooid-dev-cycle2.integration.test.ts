@@ -91,7 +91,15 @@ describe.skipIf(!dockerAvailable())(
 
       const cfg = await fetch(`http://localhost:${UI_PORT}/config.json`)
       expect(cfg.status).toBe(200)
-      expect(await cfg.json()).toEqual({ homeserver_url: HS })
+      const body = (await cfg.json()) as Record<string, unknown>
+      expect(body.homeserver_url).toBe(HS)
+      // The daemon's push gateway rides the AS listener; `zooid dev` wires
+      // its VAPID key + a host.docker.internal URL into config.json so the
+      // web client (in the host browser, not the container) can subscribe.
+      expect(body.push_gateway_url).toMatch(
+        /^http:\/\/host\.docker\.internal:\d+\/_matrix\/push\/v1\/notify$/,
+      )
+      expect(body.vapid_public_key).toMatch(/^[A-Za-z0-9_-]+$/)
     })
 
     it('admin user can log in via Tuwunel', async () => {

@@ -48,4 +48,26 @@ describe('webStatic', () => {
     const r = await app.request('/assets/nope.js')
     expect(r.status).toBe(404)
   })
+
+  it('serves push_gateway_url and vapid_public_key when configured', async () => {
+    const app = webStatic({
+      webRoot: dir,
+      homeserverUrl: 'http://localhost:8448',
+      pushGatewayUrl: 'http://host.docker.internal:9000/_matrix/push/v1/notify',
+      vapidPublicKey: 'BPk',
+    })
+    const res = await app.request('/config.json')
+    expect(await res.json()).toEqual({
+      homeserver_url: 'http://localhost:8448',
+      push_gateway_url: 'http://host.docker.internal:9000/_matrix/push/v1/notify',
+      vapid_public_key: 'BPk',
+    })
+  })
+
+  it('omits both when unconfigured, so the client falls back instead of half-subscribing', async () => {
+    const app = webStatic({ webRoot: dir, homeserverUrl: 'http://localhost:8448' })
+    expect(await (await app.request('/config.json')).json()).toEqual({
+      homeserver_url: 'http://localhost:8448',
+    })
+  })
 })

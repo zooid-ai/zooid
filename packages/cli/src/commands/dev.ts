@@ -248,7 +248,22 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
                 t.output = msg
               },
             }))
-          const app = webStatic({ webRoot, homeserverUrl: homeserver })
+          const app = webStatic({
+            webRoot,
+            homeserverUrl: homeserver,
+            ...(ctx.daemon?.vapidPublicKey
+              ? {
+                  // Tuwunel runs in a container; `localhost` here would
+                  // resolve to the container, not the daemon. Same shorthand
+                  // as the AS registration url
+                  // (bootstrap/registration-url.ts). This URL is stored in
+                  // the pusher and fetched by the homeserver — the browser
+                  // never requests it.
+                  pushGatewayUrl: `http://host.docker.internal:${ctx.daemon.port}/_matrix/push/v1/notify`,
+                  vapidPublicKey: ctx.daemon.vapidPublicKey,
+                }
+              : {}),
+          })
           ctx.uiServer = serve({ fetch: app.fetch, port: flags.uiPort })
         },
       },

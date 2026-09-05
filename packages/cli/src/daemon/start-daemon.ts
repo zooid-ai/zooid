@@ -33,6 +33,7 @@ import {
 } from '@zooid/context-mcp'
 import { buildAcpRegistry } from '../build-registry.js'
 import { prepullImages } from '../prepull-images.js'
+import { mountPushGateway } from '../push-gateway/index.js'
 import { makeSyncCursorStore } from './sync-cursors.js'
 import { shouldBindHttpListener } from './pull-wiring.js'
 
@@ -79,6 +80,8 @@ export interface StartDaemonOpts {
 export interface DaemonHandle {
   port: number
   agentNames: string[]
+  /** VAPID public key for web push, when the gateway bound (appservice mode with a data dir). */
+  vapidPublicKey?: string
   stop(): Promise<void>
   whenStopped: Promise<void>
 }
@@ -166,6 +169,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
 
   const matrix = findMatrixTransport(config)
   let port: number
+  let vapidPublicKey: string | undefined
 
   if (matrix) {
     const mode = matrix.transport.mode ?? 'appservice'
@@ -232,6 +236,16 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     })
     if (shouldBindHttpListener(mode)) {
       const requestedPort = matrix.transport.port ?? 9000
+      // The gateway rides the appservice listener, not webStatic: webStatic
+      // exists only under `zooid dev`, and on a deployed box Caddy serves the
+      // dist directly with the daemon out of the serving path. This is the
+      // one HTTP surface bound in both modes.
+      if (dataDir) {
+        vapidPublicKey = mountPushGateway(transport.app, {
+          dataDir,
+          subject: `https://${serverName}`,
+        }).publicKey
+      }
       // Bind 0.0.0.0 explicitly — @hono/node-server defaults to IPv6-only on
       // macOS, which Docker's NAT bridge can't reach when Tuwunel pushes AS
       // events back to host.docker.internal:<port>.
@@ -347,5 +361,5 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     process.on('SIGTERM', () => handler('SIGTERM'))
   }
 
-  return { port, agentNames, stop, whenStopped }
+  return { port, agentNames, vapidPublicKey, stop, whenStopped }
 }

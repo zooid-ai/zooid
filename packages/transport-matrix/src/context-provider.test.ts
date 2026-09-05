@@ -347,6 +347,55 @@ describe('MatrixContextProvider', () => {
     expect(byId.get('$img')?.text).toBe('[image: dog.jpg]')
     expect(byId.get('$file')?.text).toBe('[file: report.pdf]')
   })
+
+  it('renders agent prose sent as m.notice — ZNC025 §10 switches agent output to m.notice', async () => {
+    const client = fakeClient({
+      fetchRoomMessages: vi.fn().mockResolvedValue({
+        chunk: [
+          {
+            event_id: '$e1',
+            sender: '@architect:hs',
+            origin_server_ts: 1000,
+            type: 'm.room.message',
+            content: { msgtype: 'm.notice', body: 'agent output' },
+          },
+        ],
+        end: undefined,
+      }),
+    } as unknown as Partial<MatrixClient>)
+    const provider = new MatrixContextProvider({
+      client,
+      asUserId: '@_zooid:hs',
+      agentBots: new Map([['@architect:hs', 'architect']]),
+    })
+    const page = await provider.getRoomHistory('!room:hs', {})
+    expect(page.messages[0]?.text).toBe('agent output')
+  })
+
+  it('getRecentThreads keeps a thread rooted in an m.notice', async () => {
+    const client = fakeClient({
+      fetchRoomMessages: vi.fn().mockResolvedValue({
+        chunk: [
+          {
+            event_id: '$root',
+            sender: '@architect:hs',
+            origin_server_ts: 1000,
+            type: 'm.room.message',
+            content: { msgtype: 'm.notice', body: 'agent thread root' },
+          },
+        ],
+        end: undefined,
+      }),
+    } as unknown as Partial<MatrixClient>)
+    const provider = new MatrixContextProvider({
+      client,
+      asUserId: '@_zooid:hs',
+      agentBots: new Map([['@architect:hs', 'architect']]),
+    })
+    const page = await provider.getRecentThreads('!room:hs', { limit: 50 })
+    expect(page.threads.map((t) => t.id)).toEqual(['$root'])
+    expect(page.threads[0]?.text).toBe('agent thread root')
+  })
 })
 
 // The authorization boundary for context reads is the homeserver, not this

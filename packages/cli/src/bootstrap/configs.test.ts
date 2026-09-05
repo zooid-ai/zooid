@@ -15,6 +15,11 @@ describe('renderTuwunelToml', () => {
     )
     expect(toml).toContain('allow_local_presence = true')
     expect(toml).toContain('port = [8448]')
+    expect(toml).toContain('suppress_push_when_active = true')
+    // DEV ONLY: Tuwunel is in Podman, the push gateway runs on the host, and
+    // the default ip_range_denylist (127/8, 10/8, 172.16/12, 192.168/16, ::1)
+    // would silently drop every pusher delivery to it.
+    expect(toml).toContain('ip_range_denylist = []')
   })
 
   it('honors a non-default server_name', () => {

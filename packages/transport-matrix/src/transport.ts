@@ -7,7 +7,14 @@ import { BotPool } from './bot-pool.js'
 import { route, isMediaMsgtype, type AgentBinding, type ThreadState } from './router.js'
 import { sessionKeyFor, composeHandoffKey } from './session-keys.js'
 import { stripMention, extractMentions } from './mentions.js'
-import { toToolCallBody, toUpdateBody, toPlanBody, toAvailableCommandsBody, toErrorBody } from './event-encoders.js'
+import {
+  toToolCallBody,
+  toUpdateBody,
+  toPlanBody,
+  toAvailableCommandsBody,
+  toErrorBody,
+  toTurnEndBody,
+} from './event-encoders.js'
 import { classify } from '@zooid/acp-client'
 import { toMatrixHtml } from './markdown-to-matrix-html.js'
 import {
@@ -288,7 +295,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     text: string,
   ): { msgtype: string; body: string; [k: string]: unknown } => {
     const content: { msgtype: string; body: string; [k: string]: unknown } = {
-      msgtype: 'm.text',
+      // m.notice, not m.text: .m.rule.suppress_notices silences the
+      // chunk-storm of agent prose server-side (ZNC025 §10) instead of every
+      // client having to filter it. dev.zooid.error carries the same tweak
+      // for the same reason.
+      msgtype: 'm.notice',
       body: text,
     }
     const html = toMatrixHtml(text)
@@ -900,18 +911,32 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       // Flush the final assistant message — the one with no following messageId
       // change or out-of-band event to have triggered an earlier flush.
       flushBuffer(sessionId)
-      // Wait for every queued send (mid-turn flushes, tool/plan events, final
-      // flush) to settle before tearing the session down.
-      await (sendQueue.get(sessionId) ?? Promise.resolve())
-      if ((flushedCounts.get(sessionId) ?? 0) === 0) {
-        console.warn(
-          `[matrix:${agent.name}] turn finished with empty buffer (session=${sessionId}); nothing sent to ${evt.room_id}`,
-        )
-      }
     } finally {
       clearInterval(refresh)
       await safeTyping(false)
       await safePresence('online')
+      // Wait for every queued send (mid-turn flushes, tool/plan events, final
+      // flush) to settle before announcing the turn's end — and run this even
+      // when the turn above threw, so the room never hangs on a spinner.
+      await (sendQueue.get(sessionId) ?? Promise.resolve())
+      const producedOutput = (flushedCounts.get(sessionId) ?? 0) > 0
+      if (!producedOutput) {
+        console.warn(
+          `[matrix:${agent.name}] turn finished with empty buffer (session=${sessionId}); nothing sent to ${evt.room_id}`,
+        )
+      }
+      // Turn boundary for [[ZOD076]] and push notifications. Sent after the
+      // send queue drains so it lands *after* the prose it announces — a
+      // turn.end arriving first would notify the user to look at a room that
+      // has nothing in it yet.
+      await client
+        .sendCustomEvent({
+          roomId: evt.room_id,
+          asUserId: agent.userId,
+          eventType: 'dev.zooid.turn.end',
+          content: toTurnEndBody({ agentId: agent.name, sessionId, producedOutput }, threadRoot),
+        })
+        .catch((e) => console.warn(`[matrix:${agent.name}] turn.end send failed:`, e))
       buffers.delete(sessionId)
       bufferMessageIds.delete(sessionId)
       flushedCounts.delete(sessionId)

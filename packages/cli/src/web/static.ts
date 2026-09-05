@@ -5,6 +5,8 @@ import { Hono } from 'hono'
 export interface WebStaticOpts {
   webRoot: string
   homeserverUrl: string
+  pushGatewayUrl?: string
+  vapidPublicKey?: string
 }
 
 const MIME: Record<string, string> = {
@@ -28,7 +30,13 @@ function isAssetPath(p: string): boolean {
 export function webStatic(opts: WebStaticOpts): Hono {
   const app = new Hono()
 
-  app.get('/config.json', (c) => c.json({ homeserver_url: opts.homeserverUrl }))
+  app.get('/config.json', (c) =>
+    c.json({
+      homeserver_url: opts.homeserverUrl,
+      ...(opts.pushGatewayUrl ? { push_gateway_url: opts.pushGatewayUrl } : {}),
+      ...(opts.vapidPublicKey ? { vapid_public_key: opts.vapidPublicKey } : {}),
+    }),
+  )
 
   app.get('*', (c) => {
     const url = new URL(c.req.url)

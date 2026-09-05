@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import chalk from 'chalk'
 import { findConfigFile, findMatrixTransport, loadZooidConfig } from '@zooid/core'
 import { deriveHomeserverShape } from '../bootstrap/derive.js'
+import { VAPID_FILENAME } from '../push-gateway/vapid.js'
 
 export interface StatusFlags {
   cwd?: string
@@ -15,6 +16,24 @@ export interface StatusReport {
   tuwunel: { status: 'up' | 'down'; url: string }
   daemon: { status: 'up' | 'down'; url: string } | { status: 'unknown'; reason: string }
   agents: { name: string; userId: string; trigger: string }[]
+  /** VAPID public key read from `<dataDir>/vapid.json`, when it exists. */
+  vapidPublicKey?: string
+}
+
+/**
+ * Read the daemon's VAPID public key straight off disk. Operators
+ * hand-editing a box's config.json need it and can't start a daemon just to
+ * ask, so this reads the persisted file rather than starting one.
+ */
+export function readVapidPublicKey(dataDir: string): string | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(join(dataDir, VAPID_FILENAME), 'utf8')) as {
+      publicKey?: string
+    }
+    return typeof parsed.publicKey === 'string' ? parsed.publicKey : undefined
+  } catch {
+    return undefined
+  }
 }
 
 async function probe(url: string, timeoutMs = 2_000): Promise<boolean> {
@@ -29,12 +48,14 @@ async function probe(url: string, timeoutMs = 2_000): Promise<boolean> {
 export async function collectStatus(opts: {
   cwd: string
   tuwunelUrl: string
+  dataDir?: string
 }): Promise<StatusReport> {
   const tuwunelUp = await probe(`${opts.tuwunelUrl}/_matrix/client/versions`)
   const tuwunel: StatusReport['tuwunel'] = {
     status: tuwunelUp ? 'up' : 'down',
     url: opts.tuwunelUrl,
   }
+  const vapidPublicKey = opts.dataDir ? readVapidPublicKey(opts.dataDir) : undefined
 
   const found = findConfigFile(opts.cwd)
   if (!found) {
@@ -42,6 +63,7 @@ export async function collectStatus(opts: {
       tuwunel,
       daemon: { status: 'unknown', reason: 'no zooid.yaml' },
       agents: [],
+      ...(vapidPublicKey ? { vapidPublicKey } : {}),
     }
   }
   const cfg = loadZooidConfig(readFileSync(found.path, 'utf8'), {
@@ -67,6 +89,7 @@ export async function collectStatus(opts: {
     tuwunel,
     daemon: { status: daemonUp ? 'up' : 'down', url: daemonUrl },
     agents,
+    ...(vapidPublicKey ? { vapidPublicKey } : {}),
   }
 }
 
@@ -89,7 +112,8 @@ export async function runStatus(flags: StatusFlags): Promise<void> {
     }
   }
   const tuwunelUrl = `http://localhost:${port ?? 8448}`
-  const s = await collectStatus({ cwd, tuwunelUrl })
+  const dataDir = resolve(cwd, flags.dataDir ?? './data')
+  const s = await collectStatus({ cwd, tuwunelUrl, dataDir })
   const fmt = (st: 'up' | 'down' | 'unknown'): string =>
     st === 'up' ? chalk.green('up') : st === 'down' ? chalk.red('down') : chalk.yellow('unknown')
   process.stdout.write(
@@ -99,6 +123,7 @@ export async function runStatus(flags: StatusFlags): Promise<void> {
       ...s.agents.map(
         (a) => `  agent: ${a.name} (${a.userId}, trigger: ${a.trigger})`,
       ),
+      ...(s.vapidPublicKey ? [`vapid public key: ${s.vapidPublicKey}`] : []),
       '',
     ].join('\n'),
   )

@@ -54,6 +54,21 @@ describe('collectStatus', () => {
     ])
   })
 
+  it('reports the VAPID public key when vapid.json exists in the data dir', async () => {
+    writeFileSync(join(dir, 'zooid.yaml'), yaml)
+    writeFileSync(join(dir, 'vapid.json'), JSON.stringify({ publicKey: 'BPk', privateKey: 'priv' }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })))
+    const s = await collectStatus({ cwd: dir, tuwunelUrl: 'http://localhost:8448', dataDir: dir })
+    expect(s.vapidPublicKey).toBe('BPk')
+  })
+
+  it('omits the VAPID key when no daemon has run yet', async () => {
+    writeFileSync(join(dir, 'zooid.yaml'), yaml)
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not found', { status: 404 })))
+    const s = await collectStatus({ cwd: dir, tuwunelUrl: 'http://localhost:8448', dataDir: dir })
+    expect(s.vapidPublicKey).toBeUndefined()
+  })
+
   it('reports daemon down when the AS callback port refuses the connection', async () => {
     writeFileSync(join(dir, 'zooid.yaml'), yaml)
     vi.stubGlobal(
