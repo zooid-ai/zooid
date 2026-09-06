@@ -1,6 +1,6 @@
 {
   "name": "@zooid/transport-http",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "HTTP transport for zooid. POST /sessions to start a session, POST /sessions/:id/turns to resume, GET /sessions/:id/events to tail. Bearer-auth, SSE responses.",
   "type": "module",
   "license": "MIT",

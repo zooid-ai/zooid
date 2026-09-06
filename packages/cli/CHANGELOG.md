@@ -1,5 +1,53 @@
 # zooid
 
+## 0.13.0
+
+### Minor Changes
+
+- 1a6bf39: Web push gateway ([ZNC025]), so agents can notify you with the browser tab
+  closed.
+
+  - The daemon generates a VAPID keypair on first start and serves
+    `/_matrix/push/v1/notify`, encrypting each notification to the browser's push
+    subscription (RFC 8291). Only 404/410 mark a pusher rejected — the homeserver
+    deletes those permanently, so transient failures must not.
+  - `zooid dev` publishes the gateway URL and VAPID public key to the web client's
+    runtime config, and no longer sets `suppress_push_when_active` in the
+    generated `tuwunel.toml`: it keys off Matrix presence, which is per-user
+    rather than per-room and stays active for 300s after the last sync, so it
+    suppressed exactly the notification you were waiting for.
+  - The Matrix transport emits `dev.zooid.turn.end` at turn completion, carrying
+    a preview of the agent's closing message so the notification can say what the
+    agent said rather than only that it stopped.
+  - Agent prose is sent as `m.notice`, which the default
+    `.m.rule.suppress_notices` rule silences — a verbose turn no longer fires one
+    push per streamed chunk. Context assembly still reads it.
+  - `zooid dev` no longer hangs on shutdown. The context-MCP socket server now
+    drops its connections on close; `net.Server.close()` waits for every open
+    connection and, unlike `http.Server`, never drops idle ones, so it sat there
+    until the agent's MCP child processes happened to exit. Tuwunel teardown is
+    bounded, and a repeated Ctrl-C now escalates to a force quit.
+
+- 1a6bf39: Make the CLI explorable. `zooid help` and `zooid help <command>` now mirror
+  `--help`, every command carries usage examples, and the help footer links the
+  docs. A bare `zooid` prints help and exits 1 instead of doing nothing, and an
+  unknown command says so rather than exiting silently.
+
+### Patch Changes
+
+- 2f8a879: Fix `zooid --version`, which reported `0.0.1` on every build from the first
+  release through 0.12.0. The version was a hardcoded literal in `bin.ts`; it is
+  now read from the package manifest at startup, so it can't drift from the
+  installed release again.
+- Updated dependencies [fecd79f]
+  - @zooid/transport-matrix@0.13.0
+  - @zooid/core@0.13.0
+  - @zooid/acp-client@0.13.0
+  - @zooid/context-mcp@0.13.0
+  - @zooid/runtime-docker@0.13.0
+  - @zooid/runtime-local@0.13.0
+  - @zooid/transport-http@0.13.0
+
 ## 0.12.0
 
 ### Minor Changes
