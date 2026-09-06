@@ -137,4 +137,14 @@ describe('pushGateway', () => {
   it('400s on a malformed body instead of throwing', async () => {
     expect((await notify({ nope: true })).status).toBe(400)
   })
+
+  it('logs receipt and outcome — the only way to see a Tuwunel call in the daemon log', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    await notify(notification([device()]))
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining('notify room=!r:example.org type=m.room.message devices=1'),
+    )
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('delivered=1 rejected=0'))
+    log.mockRestore()
+  })
 })

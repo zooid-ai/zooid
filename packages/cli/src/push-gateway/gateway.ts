@@ -26,8 +26,18 @@ export function pushGateway(opts: PushGatewayOpts): Hono {
 
   app.post('/_matrix/push/v1/notify', async (c) => {
     const parsed = parseNotifyBody(await c.req.json().catch(() => null))
-    if (!parsed) return c.json({ error: 'malformed notification' }, 400)
+    if (!parsed) {
+      console.warn('[push] notify: malformed body')
+      return c.json({ error: 'malformed notification' }, 400)
+    }
+    // Logged unconditionally: this is the only way to tell "Tuwunel never
+    // called us" (nothing below appears at all — check ip_range_denylist)
+    // apart from "it called us and here's what happened."
+    console.log(
+      `[push] notify room=${parsed.room_id} type=${parsed.type} devices=${parsed.devices.length}`,
+    )
 
+    let delivered = 0
     const rejected: string[] = []
     await Promise.all(
       parsed.devices.map(async (device) => {
@@ -49,6 +59,7 @@ export function pushGateway(opts: PushGatewayOpts): Hono {
               urgency: device.tweaks?.sound !== undefined ? 'high' : 'normal',
             },
           )
+          delivered++
         } catch (err) {
           const status = (err as { statusCode?: number }).statusCode
           // 404/410 are the ONLY statuses that mean "this device is gone".
@@ -59,6 +70,7 @@ export function pushGateway(opts: PushGatewayOpts): Hono {
       }),
     )
 
+    console.log(`[push] notify done: delivered=${delivered} rejected=${rejected.length}`)
     return c.json({ rejected })
   })
 
