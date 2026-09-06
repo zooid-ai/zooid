@@ -16,6 +16,8 @@ cli
   .option('--runtime <local|docker|podman>', 'Agent runtime')
   .option('--image <ref>', 'Agent container image')
   .option('--print-token', 'Print a 32-byte hex token and exit')
+  .example('$ zooid start --data ./data')
+  .example('$ zooid start --runtime docker --image ghcr.io/zooid-ai/agent:latest')
   .action(async (flags) => {
     await runStart({
       dataDir: flags.data,
@@ -36,6 +38,8 @@ cli
     '--watch-web [path]',
     'Run vite build --watch on @zooid/web. Path defaults to sibling ../zooid-clients/packages/web.',
   )
+  .example('$ zooid dev')
+  .example('$ zooid dev --engine podman --ui-port 5174')
   .action(async (flags) => {
     await runDev({
       dataDir: flags.data,
@@ -57,6 +61,9 @@ cli
   .option('--turn <id>', 'Filter ACP taps to a single turn id')
   .option('-f, --follow', 'Tail the file (not yet implemented)')
   .option('--keep <n>', 'For `logs prune`: days to retain', { default: 14 })
+  .example('$ zooid logs daemon')
+  .example('$ zooid logs agent-support.acp --turn 3f9c1a --day 2026-09-06')
+  .example('$ zooid logs prune --keep 7')
   .action(async (source, flags) => {
     if (source === 'prune') {
       await runLogs({
@@ -79,6 +86,7 @@ cli
   .command('status', 'Print Tuwunel + daemon health')
   .option('--data <dir>', 'Persistent data root dir', { default: './data' })
   .option('--port <n>', 'Tuwunel host port (defaults to zooid.yaml)')
+  .example('$ zooid status')
   .action(async (flags) => {
     await runStatus({
       dataDir: flags.data,
@@ -96,6 +104,9 @@ cli
   .option('--force', 'Allow scaffolding into a non-empty directory')
   .option('--overwrite', 'With --force, overwrite existing files')
   .option('--no-interactive', 'Disable prompts; require all flags up front')
+  .example('$ zooid init')
+  .example('$ zooid init my-workforce --preset opencode --provider anthropic')
+  .example('$ zooid init --preset claude --auth api-key --api-key sk-... --no-interactive')
   .action(async (dir: string | undefined, flags) => {
     const resolved = await resolveOptions({
       dir: dir ?? process.cwd(),
@@ -111,6 +122,43 @@ cli
     await runInit(resolved)
   })
 
-cli.help()
+cli
+  .command('help [command]', 'Display help for zooid, or for a specific command')
+  .example('$ zooid help')
+  .example('$ zooid help init')
+  .action((commandName?: string) => {
+    if (!commandName) {
+      cli.globalCommand.outputHelp()
+      return
+    }
+    const target = cli.commands.find((c) => c.isMatched(commandName))
+    if (!target) {
+      console.error(`Unknown command: ${commandName}\n`)
+      cli.globalCommand.outputHelp()
+      process.exitCode = 1
+      return
+    }
+    target.outputHelp()
+  })
+
+cli.help((sections) => {
+  sections.push({
+    title: 'Docs',
+    body: '  https://zooid.dev/docs',
+  })
+  return sections
+})
 cli.version(CLI_VERSION)
-cli.parse()
+
+cli.on('command:*', () => {
+  console.error(`Unknown command: ${cli.args.join(' ')}\n`)
+  cli.outputHelp()
+  process.exitCode = 1
+})
+
+if (process.argv.slice(2).length === 0) {
+  cli.outputHelp()
+  process.exitCode = 1
+} else {
+  cli.parse()
+}

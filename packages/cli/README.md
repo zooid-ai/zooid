@@ -21,6 +21,8 @@ Install the CLI:
 npm install -g zooid
 ```
 
+Run `zooid help` (or `zooid <command> --help`) at any time for the full list of commands and options.
+
 Scaffold a workforce:
 
 ```bash
