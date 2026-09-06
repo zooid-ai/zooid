@@ -323,11 +323,17 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   // same turn. The buffer is cleared synchronously (before the first await),
   // so a chunk for the *next* message that arrives during the send starts
   // fresh. Returns true when a message was enqueued.
+  const lastFlushed = new Map<string, string>()
+
   const flushBuffer = (sessionId: string): boolean => {
     const ctx = sessions.get(sessionId)
     const text = buffers.get(sessionId) ?? ''
     if (!ctx || text.length === 0) return false
     buffers.set(sessionId, '')
+    // Kept for turn.end's push preview: the prose goes out as `m.notice` and
+    // is deliberately silenced server-side, so turn.end is the only event that
+    // can tell the user what the agent actually said.
+    lastFlushed.set(sessionId, text)
     flushedCounts.set(sessionId, (flushedCounts.get(sessionId) ?? 0) + 1)
     const content = buildTextContent(text)
     const tail = (sendQueue.get(sessionId) ?? Promise.resolve()).then(async () => {
@@ -934,12 +940,16 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           roomId: evt.room_id,
           asUserId: agent.userId,
           eventType: 'dev.zooid.turn.end',
-          content: toTurnEndBody({ agentId: agent.name, sessionId, producedOutput }, threadRoot),
+          content: toTurnEndBody(
+            { agentId: agent.name, sessionId, producedOutput, lastMessage: lastFlushed.get(sessionId) },
+            threadRoot,
+          ),
         })
         .catch((e) => console.warn(`[matrix:${agent.name}] turn.end send failed:`, e))
       buffers.delete(sessionId)
       bufferMessageIds.delete(sessionId)
       flushedCounts.delete(sessionId)
+      lastFlushed.delete(sessionId)
       sendQueue.delete(sessionId)
     }
   }

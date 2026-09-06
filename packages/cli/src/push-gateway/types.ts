@@ -30,6 +30,8 @@ export interface PushPayload {
   sender_display_name?: string
   type: string
   body?: string
+  /** The agent's final message on a turn.end — the prose itself never pushes. */
+  preview?: string
   unread: number
   sound: boolean
 }

@@ -115,7 +115,12 @@ export interface TurnEnd {
   agentId: string
   sessionId: string
   producedOutput: boolean
+  /** The turn's final assistant message, for the push notification's preview. */
+  lastMessage?: string
 }
+
+/** Push payloads are size-capped, and a notification body is glanceable or useless. */
+const PREVIEW_MAX = 140
 
 /**
  * Turn-boundary marker for [[ZOD076]] and push notifications. Carries no
@@ -124,8 +129,17 @@ export interface TurnEnd {
  * the event before the [[ZNC025]] agent push rule ever sees it.
  */
 export function toTurnEndBody(evt: TurnEnd, threadRoot: string): Record<string, unknown> {
+  const preview = evt.lastMessage?.trim().replace(/\s+/g, ' ')
   return {
+    // `body` stays the turn-boundary summary: it is what a generic Matrix
+    // client renders for this event, and the prose is already its own message
+    // in the timeline. The preview below exists only for the push, which
+    // cannot see that message — agent prose is `m.notice`, deliberately
+    // silenced by `.m.rule.suppress_notices` so a chatty turn doesn't fire one
+    // push per chunk ([[ZNC025]] §10). Without it the only notification the
+    // user gets says an agent finished and nothing about what it said.
     body: evt.producedOutput ? `${evt.agentId} finished` : `${evt.agentId} finished without output`,
+    ...(preview ? { last_message: preview.slice(0, PREVIEW_MAX) } : {}),
     agent_id: evt.agentId,
     session_id: evt.sessionId,
     produced_output: evt.producedOutput,

@@ -19,6 +19,10 @@ function truncate(s: string, max: number): string {
 export function buildPushPayload(n: PushNotification, device?: PushDevice): PushPayload {
   const body =
     typeof n.content?.body === 'string' ? truncate(n.content.body as string, MAX_BODY) : undefined
+  const preview =
+    typeof n.content?.last_message === 'string'
+      ? truncate(n.content.last_message as string, MAX_BODY)
+      : undefined
   return {
     event_id: n.event_id,
     room_id: n.room_id,
@@ -26,6 +30,7 @@ export function buildPushPayload(n: PushNotification, device?: PushDevice): Push
     ...(n.sender_display_name !== undefined ? { sender_display_name: n.sender_display_name } : {}),
     type: n.type,
     ...(body !== undefined ? { body } : {}),
+    ...(preview !== undefined ? { preview } : {}),
     unread: n.counts?.unread ?? 0,
     // Whether this makes a noise is a push-rule property the server evaluated,
     // not a second decision made here (spec §12).

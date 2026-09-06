@@ -27,6 +27,29 @@ describe('buildPushPayload', () => {
     })
   })
 
+  it("forwards turn.end's last_message as the preview the worker renders", () => {
+    const out = buildPushPayload({
+      ...base,
+      type: 'dev.zooid.turn.end',
+      content: { body: 'claude finished', last_message: 'the deploy is green' },
+    })
+    expect(out.preview).toBe('the deploy is green')
+  })
+
+  it('truncates a long preview too — push payloads are size-capped', () => {
+    const out = buildPushPayload({
+      ...base,
+      type: 'dev.zooid.turn.end',
+      content: { body: 'claude finished', last_message: 'y'.repeat(MAX_BODY + 50) },
+    })
+    expect(out.preview!.length).toBe(MAX_BODY)
+    expect(out.preview!.endsWith('…')).toBe(true)
+  })
+
+  it('omits preview when the event carries no last_message', () => {
+    expect(buildPushPayload(base).preview).toBeUndefined()
+  })
+
   it('truncates a long body rather than shipping the whole message', () => {
     const long = 'x'.repeat(MAX_BODY + 50)
     const out = buildPushPayload({ ...base, content: { msgtype: 'm.text', body: long } })

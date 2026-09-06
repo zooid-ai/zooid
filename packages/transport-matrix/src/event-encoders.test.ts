@@ -250,6 +250,40 @@ describe('toTurnEndBody', () => {
     })
   })
 
+  it('carries a preview of the final message — the prose itself never pushes', () => {
+    // Agent prose goes out as m.notice and is silenced by
+    // .m.rule.suppress_notices, so without this the only notification the user
+    // gets says an agent finished and nothing about what it said.
+    const out = toTurnEndBody(
+      { agentId: 'claude', sessionId: 's1', producedOutput: true, lastMessage: 'the deploy is green' },
+      '$root',
+    )
+    expect(out.last_message).toBe('the deploy is green')
+    // body stays the turn-boundary summary a generic Matrix client renders.
+    expect(out.body).toBe('claude finished')
+  })
+
+  it('collapses whitespace and truncates a long final message', () => {
+    const out = toTurnEndBody(
+      {
+        agentId: 'claude',
+        sessionId: 's1',
+        producedOutput: true,
+        lastMessage: '  line one\n\nline two   ' + 'x'.repeat(400),
+      },
+      '$root',
+    )
+    const preview = out.last_message as string
+    expect(preview.length).toBe(140)
+    expect(preview.startsWith('line one line two ')).toBe(true)
+    expect(preview).not.toContain('\n')
+  })
+
+  it('omits last_message entirely when the turn produced nothing', () => {
+    const out = toTurnEndBody({ agentId: 'claude', sessionId: 's1', producedOutput: false }, '$root')
+    expect('last_message' in out).toBe(false)
+  })
+
   it('marks an empty turn', () => {
     const out = toTurnEndBody(
       { agentId: 'claude', sessionId: 's1', producedOutput: false },
