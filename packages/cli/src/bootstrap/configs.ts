@@ -26,9 +26,14 @@ export function renderTuwunelToml(opts: TuwunelTomlOpts): string {
     'allow_local_presence = true',
     'address = ["0.0.0.0"]',
     `port = [${TUWUNEL_INTERNAL_PORT}]`,
-    // Push rules ([[ZNC025]]) already gate what notifies; don't also push to
-    // a device actively looking at the room.
-    'suppress_push_when_active = true',
+    // NOT `suppress_push_when_active` ([[ZNC025]]). It reads Matrix presence,
+    // which is both too coarse and too slow for this: coarse because it is
+    // per-user, so reading room A kills the push for room B; slow because
+    // `currently_active` lingers for minutes after the last sync, so closing
+    // the tab and waiting for an agent to finish still delivers nothing —
+    // exactly the case this feature exists for. `public/sw.js` already does
+    // the suppression we actually want, precisely: it drops a push only when
+    // a *visible* window is on *that* room.
     // DEV ONLY — disables an SSRF guard. Tuwunel is in Podman and the push
     // gateway runs on the host, so the default ip_range_denylist (127/8,
     // 10/8, 172.16/12, 192.168/16, ::1) silently drops every pusher delivery.
