@@ -32,7 +32,17 @@ export async function startDaemonSocketServer(opts: {
   registry: SpawnRegistry
 }): Promise<DaemonSocketHandle> {
   await unlink(opts.sockPath).catch(() => {})
+  // net.Server.close() waits for every open connection and — unlike
+  // http.Server since Node 19 — never destroys idle ones, and there is no
+  // closeAllConnections() for it. The clients here are context-mcp servers
+  // spawned beside each agent, which outlive AcpClient.stop() (it SIGTERMs
+  // the agent without waiting, and these are its grandchildren). So without
+  // tracking them, close() hangs until they happen to die — which is what
+  // made `zooid dev` take ages to stop.
+  const open = new Set<Socket>()
   const server: Server = createServer((socket: Socket) => {
+    open.add(socket)
+    socket.on('close', () => open.delete(socket))
     let buf = ''
     socket.setEncoding('utf8')
     socket.on('data', async (chunk) => {
@@ -58,6 +68,11 @@ export async function startDaemonSocketServer(opts: {
     close: () =>
       new Promise<void>((resolve) => {
         server.close(() => resolve())
+        // Shutdown is already tearing the agents down, so there is no
+        // in-flight request worth waiting for. Drop the connections that
+        // would otherwise keep close() pending forever.
+        for (const socket of open) socket.destroy()
+        open.clear()
       }),
   }
 }

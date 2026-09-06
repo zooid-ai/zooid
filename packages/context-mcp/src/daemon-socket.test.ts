@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { createConnection } from 'node:net'
 import { SpawnRegistry } from './spawn-registry.js'
 import { startDaemonSocketServer, callDaemon } from './daemon-socket.js'
 import type { TransportContextProvider } from '@zooid/core'
@@ -217,5 +218,31 @@ describe('daemon-socket', () => {
       })) as { messages: Array<{ id: string }> }
       expect(res.messages[0].id).toBe(expected)
     }
+  })
+})
+
+describe('close()', () => {
+  it('does not hang on a connected client that never disconnects', async () => {
+    // The context-mcp servers spawned beside each agent outlive
+    // AcpClient.stop() (it SIGTERMs the agent and doesn't wait; these are its
+    // grandchildren). net.Server.close() waits for every open connection and,
+    // unlike http.Server, never drops idle ones — so before this was fixed,
+    // `zooid dev` hung on shutdown for as long as those processes lived.
+    const sockPath = join(tmpdir(), `zooid-close-${randomUUID()}.sock`)
+    const registry = new SpawnRegistry()
+    const handle = await startDaemonSocketServer({ sockPath, registry })
+
+    const client = createConnection(sockPath)
+    await new Promise<void>((resolve, reject) => {
+      client.once('connect', () => resolve())
+      client.once('error', reject)
+    })
+
+    const closed = await Promise.race([
+      handle.close().then(() => 'closed' as const),
+      new Promise<'hung'>((resolve) => setTimeout(() => resolve('hung'), 2000)),
+    ])
+    client.destroy()
+    expect(closed).toBe('closed')
   })
 })

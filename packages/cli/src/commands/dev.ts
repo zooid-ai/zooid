@@ -302,13 +302,28 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
   })
 
   if (flags.installSignalHandlers !== false) {
-    const handler = async (): Promise<void> => {
-      process.stdout.write(chalk.dim('\nStopping…\n'))
-      await shutdown()
-      process.exit(0)
+    // buildShutdown is idempotent, so a repeat Ctrl-C used to print again and
+    // await the same promise, with no way to give up on a step taking too
+    // long. Escalate on repeats instead.
+    let interrupts = 0
+    const onSignal = (): void => {
+      interrupts += 1
+      if (interrupts === 1) {
+        process.stdout.write(chalk.dim('\nStopping…\n'))
+        void shutdown().then(() => process.exit(0))
+        return
+      }
+      if (interrupts === 2) {
+        process.stdout.write(
+          chalk.dim('Still stopping — press Ctrl-C again to force quit.\n'),
+        )
+        return
+      }
+      process.stdout.write(chalk.dim('Forced.\n'))
+      process.exit(130)
     }
-    process.on('SIGINT', () => void handler())
-    process.on('SIGTERM', () => void handler())
+    process.on('SIGINT', onSignal)
+    process.on('SIGTERM', onSignal)
   }
 
   process.stdout.write(

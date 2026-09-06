@@ -52,9 +52,28 @@ export class TuwunelService {
   async stop(): Promise<void> {
     // Foregrounded container: kill the engine process; --rm cleans up after.
     if (this.child && this.child.exitCode === null) {
-      this.child.kill('SIGTERM')
+      const child = this.child
+      child.kill('SIGTERM')
+      // Bounded: `docker stop` below is the real cleanup and is a no-op if the
+      // container is already gone, so a wedged engine process must not be able
+      // to hang shutdown forever. Measured ~450ms for a healthy Tuwunel.
       await new Promise<void>((resolve) => {
-        this.child!.on('exit', () => resolve())
+        let done = false
+        const finish = (): void => {
+          if (done) return
+          done = true
+          clearTimeout(timer)
+          resolve()
+        }
+        const timer = setTimeout(() => {
+          try {
+            child.kill('SIGKILL')
+          } catch {
+            // already gone
+          }
+          finish()
+        }, 5000)
+        child.once('exit', finish)
       })
     }
     this.child = null
