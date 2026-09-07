@@ -4,7 +4,8 @@ import type { ChildProcess } from 'node:child_process'
  * Per-agent ACP block in zooid.yaml. XOR: either a known preset or an
  * explicit command. The schema parser rejects both/neither.
  *
- * Built-in presets: `claude`, `codex`, `opencode`, `cline`, `kiro`, `gemini`.
+ * Built-in presets: `claude`, `codex`, `opencode`, `pi`, `cline`, `kiro`,
+ * `gemini`.
  * See `@zooid/acp-client`'s preset registry for the current list.
  */
 export type AcpAgentSpec =
