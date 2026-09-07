@@ -8,7 +8,7 @@ FROM ghcr.io/zooid-ai/agent-base:latest
 # unpinned and therefore freeze at whatever was current when someone last ran
 # the publish workflow by hand. [[ZOD074]] hoists all four into
 # docker/versions.json and automates the refresh.
-ARG PI_VERSION=0.85.0
+ARG PI_VERSION=0.85.1
 ARG PI_ACP_VERSION=0.0.33
 RUN npm install -g \
       @earendil-works/pi-coding-agent@${PI_VERSION} \
