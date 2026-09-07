@@ -7,10 +7,7 @@ export {
   findConfigFile,
 } from './config.js'
 export type { LoadZooidConfigOptions } from './config.js'
-export {
-  AcpAgentRegistry,
-  resolveAcpAgentSpec,
-} from './acp-registry.js'
+export { AcpAgentRegistry, resolveAcpAgentSpec } from './acp-registry.js'
 export {
   ApprovalCorrelator,
   type RegisteredApproval,
@@ -24,12 +21,7 @@ export type {
   ContextSpawnFactory,
 } from './acp-registry.js'
 export type { TapEvent } from '@zooid/acp-client'
-export type {
-  AcpAgentSpec,
-  AcpMount,
-  AcpRuntime,
-  AcpSpawnSpec,
-} from './acp-types.js'
+export type { AcpAgentSpec, AcpMount, AcpRuntime, AcpSpawnSpec } from './acp-types.js'
 export type {
   AgentConfig,
   ContainerConfig,
@@ -57,3 +49,4 @@ export type {
   ThreadOverviewPage,
   TransportContextProvider,
 } from './transport-context.js'
+export * from './task-actions.js'

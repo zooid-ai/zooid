@@ -78,10 +78,7 @@ function presetOf(agent: AgentConfig): PresetName | undefined {
   return undefined
 }
 
-function resolveAgentImage(
-  agent: AgentConfig,
-  cfg: ZooidConfig,
-): ResolvedImage {
+function resolveAgentImage(agent: AgentConfig, cfg: ZooidConfig): ResolvedImage {
   if (agent.container?.image) return { image: agent.container.image, source: 'agent' }
   if (cfg.container?.image) return { image: cfg.container.image, source: 'workforce' }
   const preset = presetOf(agent)
@@ -183,9 +180,7 @@ function composeAgentMounts(
     composed.push(out)
   }
 
-  const mkdirs: string[] = composed
-    .filter((m) => m.create)
-    .map((m) => m.host)
+  const mkdirs: string[] = composed.filter((m) => m.create).map((m) => m.host)
 
   return {
     mounts: composed,
@@ -227,8 +222,9 @@ export function buildAcpRegistry(
       }
     }
     if (missing.length > 0) {
-      const lines = missing.map(({ name, preset }) =>
-        `  - ${name}${preset ? ` (preset: ${preset})` : ''} — no preset-default image`,
+      const lines = missing.map(
+        ({ name, preset }) =>
+          `  - ${name}${preset ? ` (preset: ${preset})` : ''} — no preset-default image`,
       )
       throw new Error(
         `runtime: ${cfg.runtime} requires a container image for each agent. Unresolved:\n` +
@@ -260,9 +256,10 @@ export function buildAcpRegistry(
     mkdirByAgent[name] = composed.mkdirs
     cwdByAgent[name] = composed.cwd
     if (resolvedImage && cfg.runtime !== 'local') {
-      const mountSummary = composed.mounts.length === 0
-        ? 'mounts=[]'
-        : `mounts=[${composed.mounts.map((m) => m.id ?? m.target).join(',')}]`
+      const mountSummary =
+        composed.mounts.length === 0
+          ? 'mounts=[]'
+          : `mounts=[${composed.mounts.map((m) => m.id ?? m.target).join(',')}]`
       log(
         `[zooid] agent ${name.padEnd(12)} image=${resolvedImage}  source=${source}  ${mountSummary}`,
       )
@@ -330,11 +327,12 @@ function buildContextSpawns(
         asUserId: agent.matrix.user_id,
         agentBots,
       })
-      result[name] = async (threadId: string, channelId?: string) => {
+      result[name] = async (threadId: string, channelId?: string, sessionKey?: string) => {
         const spawnId = registry.register({
           agentName: name,
           threadRef: { channelId: channelId ?? threadId, threadId },
           provider,
+          sessionKey: sessionKey ?? threadId,
         })
         return buildContextServerSpec({
           spawnId,
@@ -352,10 +350,16 @@ function buildContextSpawns(
 function defaultRuntimeFor(cfg: ZooidConfig): AcpRuntime {
   if (cfg.runtime === 'local') return new LocalAcpRuntime()
   if (cfg.runtime === 'docker') {
-    return new DockerAcpRuntime({ defaultImage: cfg.container?.image, engine: 'docker' })
+    return new DockerAcpRuntime({
+      defaultImage: cfg.container?.image,
+      engine: 'docker',
+    })
   }
   if (cfg.runtime === 'podman') {
-    return new DockerAcpRuntime({ defaultImage: cfg.container?.image, engine: 'podman' })
+    return new DockerAcpRuntime({
+      defaultImage: cfg.container?.image,
+      engine: 'podman',
+    })
   }
   throw new Error(`unsupported runtime: ${cfg.runtime}`)
 }

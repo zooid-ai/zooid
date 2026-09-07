@@ -53,7 +53,7 @@ describe('AcpClient — context MCP wiring', () => {
     })
     injectConnection(client, calls)
     await client.ensureSession('!room:hs')
-    expect(contextSpawn).toHaveBeenCalledWith('!room:hs', undefined)
+    expect(contextSpawn).toHaveBeenCalledWith('!room:hs', undefined, '!room:hs')
     const params = calls.find((c) => c.method === 'newSession')!.params as {
       mcpServers: Array<{ name: string; args: string[] }>
     }
@@ -80,7 +80,12 @@ describe('AcpClient — context MCP wiring', () => {
     })
     const conn = injectConnection(client, calls)
     // @ts-expect-error
-    client.store = { load: async () => {}, get: () => 'sess-old', set: async () => {}, delete: async () => {} }
+    client.store = {
+      load: async () => {},
+      get: () => 'sess-old',
+      set: async () => {},
+      delete: async () => {},
+    }
     // @ts-expect-error
     client.storeLoaded = Promise.resolve()
     await client.ensureSession('!room:hs')
@@ -109,7 +114,7 @@ describe('AcpClient — context MCP wiring', () => {
     // Handoff-arc session: key is composed, context ref is the real root —
     // zooid_get_history must read the real Matrix thread.
     await client.ensureSession('$root|$p1', '!r:example.com', '$root')
-    expect(contextSpawn).toHaveBeenCalledWith('$root', '!r:example.com')
+    expect(contextSpawn).toHaveBeenCalledWith('$root', '!r:example.com', '$root|$p1')
   })
 
   it('defaults the context ref to the session key when contextThreadId is omitted (back-compat)', async () => {
@@ -128,6 +133,6 @@ describe('AcpClient — context MCP wiring', () => {
     })
     injectConnection(client, calls)
     await client.ensureSession('$root', '!r:example.com')
-    expect(contextSpawn).toHaveBeenCalledWith('$root', '!r:example.com')
+    expect(contextSpawn).toHaveBeenCalledWith('$root', '!r:example.com', '$root')
   })
 })

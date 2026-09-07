@@ -12,15 +12,9 @@ import {
 } from '@zooid/acp-client'
 import type { AcpAgentSpec, AcpMount, AcpRuntime } from './acp-types.js'
 import type { AgentConfig } from './types.js'
-import type {
-  ApprovalCorrelator,
-  RegisteredApproval,
-} from './approval-correlator.js'
+import type { ApprovalCorrelator, RegisteredApproval } from './approval-correlator.js'
 
-export type AcpRegistryEventHandler = (
-  agentName: string,
-  event: AgentEvent,
-) => void
+export type AcpRegistryEventHandler = (agentName: string, event: AgentEvent) => void
 export type AcpRegistryApprovalHandler = (
   agentName: string,
   req: ApprovalRequest,
@@ -119,6 +113,7 @@ export interface AcpAgentRegistryOptions {
 export type ContextSpawnFactory = (
   threadId: string,
   channelId?: string,
+  sessionKey?: string,
 ) => Promise<{
   name: 'zooid-context'
   command: string
@@ -174,11 +169,7 @@ export class AcpAgentRegistry implements AcpRegistry {
   }
 
   resolveSpawnCwd(name: string): string {
-    return (
-      this.opts.cwd?.[name] ??
-      this.opts.agents[name]?.workdir ??
-      process.cwd()
-    )
+    return this.opts.cwd?.[name] ?? this.opts.agents[name]?.workdir ?? process.cwd()
   }
 
   agentNames(): string[] {
@@ -229,9 +220,7 @@ export class AcpAgentRegistry implements AcpRegistry {
   }
 
   async stopAll(): Promise<void> {
-    await Promise.allSettled(
-      [...this.clients.values()].map((c) => c.stop()),
-    )
+    await Promise.allSettled([...this.clients.values()].map((c) => c.stop()))
     this.clients.clear()
   }
 

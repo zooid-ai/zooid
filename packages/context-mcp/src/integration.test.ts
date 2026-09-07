@@ -35,7 +35,13 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
     const provider = fakeProvider({
       getRoomHistory: async () => ({
         messages: [
-          { id: 'e1', sender: 'alice', text: 'hi', timestamp: 'T', is_agent: false },
+          {
+            id: 'e1',
+            sender: 'alice',
+            text: 'hi',
+            timestamp: 'T',
+            is_agent: false,
+          },
         ],
         has_more: false,
       }),
@@ -63,14 +69,19 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
 
     const list = await client.listTools()
     expect(list.tools.map((t) => t.name).sort()).toEqual([
+      'zooid_complete_task',
       'zooid_get_channel_info',
       'zooid_get_history',
       'zooid_get_members',
       'zooid_get_recent_threads',
       'zooid_get_thread_history',
+      'zooid_start_tasks',
     ])
 
-    const result = await client.callTool({ name: 'zooid_get_history', arguments: {} })
+    const result = await client.callTool({
+      name: 'zooid_get_history',
+      arguments: {},
+    })
     const payload = JSON.parse((result.content as Array<{ text: string }>)[0].text)
     expect(payload.messages[0].id).toBe('e1')
   })
@@ -78,17 +89,41 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
   it('two MCP server subprocesses sharing one socket route to their own bindings', async () => {
     const providerA = fakeProvider({
       getRoomHistory: async () => ({
-        messages: [{ id: 'A1', sender: 'alice', text: 'from A', timestamp: 'T', is_agent: false }],
+        messages: [
+          {
+            id: 'A1',
+            sender: 'alice',
+            text: 'from A',
+            timestamp: 'T',
+            is_agent: false,
+          },
+        ],
         has_more: false,
       }),
-      getChannelInfo: async () => ({ id: '!a:hs', name: 'room-A', transport: 'matrix' }),
+      getChannelInfo: async () => ({
+        id: '!a:hs',
+        name: 'room-A',
+        transport: 'matrix',
+      }),
     })
     const providerB = fakeProvider({
       getRoomHistory: async () => ({
-        messages: [{ id: 'B1', sender: 'bob', text: 'from B', timestamp: 'T', is_agent: false }],
+        messages: [
+          {
+            id: 'B1',
+            sender: 'bob',
+            text: 'from B',
+            timestamp: 'T',
+            is_agent: false,
+          },
+        ],
         has_more: false,
       }),
-      getChannelInfo: async () => ({ id: '!b:hs', name: 'room-B', transport: 'matrix' }),
+      getChannelInfo: async () => ({
+        id: '!b:hs',
+        name: 'room-B',
+        transport: 'matrix',
+      }),
     })
     const registry = new SpawnRegistry()
     const spawnA = registry.register({
@@ -130,8 +165,14 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
     expect(payloadA.messages[0].id).toBe('A1')
     expect(payloadB.messages[0].id).toBe('B1')
 
-    const infoA = await clientA.callTool({ name: 'zooid_get_channel_info', arguments: {} })
-    const infoB = await clientB.callTool({ name: 'zooid_get_channel_info', arguments: {} })
+    const infoA = await clientA.callTool({
+      name: 'zooid_get_channel_info',
+      arguments: {},
+    })
+    const infoB = await clientB.callTool({
+      name: 'zooid_get_channel_info',
+      arguments: {},
+    })
     expect(JSON.parse((infoA.content as Array<{ text: string }>)[0].text).id).toBe('!a:hs')
     expect(JSON.parse((infoB.content as Array<{ text: string }>)[0].text).id).toBe('!b:hs')
   })

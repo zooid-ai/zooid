@@ -1,6 +1,16 @@
 import { Hono } from 'hono'
 import { timingSafeEqual } from 'node:crypto'
-import type { AcpRegistry, ApprovalCorrelator, RegisteredApproval } from '@zooid/core'
+import type {
+  AcpRegistry,
+  ApprovalCorrelator,
+  RegisteredApproval,
+  TaskActions,
+  StartTaskResult,
+  StartTaskSpec,
+  ThreadCompletion,
+  ThreadStartContent,
+} from '@zooid/core'
+import { THREAD_RESULT_FIELD, THREAD_START_FIELD } from '@zooid/core'
 import type { AgentEvent, ContentBlock } from '@zooid/acp-client'
 import { MatrixClient } from './matrix-client.js'
 import { BotPool } from './bot-pool.js'
@@ -17,17 +27,12 @@ import {
 } from './event-encoders.js'
 import { classify } from '@zooid/acp-client'
 import { toMatrixHtml } from './markdown-to-matrix-html.js'
-import {
-  PendingMediaStore,
-  type PendingMediaItem,
-} from './pending-media.js'
-import {
-  MediaClient,
-  MAX_INLINE_IMAGE_BYTES,
-  INLINE_IMAGE_MIMES,
-} from './media-client.js'
+import { PendingMediaStore, type PendingMediaItem } from './pending-media.js'
+import { MediaClient, MAX_INLINE_IMAGE_BYTES, INLINE_IMAGE_MIMES } from './media-client.js'
 import { writeAttachment } from './attachments.js'
 import { SyncLoop } from './sync-loop.js'
+import { TaskRegistry, MAX_OPEN_TASKS_PER_ROOM, type TaskRecord } from './task-registry.js'
+import { buildAssignmentContent, checkDelegable, renderCompletionPrompt } from './task-dispatch.js'
 
 export interface MediaClientLike {
   download(input: {
@@ -82,6 +87,13 @@ interface SessionContext {
   roomId: string
   /** Always set — every session is thread-scoped via agent-promotion. */
   threadRoot: string
+}
+interface TurnInput {
+  roomId: string
+  threadRoot: string
+  sessionKey: string
+  promptText?: string
+  event?: MatrixEvent
 }
 
 interface MatrixEvent {
@@ -242,7 +254,16 @@ function inboundThreadRoot(evt: MatrixEvent): string | undefined {
 }
 
 export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
-  const { agents, approvals, client, bindings, hsToken, adminUserId, botUserId, mode = 'appservice' } = opts
+  const {
+    agents,
+    approvals,
+    client,
+    bindings,
+    hsToken,
+    adminUserId,
+    botUserId,
+    mode = 'appservice',
+  } = opts
   const drainQuietMs = opts.drainQuietMs ?? DRAIN_QUIET_MS
   const drainMaxMs = opts.drainMaxMs ?? DRAIN_MAX_MS
   const mediaClient = opts.media
@@ -267,6 +288,9 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const sendQueue = new Map<string, Promise<void>>()
   // Thread participation index: keyed by thread root event_id.
   const threadStates = new Map<string, ThreadState>()
+  const taskRegistry = new TaskRegistry()
+  const bindingFor = (name: string) => bindings.find((b) => b.name === name)
+  const turnQueues = new Map<string, Promise<void>>()
   // Drop events older than this — in push (appservice) mode Tuwunel may replay
   // a backlog after the daemon was offline, and we don't want yesterday's
   // "@docs hi" to fire now. In pull (client) mode the persisted `since` cursor
@@ -305,9 +329,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     const html = toMatrixHtml(text)
     if (html) {
       const escapedPlain =
-        '<p>' +
-        text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') +
-        '</p>'
+        '<p>' + text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</p>'
       const norm = (s: string) => s.replace(/\s+/g, ' ').trim()
       if (norm(html) !== norm(escapedPlain)) {
         content.format = 'org.matrix.custom.html'
@@ -369,7 +391,12 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     }
 
     if (event.type === 'agent_message_chunk') {
-      const block = event.content as { type?: string; text?: string; data?: string; mimeType?: string }
+      const block = event.content as {
+        type?: string
+        text?: string
+        data?: string
+        mimeType?: string
+      }
       if (block.type === 'text' && typeof block.text === 'string') {
         // A change in ACP messageId marks the previous assistant message as
         // complete. opencode streams each assistant message under its own id
@@ -382,8 +409,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           event.messageId !== undefined &&
           prevMessageId !== undefined &&
           event.messageId !== prevMessageId
-        if (event.messageId !== undefined)
-          bufferMessageIds.set(event.sessionId, event.messageId)
+        if (event.messageId !== undefined) bufferMessageIds.set(event.sessionId, event.messageId)
         // flushBuffer clears the buffer synchronously, so the new message's
         // text below starts fresh.
         if (messageChanged) flushBuffer(event.sessionId)
@@ -407,7 +433,12 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           const ext = (block.mimeType.split('/')[1] ?? 'png').replace(/[^a-z0-9]/gi, '')
           const filename = `image.${ext}`
           void mediaClient
-            .upload({ data: bytes, contentType: block.mimeType, filename, asUserId: ctx.agent.userId })
+            .upload({
+              data: bytes,
+              contentType: block.mimeType,
+              filename,
+              asUserId: ctx.agent.userId,
+            })
             .then(({ content_uri }) =>
               client.sendMessage({
                 roomId: ctx.roomId,
@@ -486,7 +517,10 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       tool_call_id: handle.toolCallId,
       options: handle.options,
     }
-    content['m.relates_to'] = { rel_type: 'm.thread', event_id: ctx.threadRoot }
+    content['m.relates_to'] = {
+      rel_type: 'm.thread',
+      event_id: ctx.threadRoot,
+    }
     if (handle.toolKind !== undefined) content.tool_kind = handle.toolKind
     if (handle.toolTitle !== undefined) content.tool_title = handle.toolTitle
     if (handle.toolInput !== undefined) content.tool_input = handle.toolInput
@@ -497,6 +531,58 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       content,
     })
   })
+
+  function reportTurnFailure(agent: AgentBinding, input: TurnInput, err: unknown): void {
+    console.error(`[matrix] runTurn failed for ${agent.name}:`, err)
+    const c = classify(err)
+    const body = toErrorBody(
+      {
+        kind: 'error',
+        agentId: agent.name,
+        sessionId: null,
+        turnId: null,
+        code: c.code,
+        message: err instanceof Error ? err.message : String(err),
+        detail: err instanceof Error && err.stack ? err.stack.slice(0, 2000) : undefined,
+        transient: c.transient,
+        acp_error: c.acp_error,
+      },
+      input.threadRoot,
+    )
+    void client
+      .sendCustomEvent({
+        roomId: input.roomId,
+        asUserId: agent.userId,
+        eventType: 'dev.zooid.error',
+        content: body,
+      })
+      .catch((e) => console.warn(`[matrix:${agent.name}] dev.zooid.error send failed:`, e))
+  }
+
+  function enqueueTurn(agent: AgentBinding, input: TurnInput): Promise<void> {
+    const key = `${agent.name}::${input.sessionKey}`
+    const chained = (turnQueues.get(key) ?? Promise.resolve())
+      .then(() => runTurn(agent, input))
+      .then(() => {
+        let st = threadStates.get(input.threadRoot)
+        if (!st) {
+          st = {
+            participants: [],
+            rootMentions: [],
+            callers: {},
+            handoffs: {},
+          }
+          threadStates.set(input.threadRoot, st)
+        }
+        if (st.participants.at(-1) !== agent.name) st.participants.push(agent.name)
+      })
+      .catch((err) => reportTurnFailure(agent, input, err))
+    turnQueues.set(key, chained)
+    void chained.finally(() => {
+      if (turnQueues.get(key) === chained) turnQueues.delete(key)
+    })
+    return chained
+  }
 
   async function handleInboundEvent(evt: MatrixEvent): Promise<void> {
     if (evt.event_id) {
@@ -571,8 +657,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       const st = threadStates.get(threadRoot)
       for (const a of bindings) {
         agents.endSession(a.name, threadRoot)
+        taskRegistry.bumpGeneration(a.name, threadRoot)
         for (const arc of st?.handoffs[a.name] ?? []) {
-          agents.endSession(a.name, composeHandoffKey(threadRoot, arc))
+          const key = composeHandoffKey(threadRoot, arc)
+          agents.endSession(a.name, key)
+          taskRegistry.bumpGeneration(a.name, key)
         }
       }
       // NB: keep threadStates intact. Per ZOD039 § /clear, only the agent's
@@ -582,7 +671,10 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       return
     }
     if (evt.type === 'dev.zooid.interrupt') {
-      const content = (evt.content ?? {}) as { session_id?: string; reason?: string }
+      const content = (evt.content ?? {}) as {
+        session_id?: string
+        reason?: string
+      }
       // Thread-relation form (client-friendly): /interrupt in a thread sends
       // an empty event with `m.relates_to: thread/<root>`. Cancel every
       // session whose threadRoot matches.
@@ -623,7 +715,10 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           (content.reason ? ` reason=${content.reason}` : ''),
       )
       await agents.cancelSession(ctx.agent.name, content.session_id).catch((err) => {
-        console.error(`[matrix] cancelSession(${ctx.agent.name}, ${content.session_id}) failed:`, err)
+        console.error(
+          `[matrix] cancelSession(${ctx.agent.name}, ${content.session_id}) failed:`,
+          err,
+        )
       })
       return
     }
@@ -638,11 +733,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       const decision = content.option_id
         ? { decision: content.decision, optionId: content.option_id }
         : { decision: content.decision }
-      const ok = approvals.resolve(
-        content.session_id,
-        content.approval_id,
-        decision as never,
-      )
+      const ok = approvals.resolve(content.session_id, content.approval_id, decision as never)
       if (!ok) console.warn(`[matrix] unknown approval ${content.approval_id}`)
       return
     }
@@ -693,7 +784,19 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         console.warn(`[matrix] failed to rebuild threadState for ${inboundRel}:`, err)
       }
     }
-    const matches = route(evt, bindings, threadStates)
+    const startField = evt.content?.[THREAD_START_FIELD] as ThreadStartContent | undefined
+    if (startField?.attempt_id && !inboundRel && evt.event_id)
+      taskRegistry.adopt(startField.attempt_id, evt.event_id)
+    if (evt.content?.[THREAD_RESULT_FIELD] !== undefined) return
+    const taskRec = promotedRoot ? taskRegistry.taskForRoot(promotedRoot) : undefined
+    const taskCtx =
+      taskRec && taskRec.phase !== 'reserved'
+        ? {
+            assignee: taskRec.assignee,
+            isRoot: !inboundRel && evt.event_id === taskRec.threadRoot,
+          }
+        : undefined
+    const matches = route(evt, bindings, threadStates, taskCtx)
     // Suppress the no-match warning for events sent by our own bots.
     const senderIsBot = bindings.some((b) => b.userId === evt.sender)
     if (evt.type === 'm.room.message' && matches.length === 0 && !senderIsBot) {
@@ -709,65 +812,34 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         st = { participants: [], rootMentions: [], callers: {}, handoffs: {} }
         threadStates.set(promotedRoot, st)
       }
-      const msgMentions = new Set(extractMentions(evt as never))
-      const senderAgent = bindings.find((b) => b.userId === evt.sender)
-      for (const a of bindings) {
-        if (!msgMentions.has(a.userId)) continue
-        if (!st.rootMentions.includes(a.name)) st.rootMentions.push(a.name)
-        // Call edge: the (agent) sender is the caller of every agent it @mentions.
-        if (senderAgent && a.name !== senderAgent.name) {
-          st.callers[a.name] = senderAgent.name
-          // [[ZOD071]] handoff arc: every agent→agent call opens a fresh
-          // session for the callee, keyed by this call event. Recorded before
-          // runTurn dispatch so sessionKeyFor resolves the just-minted arc.
-          // Deduped: homeservers may redeliver a transaction.
-          if (evt.event_id) {
-            const arcs = (st.handoffs[a.name] ??= [])
-            if (!arcs.includes(evt.event_id)) arcs.push(evt.event_id)
+      if (taskCtx?.isRoot) {
+        if (!st.rootMentions.includes(taskRec!.assignee)) st.rootMentions.push(taskRec!.assignee)
+      } else {
+        const msgMentions = new Set(extractMentions(evt as never))
+        const senderAgent = bindings.find((b) => b.userId === evt.sender)
+        for (const a of bindings) {
+          if (!msgMentions.has(a.userId)) continue
+          if (!st.rootMentions.includes(a.name)) st.rootMentions.push(a.name)
+          if (senderAgent && a.name !== senderAgent.name) {
+            st.callers[a.name] = senderAgent.name
+            if (evt.event_id) {
+              const arcs = (st.handoffs[a.name] ??= [])
+              if (!arcs.includes(evt.event_id)) arcs.push(evt.event_id)
+            }
           }
         }
       }
     }
     for (const a of matches) {
       console.log(`[matrix] → ${a.name} (${a.userId})`)
-      void runTurn(a, evt)
-        .then(() => {
-          if (!promotedRoot) return
-          let st = threadStates.get(promotedRoot)
-          if (!st) {
-            st = { participants: [], rootMentions: [], callers: {}, handoffs: {} }
-            threadStates.set(promotedRoot, st)
-          }
-          if (st.participants.at(-1) !== a.name) st.participants.push(a.name)
-        })
-        .catch((err) => {
-          console.error(`[matrix] runTurn failed for ${a.name}:`, err)
-          const c = classify(err)
-          const threadRoot = inboundThreadRoot(evt) ?? evt.event_id
-          if (!threadRoot || !evt.room_id) return
-          const body = toErrorBody(
-            {
-              kind: 'error',
-              agentId: a.name,
-              sessionId: null,
-              turnId: null,
-              code: c.code,
-              message: err instanceof Error ? err.message : String(err),
-              detail: err instanceof Error && err.stack ? err.stack.slice(0, 2000) : undefined,
-              transient: c.transient,
-              acp_error: c.acp_error,
-            },
-            threadRoot,
-          )
-          void client
-            .sendCustomEvent({
-              roomId: evt.room_id,
-              asUserId: a.userId,
-              eventType: 'dev.zooid.error',
-              content: body,
-            })
-            .catch((e) => console.warn(`[matrix:${a.name}] dev.zooid.error send failed:`, e))
-        })
+      if (!promotedRoot || !evt.room_id) continue
+      const sessionKey = sessionKeyFor(a.name, promotedRoot, threadStates.get(promotedRoot))
+      void enqueueTurn(a, {
+        roomId: evt.room_id,
+        threadRoot: promotedRoot,
+        sessionKey,
+        event: evt,
+      })
     }
   }
 
@@ -785,7 +857,9 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     if (!authOk(c.req.header('authorization'))) {
       return c.json({ errcode: 'M_FORBIDDEN' }, 403)
     }
-    const body = (await c.req.json().catch(() => ({}))) as { events?: MatrixEvent[] }
+    const body = (await c.req.json().catch(() => ({}))) as {
+      events?: MatrixEvent[]
+    }
     for (const evt of body.events ?? []) {
       await handleInboundEvent(evt)
     }
@@ -812,19 +886,16 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   })
   app.get('/healthz', (c) => c.text('ok'))
 
-  async function runTurn(agent: AgentBinding, evt: MatrixEvent): Promise<void> {
-    if (!evt.room_id || !evt.event_id) return
-    const inbound = inboundThreadRoot(evt)
+  async function runTurn(agent: AgentBinding, input: TurnInput): Promise<void> {
+    const { roomId, threadRoot, sessionKey } = input
     // Agent-promotion: top-level inbound becomes a thread root via the agent's
     // first reply.
-    const threadRoot = inbound ?? evt.event_id
     // [[ZOD071]]: the session key is the agent's current handoff arc when it
     // has one, else the thread-level key. The raw threadRoot still travels
     // separately: outbound events relate to it, and it is the context ref so
     // zooid_get_history reads the real thread.
-    const sessionKey = sessionKeyFor(agent.name, threadRoot, threadStates.get(threadRoot))
-    const sessionId = await agents.ensureSession(agent.name, sessionKey, evt.room_id, threadRoot)
-    sessions.set(sessionId, { agent, roomId: evt.room_id, threadRoot })
+    const sessionId = await agents.ensureSession(agent.name, sessionKey, roomId, threadRoot)
+    sessions.set(sessionId, { agent, roomId, threadRoot })
     buffers.set(sessionId, '')
     bufferMessageIds.delete(sessionId)
     flushedCounts.set(sessionId, 0)
@@ -837,12 +908,16 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       void agents.onEvent?.(agent.name, stashedCommands)
     }
 
-    const roomId = evt.room_id
     const TYPING_TTL_MS = 30_000
     const TYPING_REFRESH_MS = 25_000
     const safeTyping = (typing: boolean) =>
       client
-        .setTyping({ roomId, asUserId: agent.userId, typing, timeoutMs: TYPING_TTL_MS })
+        .setTyping({
+          roomId,
+          asUserId: agent.userId,
+          typing,
+          timeoutMs: TYPING_TTL_MS,
+        })
         .catch((err) => console.warn(`[matrix:${agent.name}] setTyping(${typing}) failed:`, err))
     const safePresence = (presence: 'online' | 'unavailable' | 'offline') =>
       client
@@ -857,15 +932,16 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       void safeTyping(true)
     }, TYPING_REFRESH_MS)
 
+    let turnError: unknown
     try {
-      const rawBody = evt.content?.body ?? ''
-      const promptText = stripMention(rawBody, agent.userId)
+      const rawBody = input.event?.content?.body ?? ''
+      const promptText = input.promptText ?? stripMention(rawBody, agent.userId)
 
       // Drain pending media for this sender+thread and prepend as ACP content blocks.
       const pendingItems = pendingMedia.drain(
-        evt.room_id,
-        inboundThreadRoot(evt),
-        evt.sender ?? '',
+        roomId,
+        input.event ? inboundThreadRoot(input.event) : undefined,
+        input.event?.sender ?? '',
       )
       const { blocks, pathLines } = await buildMediaBlocks(pendingItems, {
         agent,
@@ -874,7 +950,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         onError: (item, err) => {
           console.warn(`[matrix:${agent.name}] media_failed for ${item.body}:`, err)
           void sendMediaError(
-            { agent, roomId: evt.room_id!, threadRoot },
+            { agent, roomId, threadRoot },
             err,
             `Could not process attachment: ${item.body}`,
             client,
@@ -885,7 +961,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       const fullPromptText = [promptText, ...pathLines].filter(Boolean).join('\n')
       await agents.prompt(agent.name, {
         threadId: sessionKey,
-        channelId: evt.room_id,
+        channelId: roomId,
         contextThreadId: threadRoot,
         content: [...blocks, { type: 'text', text: fullPromptText }],
       })
@@ -910,13 +986,15 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         // last message was flushed mid-stream). An unchanged *empty* buffer
         // with nothing flushed yet means the stream hasn't started; keep
         // waiting up to drainMaxMs.
-        if (next === drained && (next.length > 0 || (flushedCounts.get(sessionId) ?? 0) > 0))
-          break
+        if (next === drained && (next.length > 0 || (flushedCounts.get(sessionId) ?? 0) > 0)) break
         drained = next
       }
       // Flush the final assistant message — the one with no following messageId
       // change or out-of-band event to have triggered an earlier flush.
       flushBuffer(sessionId)
+    } catch (err) {
+      turnError = err
+      throw err
     } finally {
       clearInterval(refresh)
       await safeTyping(false)
@@ -928,7 +1006,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       const producedOutput = (flushedCounts.get(sessionId) ?? 0) > 0
       if (!producedOutput) {
         console.warn(
-          `[matrix:${agent.name}] turn finished with empty buffer (session=${sessionId}); nothing sent to ${evt.room_id}`,
+          `[matrix:${agent.name}] turn finished with empty buffer (session=${sessionId}); nothing sent to ${roomId}`,
         )
       }
       // Turn boundary for [[ZOD076]] and push notifications. Sent after the
@@ -937,21 +1015,250 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       // has nothing in it yet.
       await client
         .sendCustomEvent({
-          roomId: evt.room_id,
+          roomId,
           asUserId: agent.userId,
           eventType: 'dev.zooid.turn.end',
           content: toTurnEndBody(
-            { agentId: agent.name, sessionId, producedOutput, lastMessage: lastFlushed.get(sessionId) },
+            {
+              agentId: agent.name,
+              sessionId,
+              producedOutput,
+              lastMessage: lastFlushed.get(sessionId),
+            },
             threadRoot,
           ),
         })
         .catch((e) => console.warn(`[matrix:${agent.name}] turn.end send failed:`, e))
+      const openTask = taskRegistry.openTaskFor(agent.name, threadRoot)
+      if (openTask && openTask.threadRoot === sessionKey) {
+        await finishTask(openTask, {
+          agent,
+          prose: lastFlushed.get(sessionId),
+          error: turnError,
+        }).catch((e) => console.warn(`[matrix:${agent.name}] finishTask failed:`, e))
+      }
       buffers.delete(sessionId)
       bufferMessageIds.delete(sessionId)
       flushedCounts.delete(sessionId)
       lastFlushed.delete(sessionId)
       sendQueue.delete(sessionId)
     }
+  }
+
+  async function finishTask(
+    task: TaskRecord,
+    ctx: { agent: AgentBinding; prose?: string; error?: unknown },
+  ): Promise<void> {
+    const threadId = task.threadRoot!
+    const prose = ctx.prose?.trim()
+    const completion: ThreadCompletion = ctx.error
+      ? {
+          agent: ctx.agent.name,
+          thread_id: threadId,
+          status: 'failed',
+          error: ctx.error instanceof Error ? ctx.error.message : String(ctx.error),
+          ...(prose ? { output: { type: 'message' as const, text: prose } } : {}),
+        }
+      : task.summary
+        ? {
+            agent: ctx.agent.name,
+            thread_id: threadId,
+            status: 'complete',
+            output: { type: 'message', text: task.summary },
+          }
+        : prose
+          ? {
+              agent: ctx.agent.name,
+              thread_id: threadId,
+              status: 'complete',
+              output: { type: 'message', text: prose },
+            }
+          : {
+              agent: ctx.agent.name,
+              thread_id: threadId,
+              status: 'failed',
+              reason: 'no_result',
+              error: 'No result produced',
+            }
+    if (!taskRegistry.close(task.taskId)) return
+    await client.sendCustomEvent({
+      roomId: task.roomId,
+      asUserId: ctx.agent.userId,
+      eventType: THREAD_RESULT_FIELD,
+      content: {
+        ...completion,
+        'm.relates_to': { rel_type: 'm.thread', event_id: threadId },
+      },
+    })
+    if (task.summary && task.summary !== prose)
+      await client.sendMessage({
+        roomId: task.roomId,
+        asUserId: ctx.agent.userId,
+        threadRoot: threadId,
+        content: buildTextContent(task.summary),
+      })
+    if (task.notify === 'none') return
+    const parent = bindingFor(task.parent.agent)
+    await client.sendMessage({
+      roomId: task.roomId,
+      asUserId: ctx.agent.userId,
+      threadRoot: task.parent.threadRoot,
+      content: {
+        msgtype: 'm.notice',
+        body: renderCompletionPrompt(completion),
+        [THREAD_RESULT_FIELD]: completion,
+      },
+    })
+    if (
+      !parent ||
+      taskRegistry.generationOf(task.parent.agent, task.parent.sessionKey) !==
+        task.parent.generation
+    )
+      return
+    void enqueueTurn(parent, {
+      roomId: task.roomId,
+      threadRoot: task.parent.threadRoot,
+      sessionKey: task.parent.sessionKey,
+      promptText: renderCompletionPrompt(completion),
+    })
+  }
+
+  const taskActions: TaskActions = {
+    async startTasks(caller, input) {
+      const notify = input.notify ?? 'caller'
+      const results: StartTaskResult[] = new Array(input.tasks.length)
+      const callerBinding = bindingFor(caller.agentName)
+      const enclosing = taskRegistry.taskForRoot(caller.threadRoot)
+      const admitted: Array<{
+        index: number
+        spec: StartTaskSpec
+        rec: TaskRecord
+      }> = []
+      for (const [index, spec] of input.tasks.entries()) {
+        if (!callerBinding) {
+          results[index] = {
+            agent: spec.agent,
+            status: 'refused',
+            reason: 'unknown_caller',
+          }
+          continue
+        }
+        if (enclosing) {
+          results[index] = {
+            agent: spec.agent,
+            status: 'refused',
+            reason:
+              'depth_limit: this thread is itself a delegated task. Do the work here, or @mention another agent in this thread to hand off.',
+          }
+          continue
+        }
+        const admission = checkDelegable(spec.agent, caller.channelId, bindings)
+        if (!admission.ok) {
+          results[index] = {
+            agent: spec.agent,
+            status: 'refused',
+            reason: admission.reason,
+          }
+          continue
+        }
+        const rec = taskRegistry.reserve({
+          roomId: caller.channelId,
+          assignee: spec.agent,
+          notify,
+          parent: {
+            agent: caller.agentName,
+            threadRoot: caller.threadRoot,
+            sessionKey: caller.sessionKey,
+            generation: taskRegistry.generationOf(caller.agentName, caller.sessionKey),
+          },
+        })
+        if (!rec) {
+          results[index] = {
+            agent: spec.agent,
+            status: 'refused',
+            reason: `at_capacity: ${MAX_OPEN_TASKS_PER_ROOM} tasks are already open in this room. Wait for one to finish.`,
+          }
+          continue
+        }
+        admitted.push({ index, spec, rec })
+      }
+      await Promise.all(
+        admitted.map(async ({ index, spec, rec }) => {
+          const assignee = bindingFor(spec.agent)!
+          const content = buildAssignmentContent({
+            assigneeUserId: assignee.userId,
+            prompt: spec.prompt,
+            start: {
+              version: 1,
+              assignee: spec.agent,
+              attempt_id: rec.attemptId,
+              parent: {
+                agent: rec.parent.agent,
+                thread_root: rec.parent.threadRoot,
+                session_key: rec.parent.sessionKey,
+              },
+              notify,
+            },
+          })
+          const post = () =>
+            client.sendMessage({
+              roomId: caller.channelId,
+              asUserId: callerBinding!.userId,
+              content,
+              txnId: rec.attemptId,
+            })
+          try {
+            const { event_id } = await post()
+            taskRegistry.activate(rec.taskId, event_id)
+            results[index] = {
+              agent: spec.agent,
+              status: 'started',
+              thread_id: event_id,
+            }
+          } catch {
+            try {
+              const { event_id } = await post()
+              taskRegistry.activate(rec.taskId, event_id)
+              results[index] = {
+                agent: spec.agent,
+                status: 'started',
+                thread_id: event_id,
+              }
+            } catch (second) {
+              const status = (second as { status?: number }).status
+              if (status !== undefined && status >= 400 && status < 500 && status !== 429) {
+                taskRegistry.abandon(rec.taskId)
+                results[index] = {
+                  agent: spec.agent,
+                  status: 'failed',
+                  reason: `post_failed: ${String((second as Error).message)}`,
+                }
+              } else {
+                taskRegistry.markUncertain(rec.taskId)
+                results[index] = {
+                  agent: spec.agent,
+                  status: 'failed',
+                  reason: `post_uncertain: ${String((second as Error).message)}`,
+                  attempt_id: rec.attemptId,
+                }
+              }
+            }
+          }
+        }),
+      )
+      return { results }
+    },
+    async completeTask(caller, input) {
+      const summary = input.summary.trim()
+      if (!summary) return { status: 'refused', reason: 'summary must be non-empty' }
+      const rec = taskRegistry.openTaskFor(caller.agentName, caller.threadRoot)
+      if (!rec || rec.threadRoot !== caller.sessionKey)
+        return {
+          status: 'refused',
+          reason: 'no_open_task: this session is not the assignee of an open task',
+        }
+      return { status: taskRegistry.recordSummary(rec.taskId, summary) }
+    },
   }
 
   const syncLoops: SyncLoop[] | undefined =
@@ -970,6 +1277,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
 
   return {
     app,
+    taskActions,
     syncLoops,
     bootstrap: async (
       bootstrapOpts: {
@@ -1003,11 +1311,17 @@ export async function rebuildThreadState(
   rootEventId: string,
   bindings: AgentBinding[],
 ): Promise<ThreadState> {
-  const state: ThreadState = { participants: [], rootMentions: [], callers: {}, handoffs: {} }
+  const state: ThreadState = {
+    participants: [],
+    rootMentions: [],
+    callers: {},
+    handoffs: {},
+  }
   // Impersonate an agent that's actually a member of this room (AS reads
   // require room membership). Falling through to the first binding would
   // 403 if that agent never joined the target room.
-  const asUser = (bindings.find((b) => b.rooms.some((r) => r.alias === roomId)) ?? bindings[0])?.userId
+  const asUser = (bindings.find((b) => b.rooms.some((r) => r.alias === roomId)) ?? bindings[0])
+    ?.userId
   if (!asUser) return state
 
   const root = await client.fetchEvent(roomId, rootEventId, asUser)

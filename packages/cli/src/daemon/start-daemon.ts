@@ -26,11 +26,7 @@ import {
   type PublisherHandle,
   type SyncLoop,
 } from '@zooid/transport-matrix'
-import {
-  SpawnRegistry,
-  startDaemonSocketServer,
-  type DaemonSocketHandle,
-} from '@zooid/context-mcp'
+import { SpawnRegistry, startDaemonSocketServer, type DaemonSocketHandle } from '@zooid/context-mcp'
 import { buildAcpRegistry } from '../build-registry.js'
 import { prepullImages } from '../prepull-images.js'
 import { mountPushGateway } from '../push-gateway/index.js'
@@ -209,8 +205,11 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     // `:` is the homeserver's server_name. Fall back to the homeserver URL's
     // host if the namespace shape is unexpected.
     const serverName =
-      matrix.transport.user_namespace.split(':').slice(1).join(':').replace(/\\?\)?$/, '') ||
-      new URL(matrix.transport.homeserver).hostname
+      matrix.transport.user_namespace
+        .split(':')
+        .slice(1)
+        .join(':')
+        .replace(/\\?\)?$/, '') || new URL(matrix.transport.homeserver).hostname
     const asUserId = `@${matrix.transport.sender_localpart}:${serverName}`
     // Pull mode's loadSince/saveSince are keyed by MXID; the cursor store is
     // keyed by agent name. Translate via the bindings we just built.
@@ -234,6 +233,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         if (name && cursors) cursors.saveSince(name, since)
       },
     })
+    contextSpawnRegistry.setTaskActions(transport.taskActions)
     if (shouldBindHttpListener(mode)) {
       const requestedPort = matrix.transport.port ?? 9000
       // The gateway rides the appservice listener, not webStatic: webStatic
@@ -249,7 +249,11 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       // Bind 0.0.0.0 explicitly — @hono/node-server defaults to IPv6-only on
       // macOS, which Docker's NAT bridge can't reach when Tuwunel pushes AS
       // events back to host.docker.internal:<port>.
-      server = serve({ fetch: transport.app.fetch, port: requestedPort, hostname: '0.0.0.0' })
+      server = serve({
+        fetch: transport.app.fetch,
+        port: requestedPort,
+        hostname: '0.0.0.0',
+      })
       port = await listenAsync(server)
     } else {
       // Pull (client) mode runs outbound /sync loops; no inbound listener.
@@ -268,7 +272,9 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
         admins: adminUserIds,
         joinRule: opts.publicWorkforceSpace ? 'public' : 'invite',
       })
-      console.log(`[matrix] ensured workforce space #${spaceLocalpart}:${serverName} → ${spaceRoomId}`)
+      console.log(
+        `[matrix] ensured workforce space #${spaceLocalpart}:${serverName} → ${spaceRoomId}`,
+      )
     } catch (err) {
       console.warn('[matrix] workforce space provisioning failed:', err)
     }
@@ -321,7 +327,11 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     const token = process.env.ZOOID_TOKEN
     if (!token) throw new Error('ZOOID_TOKEN is required for http transport')
     const app = createApp({ agents: registry, approvals, token })
-    server = serve({ fetch: app.fetch, port: http.transport.port, hostname: '0.0.0.0' })
+    server = serve({
+      fetch: app.fetch,
+      port: http.transport.port,
+      hostname: '0.0.0.0',
+    })
     port = await listenAsync(server)
   }
 

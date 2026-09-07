@@ -11,10 +11,7 @@ import { AgentProcess } from './agent-process.js'
 import { SessionMap } from './session-map.js'
 import { JsonFileSessionStore } from './session-store.js'
 import { resolvePreset } from './presets.js'
-import {
-  acpUpdateToAgentEvent,
-  approvalDecisionToPermissionResponse,
-} from './event-mapping.js'
+import { acpUpdateToAgentEvent, approvalDecisionToPermissionResponse } from './event-mapping.js'
 import { TurnTracker, type TapEvent } from './turn-tracker.js'
 import { classify } from './errors.js'
 import type {
@@ -73,7 +70,11 @@ export interface AcpClientOptions {
    * connects to the daemon-side zooid-context MCP server for the session
    * lifetime. Called once per `ensureSession(threadId)`.
    */
-  contextSpawn?: (threadId: string, channelId?: string) => Promise<{
+  contextSpawn?: (
+    threadId: string,
+    channelId?: string,
+    sessionKey?: string,
+  ) => Promise<{
     name: 'zooid-context'
     command: string
     args: string[]
@@ -177,13 +178,19 @@ export class AcpClient {
     if (cached) return cached.sessionId
 
     const mcpServers = this.options.contextSpawn
-      ? [await this.options.contextSpawn(contextThreadId ?? threadId, channelId)]
+      ? [await this.options.contextSpawn(contextThreadId ?? threadId, channelId, threadId)]
       : []
     process.stderr.write(
       `[acp-client:${this.options.agent.id}] ensureSession(${threadId}) mcpServers=${
         mcpServers.length === 0
           ? '[]'
-          : JSON.stringify(mcpServers.map((s) => ({ name: s.name, command: s.command, args: s.args })))
+          : JSON.stringify(
+              mcpServers.map((s) => ({
+                name: s.name,
+                command: s.command,
+                args: s.args,
+              })),
+            )
       }\n`,
     )
 
@@ -264,20 +271,22 @@ export class AcpClient {
     let sessionId: string | null = null
     let turnId: string | null = null
     try {
-      sessionId = await this.ensureSession(
-        input.threadId,
-        input.channelId,
-        input.contextThreadId,
-      )
+      sessionId = await this.ensureSession(input.threadId, input.channelId, input.contextThreadId)
       const promptText = stringifyPromptForLog(input.content)
       turnId = this.turns?.startTurn({ sessionId, promptText }) ?? null
-      debugLog(this.options.agent.id, 'prompt →', { sessionId, content: input.content })
+      debugLog(this.options.agent.id, 'prompt →', {
+        sessionId,
+        content: input.content,
+      })
       const result = await this.connection!.prompt({
         sessionId,
         prompt: input.content,
       })
       this.turns?.endTurn({ sessionId, stopReason: result.stopReason })
-      debugLog(this.options.agent.id, 'prompt ←', { sessionId, stopReason: result.stopReason })
+      debugLog(this.options.agent.id, 'prompt ←', {
+        sessionId,
+        stopReason: result.stopReason,
+      })
       return { stopReason: result.stopReason }
     } catch (err) {
       const c = classify(err)

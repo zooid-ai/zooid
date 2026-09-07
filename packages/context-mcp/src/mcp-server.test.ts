@@ -24,7 +24,9 @@ async function connect(server: ReturnType<typeof buildContextMcpServer>) {
 
 describe('buildContextMcpServer', () => {
   it('lists exactly five tools with the spec names', async () => {
-    const server = buildContextMcpServer({ resolve: async () => makeProvider() })
+    const server = buildContextMcpServer({
+      resolve: async () => makeProvider(),
+    })
     const client = await connect(server)
     const list = await client.listTools()
     expect(list.tools.map((t) => t.name).sort()).toEqual([
@@ -43,7 +45,13 @@ describe('buildContextMcpServer', () => {
         calls.push(opts)
         return {
           messages: [
-            { id: 'e1', sender: 'alice', text: 'hi', timestamp: 'T', is_agent: false },
+            {
+              id: 'e1',
+              sender: 'alice',
+              text: 'hi',
+              timestamp: 'T',
+              is_agent: false,
+            },
           ],
           next_before: 'cursor-2',
           has_more: true,
@@ -59,7 +67,15 @@ describe('buildContextMcpServer', () => {
     expect(calls).toEqual([{ limit: 10, before: 'cursor-1' }])
     const text = (res.content as Array<{ type: string; text: string }>)[0].text
     expect(JSON.parse(text)).toEqual({
-      messages: [{ id: 'e1', sender: 'alice', text: 'hi', timestamp: 'T', is_agent: false }],
+      messages: [
+        {
+          id: 'e1',
+          sender: 'alice',
+          text: 'hi',
+          timestamp: 'T',
+          is_agent: false,
+        },
+      ],
       next_before: 'cursor-2',
       has_more: true,
     })
@@ -75,7 +91,10 @@ describe('buildContextMcpServer', () => {
     })
     const server = buildContextMcpServer({ resolve: async () => provider })
     const client = await connect(server)
-    await client.callTool({ name: 'zooid_get_history', arguments: { limit: 5000 } })
+    await client.callTool({
+      name: 'zooid_get_history',
+      arguments: { limit: 5000 },
+    })
     expect(calls[0].limit).toBe(200)
   })
 
@@ -112,19 +131,31 @@ describe('buildContextMcpServer', () => {
     })
     const server = buildContextMcpServer({ resolve: async () => provider })
     const client = await connect(server)
-    const res = await client.callTool({ name: 'zooid_get_recent_threads', arguments: {} })
+    const res = await client.callTool({
+      name: 'zooid_get_recent_threads',
+      arguments: {},
+    })
     const payload = JSON.parse((res.content as Array<{ text: string }>)[0].text)
     expect(payload.threads[0]).toMatchObject({ id: '$root', reply_count: 4 })
   })
 
   it('zooid_get_thread_history forwards thread_id and limit/before', async () => {
-    const calls: Array<{ threadId: string; opts: { limit?: number; before?: string } }> = []
+    const calls: Array<{
+      threadId: string
+      opts: { limit?: number; before?: string }
+    }> = []
     const provider = makeProvider({
       getThreadHistory: async (_c, threadId, opts) => {
         calls.push({ threadId, opts })
         return {
           messages: [
-            { id: '$root', sender: 'alice', text: 'root', timestamp: 'T', is_agent: false },
+            {
+              id: '$root',
+              sender: 'alice',
+              text: 'root',
+              timestamp: 'T',
+              is_agent: false,
+            },
           ],
           has_more: false,
         }
@@ -136,13 +167,21 @@ describe('buildContextMcpServer', () => {
       name: 'zooid_get_thread_history',
       arguments: { thread_id: '$root', limit: 10 },
     })
-    expect(calls[0]).toEqual({ threadId: '$root', opts: { limit: 10, before: undefined } })
+    expect(calls[0]).toEqual({
+      threadId: '$root',
+      opts: { limit: 10, before: undefined },
+    })
   })
 
   it('zooid_get_thread_history surfaces a validation error when thread_id is missing', async () => {
-    const server = buildContextMcpServer({ resolve: async () => makeProvider() })
+    const server = buildContextMcpServer({
+      resolve: async () => makeProvider(),
+    })
     const client = await connect(server)
-    const res = await client.callTool({ name: 'zooid_get_thread_history', arguments: {} })
+    const res = await client.callTool({
+      name: 'zooid_get_thread_history',
+      arguments: {},
+    })
     expect(res.isError).toBe(true)
   })
 
@@ -150,22 +189,42 @@ describe('buildContextMcpServer', () => {
     const provider = makeProvider({
       getChannelMembers: async () => [
         { id: '@alice:hs', name: 'alice', is_agent: false },
-        { id: '@architect:hs', name: 'architect', is_agent: true, agent_name: 'architect' },
+        {
+          id: '@architect:hs',
+          name: 'architect',
+          is_agent: true,
+          agent_name: 'architect',
+        },
       ],
-      getChannelInfo: async () => ({ id: '!r:hs', name: 'general', transport: 'matrix' }),
+      getChannelInfo: async () => ({
+        id: '!r:hs',
+        name: 'general',
+        transport: 'matrix',
+      }),
     })
     const server = buildContextMcpServer({ resolve: async () => provider })
     const client = await connect(server)
 
-    const m = await client.callTool({ name: 'zooid_get_members', arguments: {} })
+    const m = await client.callTool({
+      name: 'zooid_get_members',
+      arguments: {},
+    })
     expect(JSON.parse((m.content as Array<{ text: string }>)[0].text)).toEqual({
       members: [
         { id: '@alice:hs', name: 'alice', is_agent: false },
-        { id: '@architect:hs', name: 'architect', is_agent: true, agent_name: 'architect' },
+        {
+          id: '@architect:hs',
+          name: 'architect',
+          is_agent: true,
+          agent_name: 'architect',
+        },
       ],
     })
 
-    const i = await client.callTool({ name: 'zooid_get_channel_info', arguments: {} })
+    const i = await client.callTool({
+      name: 'zooid_get_channel_info',
+      arguments: {},
+    })
     expect(JSON.parse((i.content as Array<{ text: string }>)[0].text)).toEqual({
       id: '!r:hs',
       name: 'general',
@@ -180,7 +239,36 @@ describe('buildContextMcpServer', () => {
       },
     })
     const client = await connect(server)
-    const res = await client.callTool({ name: 'zooid_get_history', arguments: {} })
+    const res = await client.callTool({
+      name: 'zooid_get_history',
+      arguments: {},
+    })
     expect(res.isError).toBe(true)
+  })
+
+  it('exposes task writes only when the daemon supplies task actions', async () => {
+    const calls: unknown[] = []
+    const server = buildContextMcpServer({
+      resolve: async () => makeProvider(),
+      resolveTasks: async () => ({
+        startTasks: async (_caller, input) => {
+          calls.push(input)
+          return {
+            results: [{ agent: 'worker', status: 'started', thread_id: '$task' }],
+          }
+        },
+        completeTask: async () => ({ status: 'recorded' as const }),
+      }),
+    })
+    const client = await connect(server)
+    expect((await client.listTools()).tools.map((t) => t.name)).toContain('zooid_start_tasks')
+    const result = await client.callTool({
+      name: 'zooid_start_tasks',
+      arguments: { tasks: [{ agent: 'worker', prompt: 'audit' }] },
+    })
+    expect(calls).toEqual([{ tasks: [{ agent: 'worker', prompt: 'audit' }], notify: 'caller' }])
+    expect(JSON.parse((result.content as Array<{ text: string }>)[0].text)).toMatchObject({
+      results: [{ thread_id: '$task' }],
+    })
   })
 })

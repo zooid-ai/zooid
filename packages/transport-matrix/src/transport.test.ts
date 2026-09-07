@@ -139,14 +139,22 @@ describe('matrix transport /transactions', () => {
     expect(res.status).toBe(200)
     await settleTurn()
     // Agent-promotion: sessionKey is the inbound event_id, NOT the room.
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'architect',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
     // The reply threads against the user's message.
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         roomId: '!r:example.com',
         asUserId: '@architect:example.com',
         threadRoot: '$root',
-        content: expect.objectContaining({ msgtype: 'm.notice', body: 'hello back' }),
+        content: expect.objectContaining({
+          msgtype: 'm.notice',
+          body: 'hello back',
+        }),
       }),
     )
   })
@@ -156,7 +164,10 @@ describe('matrix transport /transactions', () => {
     // response for a normal turn; opencode flushes a trailing chunk just after
     // the stopReason. The post-turn drain must wait for it instead of sending
     // the truncated buffer.
-    const { transport, agents, client } = makeTransport({ drainQuietMs: 20, drainMaxMs: 500 })
+    const { transport, agents, client } = makeTransport({
+      drainQuietMs: 20,
+      drainMaxMs: 500,
+    })
     const events = [
       {
         type: 'm.room.message',
@@ -229,7 +240,12 @@ describe('matrix transport /transactions', () => {
     })
     await postTxn(transport.app, { events })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'architect',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ threadRoot: '$root' }),
     )
@@ -343,7 +359,9 @@ describe('matrix transport /transactions', () => {
     })
     await settleTurn()
     expect(client.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ content: expect.objectContaining({ msgtype: 'm.notice' }) }),
+      expect.objectContaining({
+        content: expect.objectContaining({ msgtype: 'm.notice' }),
+      }),
     )
   })
 
@@ -367,7 +385,7 @@ describe('matrix transport /transactions', () => {
     await settleTurn()
     approvals.emit('registered', {
       approvalId: 'a1',
-      sessionId: 'sess-$root',          // session is keyed on the promoted thread root
+      sessionId: 'sess-$root', // session is keyed on the promoted thread root
       toolCallId: 't1',
       options: [{ optionId: 'allow_once', name: 'Allow', kind: 'allow_once' }],
     })
@@ -398,11 +416,10 @@ describe('matrix transport /transactions', () => {
         },
       ],
     })
-    expect(approvals.resolve).toHaveBeenCalledWith(
-      'sess-$root',
-      'a1',
-      { decision: 'allow', optionId: 'allow_once' },
-    )
+    expect(approvals.resolve).toHaveBeenCalledWith('sess-$root', 'a1', {
+      decision: 'allow',
+      optionId: 'allow_once',
+    })
   })
 })
 
@@ -454,7 +471,9 @@ describe('dev.zooid.turn.end', () => {
   it('reports produced_output: false for a silent turn', async () => {
     const { transport, agents, client } = makeTransport()
     // The agent emits no chunks at all — this is exactly ZOD076's case.
-    agents.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+    agents.prompt.mockImplementation(async () => ({
+      stopReason: 'end_turn' as const,
+    }))
     await postTxn(transport.app, { events: [topLevelMention()] })
     await settleTurn()
 
@@ -482,7 +501,9 @@ describe('dev.zooid.turn.end', () => {
 
   it('threads to the turn root', async () => {
     const { transport, agents, client } = makeTransport()
-    agents.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+    agents.prompt.mockImplementation(async () => ({
+      stopReason: 'end_turn' as const,
+    }))
     await postTxn(transport.app, { events: [topLevelMention()] })
     await settleTurn()
 
@@ -497,7 +518,7 @@ describe('dev.zooid.turn.end', () => {
 
 describe('thread implicit triggers', () => {
   it('triggers the most-recent-posting agent for a bare reply in a thread', async () => {
-    const { transport, agents } = makeTransport()
+    const { transport, agents, finishPrompt } = makeTransport()
     // Turn 1: user @mentions architect at top level. Agent-promotion makes
     // $root the thread root and architect a thread participant.
     agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
@@ -545,13 +566,16 @@ describe('thread implicit triggers', () => {
     await settleTurn()
 
     // architect should be triggered implicitly because they posted in the thread.
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'architect',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
   })
 
   it("inherits the thread root's @mentions when no agent has posted yet", async () => {
-    const { transport, agents } = makeTransport()
-    // Have prompt() never resolve, so no agent reply has landed when turn 2 arrives.
-    agents.prompt.mockImplementation(() => new Promise(() => {}))
+    const { transport, agents, finishPrompt } = makeTransport()
     await postTxn(transport.app, {
       events: [
         {
@@ -587,8 +611,17 @@ describe('thread implicit triggers', () => {
       ],
     })
     await settleTurn()
-    // Inherits the root's @mention of architect.
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
+    // Per-session FIFO holds a fast follow-up until the original turn ends.
+    expect(agents.ensureSession).not.toHaveBeenCalled()
+    finishPrompt()
+    await settleTurn()
+    // It then inherits the root's @mention of architect.
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'architect',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
   })
 
   it('does not trigger any agent for a bare top-level message', async () => {
@@ -653,7 +686,12 @@ describe('thread implicit triggers', () => {
       ],
     })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'architect',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
   })
 })
 
@@ -728,7 +766,9 @@ describe('dev.zooid.session_reset', () => {
           event_id: '$reset',
           room_id: '!r:example.com',
           sender: '@alice:example.com',
-          content: { 'm.relates_to': { rel_type: 'm.thread', event_id: '$root' } },
+          content: {
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+          },
         },
       ],
     })
@@ -754,7 +794,12 @@ describe('dev.zooid.session_reset', () => {
       ],
     })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'architect',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
   })
 })
 
@@ -847,10 +892,10 @@ describe('typing indicator lifecycle', () => {
             room_id: '!r:example.com',
             sender: '@user:example.com',
             content: {
-            msgtype: 'm.text',
-            body: 'hi',
-            'm.mentions': { user_ids: ['@architect:example.com'] },
-          },
+              msgtype: 'm.text',
+              body: 'hi',
+              'm.mentions': { user_ids: ['@architect:example.com'] },
+            },
           },
         ],
       })
@@ -908,7 +953,9 @@ describe('presence lifecycle', () => {
     expect(seenUnavailable).toBe(true)
     finishPrompt()
     await settleTurn()
-    const last = client.setPresence.mock.calls.at(-1)?.[0] as { presence: string }
+    const last = client.setPresence.mock.calls.at(-1)?.[0] as {
+      presence: string
+    }
     expect(last.presence).toBe('online')
   })
 
@@ -1064,8 +1111,7 @@ describe('tool-call and plan event bridging', () => {
     await settleTurn()
 
     const call = client.sendCustomEvent.mock.calls.find(
-      ([arg]) =>
-        (arg as { eventType: string }).eventType === 'dev.zooid.available_commands_update',
+      ([arg]) => (arg as { eventType: string }).eventType === 'dev.zooid.available_commands_update',
     )
     expect(call).toBeDefined()
     expect((call![0] as { content: Record<string, unknown> }).content).toMatchObject({
@@ -1205,9 +1251,7 @@ describe('agent_message_chunk message-boundary buffering', () => {
     (client.sendMessage.mock.calls[0]![0] as { content: { body: string } }).content.body
 
   const sentBodies = (client: { sendMessage: { mock: { calls: unknown[][] } } }) =>
-    client.sendMessage.mock.calls.map(
-      (c) => (c[0] as { content: { body: string } }).content.body,
-    )
+    client.sendMessage.mock.calls.map((c) => (c[0] as { content: { body: string } }).content.body)
 
   it('flushes a separate Matrix message when messageId changes (opencode run-on)', async () => {
     // opencode streams "…it." under one message id, then "Filed:" under a NEW
@@ -1305,7 +1349,11 @@ describe('dev.zooid.interrupt handling', () => {
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
           sender: '@user:example.com',
-          content: { msgtype: 'm.text', body: 'hi', 'm.mentions': { user_ids: ['@architect:example.com'] } },
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
         },
       ],
     })
@@ -1338,7 +1386,11 @@ describe('dev.zooid.interrupt handling', () => {
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
           sender: '@user:example.com',
-          content: { msgtype: 'm.text', body: 'hi', 'm.mentions': { user_ids: ['@architect:example.com'] } },
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
         },
       ],
     })
@@ -1387,7 +1439,11 @@ describe('dev.zooid.interrupt handling', () => {
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
           sender: '@user:example.com',
-          content: { msgtype: 'm.text', body: 'hi', 'm.mentions': { user_ids: ['@architect:example.com'] } },
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
         },
       ],
     })
@@ -1423,7 +1479,11 @@ describe('dev.zooid.interrupt handling', () => {
           origin_server_ts: Date.now(),
           room_id: '!r:example.com',
           sender: '@user:example.com',
-          content: { msgtype: 'm.text', body: 'hi', 'm.mentions': { user_ids: ['@architect:example.com'] } },
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
         },
       ],
     })
@@ -1483,14 +1543,19 @@ describe('full loop integration', () => {
 
     // Turn 1: top-level mention.
     await postTxn(transport.app, {
-      events: [{
-        type: 'm.room.message', event_id: '$root', room_id: '!r:example.com',
-        sender: '@alice:example.com',
-        content: {
-          msgtype: 'm.text', body: 'hi @architect',
-          'm.mentions': { user_ids: ['@architect:example.com'] },
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$root',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi @architect',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
         },
-      }],
+      ],
     })
     await settleTurn()
     expect(client.sendMessage).toHaveBeenCalledWith(
@@ -1501,17 +1566,27 @@ describe('full loop integration', () => {
     agents.ensureSession.mockClear()
     client.sendMessage.mockClear()
     await postTxn(transport.app, {
-      events: [{
-        type: 'm.room.message', event_id: '$bare', room_id: '!r:example.com',
-        sender: '@alice:example.com',
-        content: {
-          msgtype: 'm.text', body: 'follow up',
-          'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$bare',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'follow up',
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+          },
         },
-      }],
+      ],
     })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith('architect', '$root', '!r:example.com', '$root')
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'architect',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({ threadRoot: '$root' }),
     )
@@ -1526,7 +1601,10 @@ const TINY_PNG = Buffer.from(TINY_PNG_B64, 'base64')
 
 function fakeMedia() {
   return {
-    download: vi.fn(async () => ({ data: new Uint8Array(TINY_PNG), contentType: 'image/png' })),
+    download: vi.fn(async () => ({
+      data: new Uint8Array(TINY_PNG),
+      contentType: 'image/png',
+    })),
     upload: vi.fn(async () => ({ content_uri: 'mxc://localhost/up1' })),
   }
 }
@@ -1537,10 +1615,12 @@ const workspaceBinding = {
   agentWorkspacePath: '/workspace',
 }
 
-function makeMediaTransport(opts: {
-  media?: ReturnType<typeof fakeMedia>
-  writeAttachmentFn?: unknown
-} = {}) {
+function makeMediaTransport(
+  opts: {
+    media?: ReturnType<typeof fakeMedia>
+    writeAttachmentFn?: unknown
+  } = {},
+) {
   const { reg, finishPrompt } = fakeRegistry()
   const approvals = fakeApprovals()
   const client = fakeClient()
@@ -1557,13 +1637,15 @@ function makeMediaTransport(opts: {
   return { transport, agents: reg, client, finishPrompt }
 }
 
-function imageEvent(over: {
-  size?: number
-  mimetype?: string
-  msgtype?: string
-  body?: string
-  eventId?: string
-} = {}) {
+function imageEvent(
+  over: {
+    size?: number
+    mimetype?: string
+    msgtype?: string
+    body?: string
+    eventId?: string
+  } = {},
+) {
   return {
     type: 'm.room.message',
     event_id: over.eventId ?? '$media1',
@@ -1616,7 +1698,11 @@ describe('inbound media', () => {
 
     expect(agents.prompt).toHaveBeenCalledOnce()
     const content = (agents.prompt.mock.calls[0][1] as { content: unknown[] }).content
-    expect(content[0]).toMatchObject({ type: 'image', data: TINY_PNG_B64, mimeType: 'image/png' })
+    expect(content[0]).toMatchObject({
+      type: 'image',
+      data: TINY_PNG_B64,
+      mimeType: 'image/png',
+    })
     expect((content[1] as { type: string; text: string }).type).toBe('text')
     expect(media.download).toHaveBeenCalledOnce()
   })
@@ -1627,7 +1713,10 @@ describe('inbound media', () => {
       hostPath: '/tmp/ws/.zooid/attachments/media1/dog.png',
       agentPath: '/workspace/.zooid/attachments/media1/dog.png',
     }))
-    const { transport, agents } = makeMediaTransport({ media, writeAttachmentFn })
+    const { transport, agents } = makeMediaTransport({
+      media,
+      writeAttachmentFn,
+    })
 
     agents.prompt.mockResolvedValue({ stopReason: 'end_turn' as const })
     await postTxn(transport.app, { events: [imageEvent({ size: 600_000 })] }) // > MAX_INLINE_IMAGE_BYTES
@@ -1651,11 +1740,20 @@ describe('inbound media', () => {
       hostPath: '/tmp/ws/.zooid/attachments/media1/report.pdf',
       agentPath: '/workspace/.zooid/attachments/media1/report.pdf',
     }))
-    const { transport, agents } = makeMediaTransport({ media, writeAttachmentFn })
+    const { transport, agents } = makeMediaTransport({
+      media,
+      writeAttachmentFn,
+    })
 
     agents.prompt.mockResolvedValue({ stopReason: 'end_turn' as const })
     await postTxn(transport.app, {
-      events: [imageEvent({ msgtype: 'm.file', body: 'report.pdf', mimetype: 'application/pdf' })],
+      events: [
+        imageEvent({
+          msgtype: 'm.file',
+          body: 'report.pdf',
+          mimetype: 'application/pdf',
+        }),
+      ],
     })
     await postTxn(transport.app, { events: [mentionMsg('read it')] })
     await settleTurn()
@@ -1721,7 +1819,10 @@ describe('outbound agent images', () => {
     await new Promise((r) => setTimeout(r, 10))
 
     expect(media.upload).toHaveBeenCalledWith(
-      expect.objectContaining({ contentType: 'image/png', asUserId: '@architect:example.com' }),
+      expect.objectContaining({
+        contentType: 'image/png',
+        asUserId: '@architect:example.com',
+      }),
     )
     expect(client.sendMessage).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1729,7 +1830,10 @@ describe('outbound agent images', () => {
         content: expect.objectContaining({
           msgtype: 'm.image',
           url: 'mxc://localhost/up1',
-          info: expect.objectContaining({ mimetype: 'image/png', size: TINY_PNG.length }),
+          info: expect.objectContaining({
+            mimetype: 'image/png',
+            size: TINY_PNG.length,
+          }),
         }),
       }),
     )
@@ -1773,17 +1877,19 @@ describe('ad-hoc bot invite declines', () => {
 
   it('declines an invite to the AS bot from a human, with a reason', async () => {
     const { transport, client } = makeTransport()
-    await postTxn(transport.app, { events: [invite('@zooid:example.com', '@zongshan:example.com')] })
-    expect(client.leaveRoom).toHaveBeenCalledWith(
-      '!r:example.com',
-      '@zooid:example.com',
-      { reason: expect.stringContaining('zooid.yaml') },
-    )
+    await postTxn(transport.app, {
+      events: [invite('@zooid:example.com', '@zongshan:example.com')],
+    })
+    expect(client.leaveRoom).toHaveBeenCalledWith('!r:example.com', '@zooid:example.com', {
+      reason: expect.stringContaining('zooid.yaml'),
+    })
   })
 
   it('declines an invite to an agent from a human', async () => {
     const { transport, client } = makeTransport()
-    await postTxn(transport.app, { events: [invite('@architect:example.com', '@zongshan:example.com')] })
+    await postTxn(transport.app, {
+      events: [invite('@architect:example.com', '@zongshan:example.com')],
+    })
     expect(client.leaveRoom).toHaveBeenCalledWith(
       '!r:example.com',
       '@architect:example.com',
@@ -1793,13 +1899,17 @@ describe('ad-hoc bot invite declines', () => {
 
   it('does NOT decline a provisioning invite (inviter is our AS bot)', async () => {
     const { transport, client } = makeTransport()
-    await postTxn(transport.app, { events: [invite('@architect:example.com', '@zooid:example.com')] })
+    await postTxn(transport.app, {
+      events: [invite('@architect:example.com', '@zooid:example.com')],
+    })
     expect(client.leaveRoom).not.toHaveBeenCalled()
   })
 
   it('ignores an invite to a human (not one of our bots)', async () => {
     const { transport, client } = makeTransport()
-    await postTxn(transport.app, { events: [invite('@dave:example.com', '@zongshan:example.com')] })
+    await postTxn(transport.app, {
+      events: [invite('@dave:example.com', '@zongshan:example.com')],
+    })
     expect(client.leaveRoom).not.toHaveBeenCalled()
   })
 })
@@ -1825,7 +1935,9 @@ describe('directional agent-to-agent handoffs', () => {
     const approvals = fakeApprovals()
     const client = fakeClient()
     // Resolve prompts immediately so runTurn completes and `participants` append.
-    reg.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+    reg.prompt.mockImplementation(async () => ({
+      stopReason: 'end_turn' as const,
+    }))
     const transport = createMatrixTransport({
       agents: reg as never,
       approvals: approvals as never,
@@ -1849,7 +1961,13 @@ describe('directional agent-to-agent handoffs', () => {
     if (o.root) content['m.relates_to'] = { rel_type: 'm.thread', event_id: o.root }
     return postTxn(transport.app, {
       events: [
-        { type: 'm.room.message', event_id: o.id, room_id: '!r:example.com', sender: o.sender, content },
+        {
+          type: 'm.room.message',
+          event_id: o.id,
+          room_id: '!r:example.com',
+          sender: o.sender,
+          content,
+        },
       ],
     })
   }
@@ -1858,19 +1976,32 @@ describe('directional agent-to-agent handoffs', () => {
     const { transport, agents } = makePairTransport()
 
     // 1. Human @mentions parent (top-level) → thread root is $root.
-    await post(transport, { id: '$root', sender: '@alice:example.com', mentions: ['@parent:example.com'] })
+    await post(transport, {
+      id: '$root',
+      sender: '@alice:example.com',
+      mentions: ['@parent:example.com'],
+    })
     await settleTurn()
 
     // 2. Parent replies in-thread @mentioning sub → sub is called; caller[sub]=parent.
     //    [[ZOD071]]: this call opens a fresh handoff arc for sub, keyed by $p1.
-    await post(transport, { id: '$p1', sender: '@parent:example.com', root: '$root', mentions: ['@sub:example.com'] })
+    await post(transport, {
+      id: '$p1',
+      sender: '@parent:example.com',
+      root: '$root',
+      mentions: ['@sub:example.com'],
+    })
     await settleTurn()
     expect(agents.ensureSession).toHaveBeenCalledWith('sub', '$root|$p1', '!r:example.com', '$root')
 
     agents.ensureSession.mockClear()
 
     // 3. Sub replies bare → bubbles UP to its caller (parent), nobody else.
-    await post(transport, { id: '$s1', sender: '@sub:example.com', root: '$root' })
+    await post(transport, {
+      id: '$s1',
+      sender: '@sub:example.com',
+      root: '$root',
+    })
     await settleTurn()
     expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com', '$root')
     expect(agents.ensureSession.mock.calls.map((c) => c[0])).not.toContain('sub')
@@ -1879,7 +2010,11 @@ describe('directional agent-to-agent handoffs', () => {
 
     // 4. Parent replies bare (the "ack") → parent has no caller → routes to NOBODY.
     //    This is the loop guard: sub is NOT re-triggered.
-    await post(transport, { id: '$p2', sender: '@parent:example.com', root: '$root' })
+    await post(transport, {
+      id: '$p2',
+      sender: '@parent:example.com',
+      root: '$root',
+    })
     await settleTurn()
     expect(agents.ensureSession).not.toHaveBeenCalled()
   })
@@ -1900,7 +2035,11 @@ describe('directional agent-to-agent handoffs', () => {
             sender: '@parent:example.com',
             content: { 'm.mentions': { user_ids: ['@sub:example.com'] } },
           },
-          { type: 'm.room.message', sender: '@sub:example.com', content: { body: 'ack' } },
+          {
+            type: 'm.room.message',
+            sender: '@sub:example.com',
+            content: { body: 'ack' },
+          },
         ],
       })),
     }
@@ -1985,12 +2124,7 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
       mentions: ['@parent:example.com'],
     })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith(
-      'parent',
-      '$root',
-      '!r:example.com',
-      '$root',
-    )
+    expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com', '$root')
 
     // 2. Parent calls BOTH subs in ONE message ($p1). Each sub gets a fresh
     //    arc session keyed by the same call event id — the composed key
@@ -2026,14 +2160,13 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
     //    thread-level session; the sibling is untouched.
     gates.get('rocksteady')!()
     await settleTurn()
-    await post(transport, { id: '$r1', sender: '@rocksteady:example.com', root: '$root' })
+    await post(transport, {
+      id: '$r1',
+      sender: '@rocksteady:example.com',
+      root: '$root',
+    })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith(
-      'parent',
-      '$root',
-      '!r:example.com',
-      '$root',
-    )
+    expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com', '$root')
     expect(agentsCalled(agents)).not.toContain('bebop')
 
     agents.ensureSession.mockClear()
@@ -2043,14 +2176,13 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
     //    SAME thread-level session (it aggregates the two results).
     gates.get('bebop')!()
     await settleTurn()
-    await post(transport, { id: '$b1', sender: '@bebop:example.com', root: '$root' })
+    await post(transport, {
+      id: '$b1',
+      sender: '@bebop:example.com',
+      root: '$root',
+    })
     await settleTurn()
-    expect(agents.ensureSession).toHaveBeenCalledWith(
-      'parent',
-      '$root',
-      '!r:example.com',
-      '$root',
-    )
+    expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com', '$root')
     expect(agentsCalled(agents)).not.toContain('rocksteady')
   })
 
@@ -2074,7 +2206,11 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
     await settleTurn()
     gates.get('bebop')!()
     await settleTurn()
-    await post(transport, { id: '$b1', sender: '@bebop:example.com', root: '$root' })
+    await post(transport, {
+      id: '$b1',
+      sender: '@bebop:example.com',
+      root: '$root',
+    })
     await settleTurn()
 
     // Second delegation: arc $p2 — a NEW session key, not a resume.
@@ -2117,7 +2253,11 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
 
     // Human "why did you do X?" — routes to bebop (last poster) and lands in
     // the session that DID the work, not a cold thread-level one.
-    await post(transport, { id: '$h1', sender: '@alice:example.com', root: '$root' })
+    await post(transport, {
+      id: '$h1',
+      sender: '@alice:example.com',
+      root: '$root',
+    })
     await settleTurn()
     expect(agents.ensureSession).toHaveBeenCalledWith(
       'bebop',
@@ -2154,7 +2294,9 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
           event_id: '$reset',
           room_id: '!r:example.com',
           sender: '@alice:example.com',
-          content: { 'm.relates_to': { rel_type: 'm.thread', event_id: '$root' } },
+          content: {
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+          },
         },
       ],
     })
@@ -2195,7 +2337,9 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
           event_id: '$reset',
           room_id: '!r:example.com',
           sender: '@alice:example.com',
-          content: { 'm.relates_to': { rel_type: 'm.thread', event_id: '$root' } },
+          content: {
+            'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+          },
         },
       ],
     })
@@ -2220,10 +2364,17 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
             event_id: '$p1',
             sender: '@parent:example.com',
             content: {
-              'm.mentions': { user_ids: ['@bebop:example.com', '@rocksteady:example.com'] },
+              'm.mentions': {
+                user_ids: ['@bebop:example.com', '@rocksteady:example.com'],
+              },
             },
           },
-          { type: 'm.room.message', event_id: '$b1', sender: '@bebop:example.com', content: { body: 'done' } },
+          {
+            type: 'm.room.message',
+            event_id: '$b1',
+            sender: '@bebop:example.com',
+            content: { body: 'done' },
+          },
           {
             type: 'm.room.message',
             event_id: '$p2',
@@ -2234,7 +2385,10 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
       })),
     }
     const state = await rebuildThreadState(client as never, '!r:example.com', '$root', trio)
-    expect(state.handoffs).toEqual({ bebop: ['$p1', '$p2'], rocksteady: ['$p1'] })
+    expect(state.handoffs).toEqual({
+      bebop: ['$p1', '$p2'],
+      rocksteady: ['$p1'],
+    })
     expect(state.callers).toEqual({ bebop: 'parent', rocksteady: 'parent' })
   })
 })

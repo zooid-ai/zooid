@@ -9,6 +9,8 @@ export interface SpawnBinding {
   agentName: string
   threadRef: ThreadRef
   provider: TransportContextProvider
+  /** Exact ACP session key; the thread reference remains the context root. */
+  sessionKey?: string
 }
 
 /** Shape we pass into ACP `session/new mcpServers[]`. */

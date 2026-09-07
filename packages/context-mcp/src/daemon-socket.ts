@@ -1,6 +1,7 @@
 import { createServer, createConnection, type Server, type Socket } from 'node:net'
 import { unlink } from 'node:fs/promises'
 import type { SpawnRegistry } from './spawn-registry.js'
+import type { CompleteTaskInput, StartTasksInput } from '@zooid/core'
 
 interface DaemonRequest {
   spawnId: string
@@ -10,6 +11,8 @@ interface DaemonRequest {
     | 'getThreadHistory'
     | 'getChannelMembers'
     | 'getChannelInfo'
+    | 'startTasks'
+    | 'completeTask'
   params: Record<string, unknown>
 }
 
@@ -82,7 +85,12 @@ async function handleLine(line: string, socket: Socket, registry: SpawnRegistry)
   try {
     req = JSON.parse(line) as DaemonRequest
   } catch {
-    socket.write(JSON.stringify({ ok: false, error: 'invalid json' } satisfies DaemonError) + '\n')
+    socket.write(
+      JSON.stringify({
+        ok: false,
+        error: 'invalid json',
+      } satisfies DaemonError) + '\n',
+    )
     return
   }
   const binding = registry.get(req.spawnId)
@@ -115,6 +123,27 @@ async function handleLine(line: string, socket: Socket, registry: SpawnRegistry)
       result = await binding.provider.getChannelMembers(channelId)
     } else if (req.method === 'getChannelInfo') {
       result = await binding.provider.getChannelInfo(channelId)
+    } else if (req.method === 'startTasks' || req.method === 'completeTask') {
+      const actions = registry.taskActions
+      if (!actions) {
+        socket.write(
+          JSON.stringify({
+            ok: false,
+            error: 'task actions unavailable',
+          } satisfies DaemonError) + '\n',
+        )
+        return
+      }
+      const caller = {
+        agentName: binding.agentName,
+        channelId,
+        threadRoot: binding.threadRef.threadId,
+        sessionKey: binding.sessionKey ?? binding.threadRef.threadId,
+      }
+      result =
+        req.method === 'startTasks'
+          ? await actions.startTasks(caller, req.params as unknown as StartTasksInput)
+          : await actions.completeTask(caller, req.params as unknown as CompleteTaskInput)
     } else {
       socket.write(
         JSON.stringify({

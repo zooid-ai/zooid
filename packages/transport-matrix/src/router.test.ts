@@ -17,7 +17,12 @@ const agents: AgentBinding[] = [
 ]
 
 function msg(
-  overrides: Partial<{ room: string; sender: string; body: string; mentions: string[] }> = {},
+  overrides: Partial<{
+    room: string
+    sender: string
+    body: string
+    mentions: string[]
+  }> = {},
 ) {
   return {
     type: 'm.room.message',
@@ -55,7 +60,10 @@ describe('route', () => {
 
   it('skips events whose sender is the matched agent itself', () => {
     const matches = route(
-      msg({ sender: '@architect:example.com', mentions: ['@architect:example.com'] }),
+      msg({
+        sender: '@architect:example.com',
+        mentions: ['@architect:example.com'],
+      }),
       agents,
     )
     expect(matches).toEqual([])
@@ -71,10 +79,7 @@ describe('route', () => {
         trigger: 'mention',
       },
     ]
-    const matches = route(
-      msg({ mentions: ['@architect:example.com', '@qa:example.com'] }),
-      both,
-    )
+    const matches = route(msg({ mentions: ['@architect:example.com', '@qa:example.com'] }), both)
     expect(matches.map((m) => m.name).sort()).toEqual(['architect', 'qa'])
   })
 
@@ -86,6 +91,86 @@ describe('route', () => {
       content: {},
     }
     expect(route(stateEvent as never, agents)).toEqual([])
+  })
+})
+
+describe('directed task routing', () => {
+  const agents: AgentBinding[] = [
+    {
+      name: 'supervisor',
+      userId: '@supervisor:hs',
+      rooms: [{ alias: '!r:hs' }],
+      trigger: 'mention',
+    },
+    {
+      name: 'worker',
+      userId: '@worker:hs',
+      rooms: [{ alias: '!r:hs' }],
+      trigger: 'mention',
+    },
+    {
+      name: 'eager',
+      userId: '@eager:hs',
+      rooms: [{ alias: '!r:hs' }],
+      trigger: 'any',
+    },
+  ]
+  const root = {
+    type: 'm.room.message',
+    room_id: '!r:hs',
+    sender: '@supervisor:hs',
+    content: {
+      msgtype: 'm.notice',
+      body: '@worker:hs task',
+      'm.mentions': { user_ids: ['@worker:hs'] },
+    },
+  }
+  it('routes a task root solely to its assignee, including self assignment', () => {
+    expect(
+      route(root, agents, new Map(), { assignee: 'worker', isRoot: true }).map((x) => x.name),
+    ).toEqual(['worker'])
+    expect(
+      route(root, agents, new Map(), {
+        assignee: 'supervisor',
+        isRoot: true,
+      }).map((x) => x.name),
+    ).toEqual(['supervisor'])
+  })
+  it('keeps trigger:any out of a task thread while allowing human steering and explicit mentions', () => {
+    const state = new Map([
+      [
+        '$task',
+        {
+          participants: ['worker'],
+          rootMentions: ['worker'],
+          callers: {},
+          handoffs: {},
+        },
+      ],
+    ])
+    const human = {
+      ...root,
+      sender: '@alice:hs',
+      content: {
+        msgtype: 'm.text',
+        body: 'continue',
+        'm.relates_to': { rel_type: 'm.thread', event_id: '$task' },
+      },
+    }
+    expect(
+      route(human, agents, state, { assignee: 'worker', isRoot: false }).map((x) => x.name),
+    ).toEqual(['worker'])
+    const mention = {
+      ...human,
+      sender: '@worker:hs',
+      content: {
+        ...human.content,
+        'm.mentions': { user_ids: ['@supervisor:hs'] },
+      },
+    }
+    expect(
+      route(mention, agents, state, { assignee: 'worker', isRoot: false }).map((x) => x.name),
+    ).toEqual(['supervisor'])
   })
 })
 
@@ -103,7 +188,11 @@ describe('media events', () => {
     const monitorRoom = msg({ room: '!alerts:example.com', body: 'dog.jpg' })
     const mediaEvent = {
       ...monitorRoom,
-      content: { msgtype: 'm.image', body: 'dog.jpg', url: 'mxc://localhost/abc' },
+      content: {
+        msgtype: 'm.image',
+        body: 'dog.jpg',
+        url: 'mxc://localhost/abc',
+      },
     }
     const matches = route(mediaEvent, agents)
     expect(matches).toEqual([])
@@ -169,7 +258,10 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
 
   it('an explicit @mention still re-engages the sub (rule 1 wins)', () => {
     const matches = route(
-      threadMsg({ sender: '@parent:example.com', mentions: ['@sub:example.com'] }),
+      threadMsg({
+        sender: '@parent:example.com',
+        mentions: ['@sub:example.com'],
+      }),
       pair,
       states({ participants: ['parent', 'sub'], callers: { sub: 'parent' } }),
     )
@@ -178,7 +270,10 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
 
   it('dedupes: a sub reply that also @mentions its caller triggers the caller once', () => {
     const matches = route(
-      threadMsg({ sender: '@sub:example.com', mentions: ['@parent:example.com'] }),
+      threadMsg({
+        sender: '@sub:example.com',
+        mentions: ['@parent:example.com'],
+      }),
       pair,
       states({ participants: ['parent'], callers: { sub: 'parent' } }),
     )

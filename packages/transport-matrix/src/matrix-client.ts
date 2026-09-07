@@ -11,6 +11,7 @@ export interface SendMessageInput {
   asUserId: string
   content: { msgtype: string; body: string; [k: string]: unknown }
   threadRoot?: string
+  txnId?: string
 }
 
 export interface SendCustomEventInput {
@@ -18,6 +19,7 @@ export interface SendCustomEventInput {
   asUserId: string
   eventType: string
   content: Record<string, unknown>
+  txnId?: string
 }
 
 export interface SetTypingInput {
@@ -51,7 +53,10 @@ export class MatrixClient {
     const r = await this.fetch(`${this.homeserver}/_matrix/client/v3/register`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${this.asToken}` },
-      body: JSON.stringify({ type: 'm.login.application_service', username: localpart }),
+      body: JSON.stringify({
+        type: 'm.login.application_service',
+        username: localpart,
+      }),
     })
     if (r.status === 200) return (await r.json()) as { user_id: string; device_id: string }
     if (r.status === 400) {
@@ -143,10 +148,7 @@ export class MatrixClient {
     return j.room_id
   }
 
-  async createRoomRaw(opts: {
-    asUserId: string
-    body: Record<string, unknown>
-  }): Promise<string> {
+  async createRoomRaw(opts: { asUserId: string; body: Record<string, unknown> }): Promise<string> {
     const url = `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.asUserId)}`
     const r = await this.fetch(url, {
       method: 'POST',
@@ -190,11 +192,7 @@ export class MatrixClient {
    * already invited" responses idempotently so bootstrap can run on a
    * fresh AND a populated homeserver without branching.
    */
-  async invite(opts: {
-    roomId: string
-    asUserId: string
-    targetUserId: string
-  }): Promise<void> {
+  async invite(opts: { roomId: string; asUserId: string; targetUserId: string }): Promise<void> {
     const url =
       `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(opts.roomId)}/invite` +
       `?user_id=${encodeURIComponent(opts.asUserId)}`
@@ -229,11 +227,7 @@ export class MatrixClient {
     throw new Error(`invite(${opts.targetUserId}) failed: ${r.status}`)
   }
 
-  async leaveRoom(
-    roomId: string,
-    asUserId: string,
-    opts?: { reason?: string },
-  ): Promise<void> {
+  async leaveRoom(roomId: string, asUserId: string, opts?: { reason?: string }): Promise<void> {
     const url =
       `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/leave` +
       `?user_id=${encodeURIComponent(asUserId)}`
@@ -263,13 +257,16 @@ export class MatrixClient {
   async sendMessage(input: SendMessageInput): Promise<{ event_id: string }> {
     const content: Record<string, unknown> = { ...input.content }
     if (input.threadRoot) {
-      content['m.relates_to'] = { rel_type: 'm.thread', event_id: input.threadRoot }
+      content['m.relates_to'] = {
+        rel_type: 'm.thread',
+        event_id: input.threadRoot,
+      }
     }
-    return this.sendEvent(input.roomId, input.asUserId, 'm.room.message', content)
+    return this.sendEvent(input.roomId, input.asUserId, 'm.room.message', content, input.txnId)
   }
 
   async sendCustomEvent(input: SendCustomEventInput): Promise<{ event_id: string }> {
-    return this.sendEvent(input.roomId, input.asUserId, input.eventType, input.content)
+    return this.sendEvent(input.roomId, input.asUserId, input.eventType, input.content, input.txnId)
   }
 
   async setTyping(input: SetTypingInput): Promise<void> {
@@ -409,7 +406,10 @@ export class MatrixClient {
       headers: { Authorization: `Bearer ${this.asToken}` },
     })
     if (!r.ok) throw new Error(`fetchRoomMessages(${opts.roomId}) failed: ${r.status}`)
-    return (await r.json()) as { chunk: Array<Record<string, unknown>>; end?: string }
+    return (await r.json()) as {
+      chunk: Array<Record<string, unknown>>
+      end?: string
+    }
   }
 
   async getJoinedMembers(
@@ -424,19 +424,24 @@ export class MatrixClient {
       headers: { Authorization: `Bearer ${this.asToken}` },
     })
     if (!r.ok) throw new Error(`getJoinedMembers(${roomId}) failed: ${r.status}`)
-    return (await r.json()) as { joined: Record<string, { display_name?: string }> }
+    return (await r.json()) as {
+      joined: Record<string, { display_name?: string }>
+    }
   }
 
-  async sync(opts: {
-    asUserId: string
-    since?: string | null
-    timeoutMs?: number
-  }): Promise<{
+  async sync(opts: { asUserId: string; since?: string | null; timeoutMs?: number }): Promise<{
     next_batch: string
     rooms: {
-      join: Record<string, {
-        timeline: { events: Record<string, unknown>[]; prev_batch?: string; limited?: boolean }
-      }>
+      join: Record<
+        string,
+        {
+          timeline: {
+            events: Record<string, unknown>[]
+            prev_batch?: string
+            limited?: boolean
+          }
+        }
+      >
     }
   }> {
     const params = new URLSearchParams({
@@ -452,9 +457,16 @@ export class MatrixClient {
     return r.json() as Promise<{
       next_batch: string
       rooms: {
-        join: Record<string, {
-          timeline: { events: Record<string, unknown>[]; prev_batch?: string; limited?: boolean }
-        }>
+        join: Record<
+          string,
+          {
+            timeline: {
+              events: Record<string, unknown>[]
+              prev_batch?: string
+              limited?: boolean
+            }
+          }
+        >
       }
     }>
   }
@@ -478,8 +490,9 @@ export class MatrixClient {
     asUserId: string,
     eventType: string,
     content: Record<string, unknown>,
+    txnId?: string,
   ): Promise<{ event_id: string }> {
-    const txn = randomUUID()
+    const txn = txnId ?? randomUUID()
     const url =
       `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}` +
       `/send/${eventType}/${txn}?user_id=${encodeURIComponent(asUserId)}`
@@ -488,7 +501,13 @@ export class MatrixClient {
       headers: { Authorization: `Bearer ${this.asToken}` },
       body: JSON.stringify(content),
     })
-    if (!r.ok) throw new Error(`sendEvent(${eventType}) failed: ${r.status}`)
+    if (!r.ok) {
+      const err = new Error(`sendEvent(${eventType}) failed: ${r.status}`) as Error & {
+        status?: number
+      }
+      err.status = r.status
+      throw err
+    }
     return (await r.json()) as { event_id: string }
   }
 }

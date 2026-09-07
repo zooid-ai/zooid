@@ -1,5 +1,9 @@
 export { MatrixClient } from './matrix-client.js'
-export type { MatrixClientOptions, SendMessageInput, SendCustomEventInput } from './matrix-client.js'
+export type {
+  MatrixClientOptions,
+  SendMessageInput,
+  SendCustomEventInput,
+} from './matrix-client.js'
 export { MatrixContextProvider } from './context-provider.js'
 export type { MatrixContextProviderOpts } from './context-provider.js'
 export { renderRegistration } from './registration.js'
@@ -22,7 +26,11 @@ export { createMatrixTransport } from './transport.js'
 export type { CreateMatrixTransportOptions, MediaClientLike } from './transport.js'
 export { SyncLoop } from './sync-loop.js'
 export type { SyncLoopOptions, SyncResponse, SyncClient } from './sync-loop.js'
-export { ensureDefaultChannel, ensureWorkforceSpace, serverNameFromMxid } from './space-provisioner.js'
+export {
+  ensureDefaultChannel,
+  ensureWorkforceSpace,
+  serverNameFromMxid,
+} from './space-provisioner.js'
 export type { EnsureDefaultChannelOpts, EnsureSpaceOpts } from './space-provisioner.js'
 export {
   buildWorkforceRoster,
@@ -35,9 +43,18 @@ export type {
   PublisherHandle,
   StartOpts as StartWorkforcePublisherOpts,
 } from './workforce-publisher.js'
-export { MediaClient, parseMxcUri, MAX_INLINE_IMAGE_BYTES, INLINE_IMAGE_MIMES, MAX_DOWNLOAD_BYTES } from './media-client.js'
+export {
+  MediaClient,
+  parseMxcUri,
+  MAX_INLINE_IMAGE_BYTES,
+  INLINE_IMAGE_MIMES,
+  MAX_DOWNLOAD_BYTES,
+} from './media-client.js'
 export type { MediaClientOptions } from './media-client.js'
 export { PendingMediaStore, MAX_MEDIA_PER_TURN } from './pending-media.js'
 export type { PendingMediaItem } from './pending-media.js'
 export { writeAttachment } from './attachments.js'
 export type { WriteAttachmentInput } from './attachments.js'
+export { TaskRegistry, MAX_OPEN_TASKS_PER_ROOM } from './task-registry.js'
+export type { TaskRecord, TaskPhase } from './task-registry.js'
+export { checkDelegable, buildAssignmentContent, renderCompletionPrompt } from './task-dispatch.js'

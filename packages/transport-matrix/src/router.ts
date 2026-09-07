@@ -50,6 +50,11 @@ export interface ThreadState {
   handoffs: Record<string, string[]>
 }
 
+export interface TaskThreadContext {
+  assignee: string
+  isRoot: boolean
+}
+
 interface MaybeEvent {
   type?: string
   room_id?: string
@@ -71,6 +76,7 @@ export function route(
   event: MaybeEvent,
   agents: AgentBinding[],
   threadStates?: Map<string, ThreadState>,
+  task?: TaskThreadContext,
 ): RouteMatch[] {
   if (event.type !== 'm.room.message') return []
   if (!event.content?.msgtype) return []
@@ -81,8 +87,25 @@ export function route(
   const threadState = threadRoot ? threadStates?.get(threadRoot) : undefined
 
   for (const a of agents) {
-    if (event.sender === a.userId) continue
     if (!a.rooms.some((r) => r.alias === event.room_id)) continue
+    if (task?.isRoot) {
+      if (a.name === task.assignee) matches.push(a)
+      continue
+    }
+    if (event.sender === a.userId) continue
+    if (task) {
+      if (mentions.has(a.userId)) {
+        matches.push(a)
+        continue
+      }
+      const senderAgent = agents.find((x) => x.userId === event.sender)
+      if (senderAgent) {
+        if (threadState?.callers[senderAgent.name] === a.name) matches.push(a)
+      } else if (a.name === task.assignee) {
+        matches.push(a)
+      }
+      continue
+    }
     if (a.trigger === 'any') {
       matches.push(a)
       continue
