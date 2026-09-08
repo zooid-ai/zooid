@@ -3,12 +3,15 @@ import type {
   HistoryOptions,
   HistoryPage,
   Member,
-  ChannelInfo,
+  RoomInfo,
+  SendMessageInput,
+  SendMessageResult,
   Message,
   ThreadOverview,
   ThreadOverviewPage,
 } from '@zooid/core'
 import type { MatrixClient } from './matrix-client.js'
+import type { RoomBinding } from '@zooid/core'
 
 interface MatrixMessageEvent {
   event_id: string
@@ -47,6 +50,15 @@ export interface MatrixContextProviderOpts {
   asUserId: string
   /** Map of Matrix user IDs → agent names, for is_agent / agent_name flags. */
   agentBots: Map<string, string>
+  /**
+   * This agent's own room bindings — the live array `BotPool.bootstrap`
+   * rewrites `.alias` on in place, so reads through this field after
+   * bootstrap see canonical room IDs. Backs `getRooms()` and the
+   * `sendMessage()` authorization check. Absent/empty = no rooms known
+   * (context providers built before this field existed, or in tests that
+   * don't exercise either method).
+   */
+  rooms?: RoomBinding[]
 }
 
 export class MatrixContextProvider implements TransportContextProvider {
@@ -213,12 +225,38 @@ export class MatrixContextProvider implements TransportContextProvider {
     })
   }
 
-  async getChannelInfo(channelId: string): Promise<ChannelInfo> {
+  async getRoomInfo(channelId: string): Promise<RoomInfo> {
     const name = await this.opts.client.fetchRoomName(channelId, this.opts.asUserId)
     return {
       id: channelId,
       name: name ?? channelId,
       transport: 'matrix',
     }
+  }
+
+  async getRooms(): Promise<RoomInfo[]> {
+    const rooms = this.opts.rooms ?? []
+    return Promise.all(
+      rooms.map(async (r) => {
+        const name = await this.opts.client.fetchRoomName(r.alias, this.opts.asUserId)
+        return { id: r.alias, name: name ?? r.alias, transport: 'matrix' as const }
+      }),
+    )
+  }
+
+  async sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
+    const rooms = this.opts.rooms ?? []
+    if (!rooms.some((r) => r.alias === input.room)) {
+      throw new Error(`not_in_room: this agent is not a member of ${input.room}`)
+    }
+    const { event_id } = await this.opts.client.sendMessage({
+      roomId: input.room,
+      asUserId: this.opts.asUserId,
+      // m.notice, not m.text: agent prose sends as m.notice so
+      // .m.rule.suppress_notices silences it server-side (ZNC025 §10).
+      content: { msgtype: 'm.notice', body: input.text },
+      ...(input.thread_id ? { threadRoot: input.thread_id } : {}),
+    })
+    return { event_id, ...(input.thread_id ? { thread_id: input.thread_id } : {}) }
   }
 }

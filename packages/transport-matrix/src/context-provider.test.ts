@@ -155,7 +155,7 @@ describe('MatrixContextProvider', () => {
     ])
   })
 
-  it('getChannelInfo returns the room name and transport: matrix', async () => {
+  it('getRoomInfo returns the room name and transport: matrix', async () => {
     const client = fakeClient({
       fetchRoomName: vi.fn().mockResolvedValue('engineering'),
     } as unknown as Partial<MatrixClient>)
@@ -164,8 +164,65 @@ describe('MatrixContextProvider', () => {
       asUserId: '@_zooid:hs',
       agentBots: new Map(),
     })
-    const info = await provider.getChannelInfo('!room:hs')
+    const info = await provider.getRoomInfo('!room:hs')
     expect(info).toEqual({ id: '!room:hs', name: 'engineering', transport: 'matrix' })
+  })
+
+  it('getRooms maps this agent\'s own room bindings to RoomInfo, fetching each name', async () => {
+    const fetchRoomName = vi.fn().mockResolvedValueOnce('general').mockResolvedValueOnce('dev')
+    const client = fakeClient({ fetchRoomName } as unknown as Partial<MatrixClient>)
+    const provider = new MatrixContextProvider({
+      client,
+      asUserId: '@architect:hs',
+      agentBots: new Map(),
+      rooms: [{ alias: '!a:hs' }, { alias: '!b:hs' }],
+    })
+    const rooms = await provider.getRooms()
+    expect(rooms).toEqual([
+      { id: '!a:hs', name: 'general', transport: 'matrix' },
+      { id: '!b:hs', name: 'dev', transport: 'matrix' },
+    ])
+    expect(fetchRoomName).toHaveBeenCalledWith('!a:hs', '@architect:hs')
+  })
+
+  it('getRooms returns an empty list when the provider has no room bindings', async () => {
+    const provider = new MatrixContextProvider({
+      client: fakeClient(),
+      asUserId: '@architect:hs',
+      agentBots: new Map(),
+    })
+    expect(await provider.getRooms()).toEqual([])
+  })
+
+  it('sendMessage posts as this agent into a bound room, echoing thread_id when replying in-thread', async () => {
+    const sendMessage = vi.fn().mockResolvedValue({ event_id: '$sent' })
+    const client = fakeClient({ sendMessage } as unknown as Partial<MatrixClient>)
+    const provider = new MatrixContextProvider({
+      client,
+      asUserId: '@architect:hs',
+      agentBots: new Map(),
+      rooms: [{ alias: '!a:hs' }],
+    })
+    const result = await provider.sendMessage({ room: '!a:hs', thread_id: '$root', text: 'noted' })
+    expect(result).toEqual({ event_id: '$sent', thread_id: '$root' })
+    expect(sendMessage).toHaveBeenCalledWith({
+      roomId: '!a:hs',
+      asUserId: '@architect:hs',
+      content: { msgtype: 'm.notice', body: 'noted' },
+      threadRoot: '$root',
+    })
+  })
+
+  it('sendMessage refuses a room this agent is not bound to', async () => {
+    const provider = new MatrixContextProvider({
+      client: fakeClient(),
+      asUserId: '@architect:hs',
+      agentBots: new Map(),
+      rooms: [{ alias: '!a:hs' }],
+    })
+    await expect(provider.sendMessage({ room: '!elsewhere:hs', text: 'hi' })).rejects.toThrow(
+      /not_in_room/,
+    )
   })
 
   it('getRecentThreads returns top-level entries newest-first with bundled thread metadata, skipping thread replies', async () => {
@@ -311,7 +368,7 @@ describe('MatrixContextProvider', () => {
       asUserId: '@_zooid:hs',
       agentBots: new Map(),
     })
-    const info = await provider.getChannelInfo('!room:hs')
+    const info = await provider.getRoomInfo('!room:hs')
     expect(info.name).toBe('!room:hs')
   })
 
@@ -433,7 +490,7 @@ describe('MatrixContextProvider — reads are impersonated as the agent', () => 
     await p.getRecentThreads('!room:hs', { limit: 10 })
     await p.getThreadHistory('!room:hs', '$root', { limit: 10 })
     await p.getChannelMembers('!room:hs')
-    await p.getChannelInfo('!room:hs')
+    await p.getRoomInfo('!room:hs')
 
     expect(fetchRoomMessages.mock.calls.every(([a]) => a.asUserId === AGENT)).toBe(true)
     expect(fetchThreadRelations).toHaveBeenCalledWith(expect.objectContaining({ asUserId: AGENT }))

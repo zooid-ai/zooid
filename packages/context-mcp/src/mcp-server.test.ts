@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import { buildContextMcpServer } from './mcp-server.js'
-import type { TransportContextProvider } from '@zooid/core'
+import type { TaskActions, TransportContextProvider } from '@zooid/core'
 
 function makeProvider(over: Partial<TransportContextProvider> = {}): TransportContextProvider {
   return {
@@ -10,7 +10,18 @@ function makeProvider(over: Partial<TransportContextProvider> = {}): TransportCo
     getRecentThreads: async () => ({ threads: [], has_more: false }),
     getThreadHistory: async () => ({ messages: [], has_more: false }),
     getChannelMembers: async () => [],
-    getChannelInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
+    getRoomInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
+    getRooms: async () => [{ id: '!a:localhost', name: 'general', transport: 'matrix' }],
+    sendMessage: async () => ({ event_id: '$sent' }),
+    ...over,
+  }
+}
+
+function makeTasks(over: Partial<TaskActions> = {}): TaskActions {
+  return {
+    startTasks: async () => ({ results: [], notify: 'caller', delivery: 'd' }),
+    completeTask: async () => ({ status: 'recorded' }),
+    describeRole: async () => ({ is_task_assignee: false, can_start_task_threads: true }),
     ...over,
   }
 }
@@ -23,19 +34,119 @@ async function connect(server: ReturnType<typeof buildContextMcpServer>) {
 }
 
 describe('buildContextMcpServer', () => {
-  it('lists exactly five tools with the spec names', async () => {
+  it('lists the read-only surface plus zooid_send_message and zooid_get_rooms when no task role is given', async () => {
     const server = buildContextMcpServer({
       resolve: async () => makeProvider(),
     })
     const client = await connect(server)
     const list = await client.listTools()
     expect(list.tools.map((t) => t.name).sort()).toEqual([
-      'zooid_get_channel_info',
       'zooid_get_history',
       'zooid_get_members',
       'zooid_get_recent_threads',
+      'zooid_get_room_info',
+      'zooid_get_rooms',
       'zooid_get_thread_history',
+      'zooid_send_message',
     ])
+  })
+
+  it('renames the two tools that did not name Matrix primitives', async () => {
+    const server = buildContextMcpServer({ resolve: async () => makeProvider() })
+    const client = await connect(server)
+    const names = (await client.listTools()).tools.map((t) => t.name)
+    expect(names).toContain('zooid_get_room_info')
+    expect(names).not.toContain('zooid_get_channel_info')
+    expect(names).toContain('zooid_send_message')
+    expect(names).toContain('zooid_get_rooms')
+  })
+
+  it('registers start_task_threads but not complete_task for a non-assignee', async () => {
+    const server = buildContextMcpServer({
+      resolve: async () => makeProvider(),
+      resolveTasks: async () => makeTasks(),
+      role: { is_task_assignee: false, can_start_task_threads: true },
+    })
+    const names = (await (await connect(server)).listTools()).tools.map((t) => t.name)
+    expect(names).toContain('zooid_start_task_threads')
+    expect(names).not.toContain('zooid_complete_task')
+  })
+
+  it('registers complete_task but not start_task_threads for an assignee', async () => {
+    const server = buildContextMcpServer({
+      resolve: async () => makeProvider(),
+      resolveTasks: async () => makeTasks(),
+      role: { is_task_assignee: true, can_start_task_threads: false },
+    })
+    const names = (await (await connect(server)).listTools()).tools.map((t) => t.name)
+    expect(names).toContain('zooid_complete_task')
+    expect(names).not.toContain('zooid_start_task_threads')
+  })
+
+  it('omits both task tools when no role is resolved', async () => {
+    const server = buildContextMcpServer({
+      resolve: async () => makeProvider(),
+      resolveTasks: async () => makeTasks(),
+    })
+    const names = (await (await connect(server)).listTools()).tools.map((t) => t.name)
+    expect(names).not.toContain('zooid_complete_task')
+    expect(names).not.toContain('zooid_start_task_threads')
+  })
+
+  it('start_task_threads returns the delivery contract verbatim', async () => {
+    const server = buildContextMcpServer({
+      resolve: async () => makeProvider(),
+      resolveTasks: async () =>
+        makeTasks({
+          startTasks: async () => ({
+            results: [{ agent: 'reviewer', status: 'started', thread_id: '$t' }],
+            notify: 'caller',
+            delivery:
+              'Each result returns to you as a new turn when that task completes. End your turn now — do not read the task thread to wait for it.',
+          }),
+        }),
+      role: { is_task_assignee: false, can_start_task_threads: true },
+    })
+    const client = await connect(server)
+    const res = await client.callTool({
+      name: 'zooid_start_task_threads',
+      arguments: { tasks: [{ agent: 'reviewer', prompt: 'review' }] },
+    })
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0].text)
+    expect(payload.notify).toBe('caller')
+    expect(payload.delivery).toMatch(/End your turn now/)
+  })
+
+  it('send_message forwards room, thread_id and text', async () => {
+    const sent: unknown[] = []
+    const server = buildContextMcpServer({
+      resolve: async () =>
+        makeProvider({
+          sendMessage: async (input) => {
+            sent.push(input)
+            return { event_id: '$e', thread_id: '$t' }
+          },
+        }),
+    })
+    const client = await connect(server)
+    await client.callTool({
+      name: 'zooid_send_message',
+      arguments: { room: '!a:localhost', thread_id: '$t', text: 'noted' },
+    })
+    expect(sent).toEqual([{ room: '!a:localhost', thread_id: '$t', text: 'noted' }])
+  })
+
+  it('zooid_get_rooms returns the provider payload', async () => {
+    const server = buildContextMcpServer({
+      resolve: async () =>
+        makeProvider({
+          getRooms: async () => [{ id: '!a:localhost', name: 'general', transport: 'matrix' }],
+        }),
+    })
+    const client = await connect(server)
+    const res = await client.callTool({ name: 'zooid_get_rooms', arguments: {} })
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0].text)
+    expect(payload).toEqual({ rooms: [{ id: '!a:localhost', name: 'general', transport: 'matrix' }] })
   })
 
   it('zooid_get_history forwards limit + before and returns the page as text JSON', async () => {
@@ -185,7 +296,7 @@ describe('buildContextMcpServer', () => {
     expect(res.isError).toBe(true)
   })
 
-  it('zooid_get_members and zooid_get_channel_info return the provider payload', async () => {
+  it('zooid_get_members and zooid_get_room_info return the provider payload', async () => {
     const provider = makeProvider({
       getChannelMembers: async () => [
         { id: '@alice:hs', name: 'alice', is_agent: false },
@@ -196,7 +307,7 @@ describe('buildContextMcpServer', () => {
           agent_name: 'architect',
         },
       ],
-      getChannelInfo: async () => ({
+      getRoomInfo: async () => ({
         id: '!r:hs',
         name: 'general',
         transport: 'matrix',
@@ -222,7 +333,7 @@ describe('buildContextMcpServer', () => {
     })
 
     const i = await client.callTool({
-      name: 'zooid_get_channel_info',
+      name: 'zooid_get_room_info',
       arguments: {},
     })
     expect(JSON.parse((i.content as Array<{ text: string }>)[0].text)).toEqual({
@@ -246,24 +357,29 @@ describe('buildContextMcpServer', () => {
     expect(res.isError).toBe(true)
   })
 
-  it('exposes task writes only when the daemon supplies task actions', async () => {
+  it('exposes task writes only when the daemon supplies task actions and a matching role', async () => {
     const calls: unknown[] = []
     const server = buildContextMcpServer({
       resolve: async () => makeProvider(),
-      resolveTasks: async () => ({
-        startTasks: async (_caller, input) => {
-          calls.push(input)
-          return {
-            results: [{ agent: 'worker', status: 'started', thread_id: '$task' }],
-          }
-        },
-        completeTask: async () => ({ status: 'recorded' as const }),
-      }),
+      resolveTasks: async () =>
+        makeTasks({
+          startTasks: async (_caller, input) => {
+            calls.push(input)
+            return {
+              results: [{ agent: 'worker', status: 'started', thread_id: '$task' }],
+              notify: 'caller',
+              delivery: 'd',
+            }
+          },
+        }),
+      role: { is_task_assignee: false, can_start_task_threads: true },
     })
     const client = await connect(server)
-    expect((await client.listTools()).tools.map((t) => t.name)).toContain('zooid_start_tasks')
+    expect((await client.listTools()).tools.map((t) => t.name)).toContain(
+      'zooid_start_task_threads',
+    )
     const result = await client.callTool({
-      name: 'zooid_start_tasks',
+      name: 'zooid_start_task_threads',
       arguments: { tasks: [{ agent: 'worker', prompt: 'audit' }] },
     })
     expect(calls).toEqual([{ tasks: [{ agent: 'worker', prompt: 'audit' }], notify: 'caller' }])

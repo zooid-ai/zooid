@@ -8,20 +8,32 @@ interface ToolResult {
 interface ExtensionContext {
   sessionManager?: { getSessionId?: () => string | undefined }
 }
+interface RegisteredTool {
+  name: string
+  label: string
+  description: string
+  parameters: unknown
+  /**
+   * Flat bullets appended to the system prompt while this tool is active —
+   * pi has no per-tool "Use this tool when…" slot, so anything that must
+   * name the tool explicitly (the wake contract) goes here.
+   */
+  promptGuidelines?: string[]
+  execute(
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    onUpdate: ((partial: unknown) => void) | undefined,
+    ctx: ExtensionContext,
+  ): Promise<ToolResult>
+}
 interface ExtensionAPI {
-  registerTool(tool: {
-    name: string
-    label: string
-    description: string
-    parameters: unknown
-    execute(
-      toolCallId: string,
-      params: Record<string, unknown>,
-      signal: AbortSignal | undefined,
-      onUpdate: ((partial: unknown) => void) | undefined,
-      ctx: ExtensionContext,
-    ): Promise<ToolResult>
-  }): void
+  registerTool(tool: RegisteredTool): void
+  /** Registered during load or after startup, including from a session_start handler. */
+  on(event: string, handler: (evt: unknown, ctx: ExtensionContext) => void | Promise<void>): void
+  getActiveTools(): string[]
+  setActiveTools(names: string[]): void
+  getAllTools(): Array<{ name: string }>
 }
 
 type DaemonReply = { ok: true; result: unknown } | { ok: false; error: string }
@@ -99,12 +111,34 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
     required: ['thread_id'],
   }, (params) => ({ threadId: params.thread_id, ...page(params) }))
   registerRead('zooid_get_members', 'List room members', 'List the humans and agents in the current room.', 'getChannelMembers', noParameters, () => ({}))
-  registerRead('zooid_get_channel_info', 'Get room information', 'Describe the current room: id, display name, and transport kind.', 'getChannelInfo', noParameters, () => ({}))
+  registerRead('zooid_get_room_info', 'Get room information', 'Describe the current room: id, display name, and transport kind.', 'getRoomInfo', noParameters, () => ({}))
+  registerRead('zooid_get_rooms', 'List rooms', 'List the rooms this agent is a member of. Valid targets for zooid_send_message.', 'getRooms', noParameters, () => ({}))
 
   pi.registerTool({
-    name: 'zooid_start_tasks',
-    label: 'Start Zooid tasks',
-    description: 'Assign concurrent work to other agents in this room. Each task opens a separate thread. A delegated task cannot start tasks of its own.',
+    name: 'zooid_send_message',
+    label: 'Send Zooid message',
+    description: 'Post a message into a room or thread this agent is bound to. Fire-and-forget: no assignee, no completion tracking, no notify. Use zooid_start_task_threads instead when the intent is delegation.',
+    parameters: {
+      type: 'object',
+      properties: {
+        room: { type: 'string' },
+        thread_id: { type: 'string' },
+        text: { type: 'string' },
+      },
+      required: ['room', 'text'],
+    },
+    async execute(_id, params, _signal, _update, ctx) {
+      return call('sendMessage', { room: params.room, thread_id: params.thread_id, text: params.text }, ctx)
+    },
+  })
+
+  pi.registerTool({
+    name: 'zooid_start_task_threads',
+    label: 'Start Zooid task threads',
+    description: 'Assign concurrent work to other agents in this room. Each task opens a separate thread. A delegated task cannot start tasks of its own. The return payload states how the result comes back — read `delivery` before deciding what to do next.',
+    promptGuidelines: [
+      'After calling zooid_start_task_threads, read the `delivery` field of its result and end your turn now when it tells you to — do not poll the task thread while waiting for a result.',
+    ],
     parameters: {
       type: 'object',
       properties: {
@@ -126,5 +160,29 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
       if (typeof params.summary !== 'string' || !params.summary.trim()) return error('zooid: summary must not be empty.')
       return call('completeTask', { summary: params.summary }, ctx)
     },
+  })
+
+  // Role-conditional gating ([[ZOD084]]). Fail open on any error — the read
+  // tools and zooid_start_task_threads/zooid_complete_task are already
+  // registered above, so the failure mode of gating is removing a
+  // capability rather than declining to add one. A daemon hiccup must not
+  // strip an assignee's ability to finish its task.
+  pi.on('session_start', async (_evt, ctx) => {
+    const acpSessionId = ctx.sessionManager?.getSessionId?.()
+    if (!acpSessionId) return
+    let reply: DaemonReply
+    try {
+      reply = await resolve({ acpSessionId, method: 'describeRole', params: {} })
+    } catch {
+      return
+    }
+    if (!reply.ok) return
+    const role = reply.result as { is_task_assignee: boolean; can_start_task_threads: boolean }
+    const next = new Set(pi.getAllTools().map((t) => t.name))
+    if (role.is_task_assignee) next.add('zooid_complete_task')
+    else next.delete('zooid_complete_task')
+    if (role.can_start_task_threads) next.add('zooid_start_task_threads')
+    else next.delete('zooid_start_task_threads')
+    pi.setActiveTools([...next])
   })
 }

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
-import type { TaskActions, TaskCallerRef, TransportContextProvider } from '@zooid/core'
+import type { TaskActions, TaskCallerRef, TaskRole, TransportContextProvider } from '@zooid/core'
 
 const MAX_LIMIT = 200
 const DEFAULT_LIMIT = 50
@@ -13,6 +13,13 @@ export interface BuildContextMcpServerOpts {
    */
   resolve: () => Promise<TransportContextProvider>
   resolveTasks?: () => Promise<TaskActions>
+  /**
+   * What this session is, queried once before the server is built. Absent =
+   * neither task tool is registered — the safe direction for MCP, since the
+   * tools are additive and a spawn that can't reach the daemon can't
+   * usefully call them anyway ([[ZOD084]]).
+   */
+  role?: TaskRole
 }
 // The socket substitutes its authenticated spawn binding; models never supply an address.
 const CALLER_FROM_BINDING: TaskCallerRef = {
@@ -43,10 +50,10 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
     },
   )
 
-  if (opts.resolveTasks) {
+  if (opts.resolveTasks && opts.role?.can_start_task_threads) {
     server.tool(
-      'zooid_start_tasks',
-      'Assign concurrent work to other agents in this room. Each task opens a separate thread.',
+      'zooid_start_task_threads',
+      'Assign concurrent work to other agents in this room. Each task opens a separate thread. The return payload states how the result comes back — read `delivery` before deciding what to do next.',
       {
         tasks: z.array(z.object({ agent: z.string(), prompt: z.string() })).min(1),
         notify: z.enum(['caller', 'none']).optional(),
@@ -61,6 +68,8 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
         return { content: [{ type: 'text', text: JSON.stringify(out) }] }
       },
     )
+  }
+  if (opts.resolveTasks && opts.role?.is_task_assignee) {
     server.tool(
       'zooid_complete_task',
       'Record an explicit result for the delegated task you were assigned.',
@@ -123,13 +132,39 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
   )
 
   server.tool(
-    'zooid_get_channel_info',
+    'zooid_get_room_info',
     'Describe the current room: id, display name, transport kind.',
     {},
     async () => {
       const provider = await opts.resolve()
-      const info = await provider.getChannelInfo('')
+      const info = await provider.getRoomInfo('')
       return { content: [{ type: 'text', text: JSON.stringify(info) }] }
+    },
+  )
+
+  server.tool(
+    'zooid_get_rooms',
+    'List the rooms this agent is a member of. Valid targets for zooid_send_message.',
+    {},
+    async () => {
+      const provider = await opts.resolve()
+      const rooms = await provider.getRooms()
+      return { content: [{ type: 'text', text: JSON.stringify({ rooms }) }] }
+    },
+  )
+
+  server.tool(
+    'zooid_send_message',
+    'Post a message into a room or thread this agent is bound to. Fire-and-forget: no assignee, no completion tracking, no notify. Use zooid_start_task_threads instead when the intent is delegation.',
+    {
+      room: z.string(),
+      thread_id: z.string().optional(),
+      text: z.string(),
+    },
+    async ({ room, thread_id, text }) => {
+      const provider = await opts.resolve()
+      const result = await provider.sendMessage({ room, thread_id, text })
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] }
     },
   )
 

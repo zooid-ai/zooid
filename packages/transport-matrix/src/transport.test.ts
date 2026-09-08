@@ -2392,3 +2392,64 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
     expect(state.callers).toEqual({ bebop: 'parent', rocksteady: 'parent' })
   })
 })
+
+describe('taskActions.describeRole', () => {
+  function makeTaskTransport() {
+    const { reg, finishPrompt } = fakeRegistry()
+    const approvals = fakeApprovals()
+    const client = fakeClient()
+    const bindings = [
+      ...baseAgents,
+      {
+        name: 'worker',
+        userId: '@worker:example.com',
+        rooms: [{ alias: '!r:example.com' }],
+        trigger: 'mention' as const,
+      },
+    ]
+    const transport = createMatrixTransport({
+      agents: reg as never,
+      approvals: approvals as never,
+      client: client as never,
+      bindings,
+      hsToken: 'hs-secret',
+      botUserId: '@zooid:example.com',
+      drainQuietMs: 0,
+    })
+    return { transport, finishPrompt }
+  }
+
+  it('describeRole reports assignee and depth for a task thread', async () => {
+    const { transport } = makeTaskTransport()
+    const started = await transport.taskActions.startTasks(
+      {
+        agentName: 'architect',
+        channelId: '!r:example.com',
+        threadRoot: '$parent',
+        sessionKey: '$parent',
+      },
+      { tasks: [{ agent: 'worker', prompt: 'do the thing' }] },
+    )
+    const result = started.results[0]!
+    expect(result.status).toBe('started')
+    const threadId = (result as { thread_id: string }).thread_id
+    const role = await transport.taskActions.describeRole({
+      agentName: 'worker',
+      channelId: '!r:example.com',
+      threadRoot: threadId,
+      sessionKey: threadId,
+    })
+    expect(role).toEqual({ is_task_assignee: true, can_start_task_threads: false })
+  })
+
+  it('describeRole reports a plain mention as neither assignee nor capped', async () => {
+    const { transport } = makeTaskTransport()
+    const role = await transport.taskActions.describeRole({
+      agentName: 'architect',
+      channelId: '!r:example.com',
+      threadRoot: '$other',
+      sessionKey: '$other',
+    })
+    expect(role).toEqual({ is_task_assignee: false, can_start_task_threads: true })
+  })
+})

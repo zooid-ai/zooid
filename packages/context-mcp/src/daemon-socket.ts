@@ -12,9 +12,12 @@ export interface DaemonRequest {
     | 'getRecentThreads'
     | 'getThreadHistory'
     | 'getChannelMembers'
-    | 'getChannelInfo'
+    | 'getRoomInfo'
+    | 'getRooms'
+    | 'sendMessage'
     | 'startTasks'
     | 'completeTask'
+    | 'describeRole'
   params: Record<string, unknown>
 }
 
@@ -152,9 +155,19 @@ async function handleLine(
       result = await binding.provider.getThreadHistory(channelId, threadId, req.params)
     } else if (req.method === 'getChannelMembers') {
       result = await binding.provider.getChannelMembers(channelId)
-    } else if (req.method === 'getChannelInfo') {
-      result = await binding.provider.getChannelInfo(channelId)
-    } else if (req.method === 'startTasks' || req.method === 'completeTask') {
+    } else if (req.method === 'getRoomInfo') {
+      result = await binding.provider.getRoomInfo(channelId)
+    } else if (req.method === 'getRooms') {
+      result = await binding.provider.getRooms()
+    } else if (req.method === 'sendMessage') {
+      result = await binding.provider.sendMessage(
+        req.params as unknown as Parameters<typeof binding.provider.sendMessage>[0],
+      )
+    } else if (
+      req.method === 'startTasks' ||
+      req.method === 'completeTask' ||
+      req.method === 'describeRole'
+    ) {
       const actions = registry.taskActions
       if (!actions) {
         socket.write(
@@ -174,7 +187,9 @@ async function handleLine(
       result =
         req.method === 'startTasks'
           ? await actions.startTasks(caller, req.params as unknown as StartTasksInput)
-          : await actions.completeTask(caller, req.params as unknown as CompleteTaskInput)
+          : req.method === 'completeTask'
+            ? await actions.completeTask(caller, req.params as unknown as CompleteTaskInput)
+            : await actions.describeRole(caller)
     } else {
       socket.write(
         JSON.stringify({

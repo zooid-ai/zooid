@@ -350,6 +350,9 @@ function buildContextSpawns(
         client,
         asUserId: agent.matrix.user_id,
         agentBots,
+        // Same array BotPool.bootstrap rewrites `.alias` on in place — reads
+        // through this after bootstrap see canonical room IDs.
+        rooms: agent.matrix.rooms,
       })
       result[name] = async (threadId: string, channelId?: string, sessionKey?: string) => {
         const spawnId = registry.register({

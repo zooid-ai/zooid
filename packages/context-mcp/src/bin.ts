@@ -6,6 +6,7 @@ import type {
   StartTasksOutput,
   CompleteTaskOutput,
   TaskActions,
+  TaskRole,
   TransportContextProvider,
 } from '@zooid/core'
 
@@ -45,12 +46,24 @@ const remoteProvider: TransportContextProvider = {
       method: 'getChannelMembers',
       params: {},
     }) as Promise<Awaited<ReturnType<TransportContextProvider['getChannelMembers']>>>,
-  getChannelInfo: () =>
+  getRoomInfo: () =>
     callDaemon(sockPath, {
       spawnId,
-      method: 'getChannelInfo',
+      method: 'getRoomInfo',
       params: {},
-    }) as Promise<Awaited<ReturnType<TransportContextProvider['getChannelInfo']>>>,
+    }) as Promise<Awaited<ReturnType<TransportContextProvider['getRoomInfo']>>>,
+  getRooms: () =>
+    callDaemon(sockPath, {
+      spawnId,
+      method: 'getRooms',
+      params: {},
+    }) as Promise<Awaited<ReturnType<TransportContextProvider['getRooms']>>>,
+  sendMessage: (input) =>
+    callDaemon(sockPath, {
+      spawnId,
+      method: 'sendMessage',
+      params: input as unknown as Record<string, unknown>,
+    }) as Promise<Awaited<ReturnType<TransportContextProvider['sendMessage']>>>,
 }
 
 const remoteTasks: TaskActions = {
@@ -66,10 +79,25 @@ const remoteTasks: TaskActions = {
       method: 'completeTask',
       params: input as unknown as Record<string, unknown>,
     }) as Promise<CompleteTaskOutput>,
+  describeRole: () =>
+    callDaemon(sockPath, {
+      spawnId,
+      method: 'describeRole',
+      params: {},
+    }) as Promise<TaskRole>,
 }
+
+// A failed role query yields undefined, which registers neither task tool —
+// the safe direction for MCP: the tools are additive, and a spawn that
+// cannot reach the daemon cannot usefully call them anyway ([[ZOD084]]).
+const role = await callDaemon(sockPath, { spawnId, method: 'describeRole', params: {} })
+  .then((r) => r as TaskRole)
+  .catch(() => undefined)
+
 const server = buildContextMcpServer({
   resolve: async () => remoteProvider,
   resolveTasks: async () => remoteTasks,
+  role,
 })
 await server.connect(new StdioServerTransport())
 process.stderr.write(`zooid-context-mcp: ready (spawnId=${spawnId})\n`)
