@@ -73,6 +73,12 @@ transports:
 
 Acting (sending, joining) is identical in both modes — only how the daemon ingests events differs.
 
+### Agent isolation
+
+Under `runtime: docker` / `runtime: podman`, each agent gets its own context socket, mounted only into its own container, so one agent cannot read another's rooms even if it learns their session ID.
+
+Under `runtime: local`, every agent runs as your user on your filesystem and can read any other agent's files directly. **`runtime: local` is a single trust domain** — treat every agent in a local workforce as having the access of the most privileged one. Use a container runtime when agents differ in what they should reach.
+
 ## The stack
 
 Every layer is open and replaceable.

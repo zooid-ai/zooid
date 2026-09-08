@@ -3,11 +3,12 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SpawnRegistry } from './spawn-registry.js'
-import { startDaemonSocketServer } from './daemon-socket.js'
+import { callDaemon, startAgentSocketServers, startDaemonSocketServer } from './daemon-socket.js'
+import { agentSocketPath } from './socket-paths.js'
 import type { TransportContextProvider } from '@zooid/core'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -53,7 +54,7 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
       provider,
     })
     const sockPath = join(tmpdir(), `zooid-it-${randomUUID()}.sock`)
-    const server = await startDaemonSocketServer({ sockPath, registry })
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'architect' })
     cleanup.push(() => server.close())
 
     const transport = new StdioClientTransport({
@@ -132,12 +133,12 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
       provider: providerA,
     })
     const spawnB = registry.register({
-      agentName: 'product-owner',
+      agentName: 'architect',
       threadRef: { channelId: '!b:hs', threadId: '!b:hs' },
       provider: providerB,
     })
     const sockPath = join(tmpdir(), `zooid-it-${randomUUID()}.sock`)
-    const server = await startDaemonSocketServer({ sockPath, registry })
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'architect' })
     cleanup.push(() => server.close())
 
     async function startClient(spawnId: string) {
@@ -175,5 +176,44 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
     })
     expect(JSON.parse((infoA.content as Array<{ text: string }>)[0].text).id).toBe('!a:hs')
     expect(JSON.parse((infoB.content as Array<{ text: string }>)[0].text).id).toBe('!b:hs')
+  })
+})
+
+describe('per-agent sockets (integration)', () => {
+  it('isolates two agents sharing a registry', async () => {
+    const registry = new SpawnRegistry()
+    const aliceSpawn = registry.register({
+      agentName: 'alice',
+      threadRef: { channelId: '!alice:hs', threadId: 'a' },
+      provider: fakeProvider({ getChannelInfo: async () => ({ id: '!alice:hs', name: 'alice', transport: 'matrix' }) }),
+    })
+    const bobSpawn = registry.register({
+      agentName: 'bob',
+      threadRef: { channelId: '!bob:hs', threadId: 'b' },
+      provider: fakeProvider({ getChannelInfo: async () => ({ id: '!bob:hs', name: 'bob', transport: 'matrix' }) }),
+    })
+    const runDir = mkdtempSync(join(tmpdir(), 'zooid-run-'))
+    const sockets = await startAgentSocketServers({ runDir, registry, agentNames: ['alice', 'bob'] })
+    cleanup.push(() => sockets.close())
+    expect(sockets.paths.alice).toBe(agentSocketPath({ runDir, agentName: 'alice' }))
+    await expect(callDaemon(sockets.paths.alice!, { spawnId: aliceSpawn, method: 'getChannelInfo', params: {} })).resolves.toMatchObject({ id: '!alice:hs' })
+    await expect(callDaemon(sockets.paths.bob!, { spawnId: aliceSpawn, method: 'getChannelInfo', params: {} })).rejects.toThrow(/binding not owned by caller/)
+    await expect(callDaemon(sockets.paths.bob!, { spawnId: bobSpawn, method: 'getChannelInfo', params: {} })).resolves.toMatchObject({ id: '!bob:hs' })
+  })
+
+  it('keeps other listeners serving when one bind fails', async () => {
+    const registry = new SpawnRegistry()
+    const sockets = await startAgentSocketServers({
+      runDir: mkdtempSync(join(tmpdir(), 'zooid-run-')),
+      registry,
+      agentNames: ['alice', 'bob'],
+      listen: async (path, name) => {
+        if (name === 'bob') throw new Error('EADDRINUSE')
+        return startDaemonSocketServer({ sockPath: path, registry, agentName: name })
+      },
+    })
+    cleanup.push(() => sockets.close())
+    expect(sockets.paths.alice).toBeDefined()
+    expect(sockets.paths.bob).toBeUndefined()
   })
 })

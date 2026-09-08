@@ -44,7 +44,7 @@ describe('buildAcpRegistry — context provider wiring', () => {
     const registry = buildAcpRegistry(matrixCfg, {
       approvals: { register: vi.fn(), on: vi.fn() } as never,
       contextSpawnRegistry: {} as never,
-      daemonSockPath: '/tmp/zooid-test.sock',
+      daemonSockPaths: { architect: '/tmp/zooid-test.sock' },
     })
     expect(registry.hasContextSpawn('architect')).toBe(true)
   })
@@ -59,7 +59,7 @@ describe('buildAcpRegistry — context provider wiring', () => {
     const registry = buildAcpRegistry(httpCfg, {
       approvals: { register: vi.fn(), on: vi.fn() } as never,
       contextSpawnRegistry: {} as never,
-      daemonSockPath: '/tmp/zooid-test.sock',
+      daemonSockPaths: { architect: '/tmp/zooid-test.sock' },
     })
     expect(registry.hasContextSpawn('architect')).toBe(false)
   })
@@ -77,7 +77,7 @@ describe('buildAcpRegistry — context provider in a container runtime', () => {
   const opts = {
     approvals: { register: vi.fn(), on: vi.fn() } as never,
     contextSpawnRegistry: { register: vi.fn(() => 'spawn-1') } as never,
-    daemonSockPath: '/home/ubuntu/hq/data/run/context.sock',
+    daemonSockPaths: { architect: '/home/ubuntu/hq/data/run/context.sock' },
     daemonHome: '/home/ubuntu',
   }
 

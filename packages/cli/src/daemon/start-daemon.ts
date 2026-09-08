@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { mkdir, unlink } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import type { AddressInfo } from 'node:net'
@@ -26,8 +26,8 @@ import {
   type PublisherHandle,
   type SyncLoop,
 } from '@zooid/transport-matrix'
-import { SpawnRegistry, startDaemonSocketServer, type DaemonSocketHandle } from '@zooid/context-mcp'
-import { buildAcpRegistry } from '../build-registry.js'
+import { SpawnRegistry, startAgentSocketServers, type AgentSocketsHandle } from '@zooid/context-mcp'
+import { buildAcpRegistry, contextEligibleAgents } from '../build-registry.js'
 import { installPiExtension, resolvePiAgentDir } from '../pi-extension-install.js'
 import { resolvePiExtensionBundle } from '@zooid/pi-extension'
 import { prepullImages } from '../prepull-images.js'
@@ -112,28 +112,24 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
 
   const approvals = new ApprovalCorrelator()
 
-  const daemonSockPath = opts.agentsDir
-    ? join(opts.agentsDir, '..', 'run', 'context.sock')
-    : join(tmpdir(), `zooid-context-${process.pid}.sock`)
-  await mkdir(dirname(daemonSockPath), { recursive: true }).catch(() => {})
+  const runDir = opts.agentsDir
+    ? join(opts.agentsDir, '..', 'run')
+    : join(tmpdir(), `zooid-context-${process.pid}`)
+  await mkdir(runDir, { recursive: true }).catch(() => {})
   const contextSpawnRegistry = new SpawnRegistry()
-  let contextSocket: DaemonSocketHandle | null = null
-  try {
-    contextSocket = await startDaemonSocketServer({
-      sockPath: daemonSockPath,
-      registry: contextSpawnRegistry,
-    })
-  } catch (err) {
-    console.warn('[context] daemon socket startup failed; zooid-context MCP disabled:', err)
-  }
+  const contextSockets: AgentSocketsHandle = await startAgentSocketServers({
+    runDir,
+    registry: contextSpawnRegistry,
+    agentNames: contextEligibleAgents(config),
+  })
 
   const dataDir = opts.agentsDir ? dirname(opts.agentsDir) : undefined
   const registry = buildAcpRegistry(config, {
     approvals,
     onTap: opts.onTap,
     agentsDir: opts.agentsDir,
-    contextSpawnRegistry: contextSocket ? contextSpawnRegistry : undefined,
-    daemonSockPath: contextSocket ? daemonSockPath : undefined,
+    contextSpawnRegistry,
+    daemonSockPaths: contextSockets.paths,
     configDir,
     dataDir,
     daemonHome: process.env.HOME,
@@ -177,13 +173,10 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     })
   }
 
-  console.log(
-    `[context] socket=${daemonSockPath} ` +
-      `status=${contextSocket ? 'listening' : 'disabled'} ` +
-      `agents={${agentNames
-        .map((n) => `${n}:${registry.hasContextSpawn(n) ? 'yes' : 'no'}`)
-        .join(', ')}}`,
-  )
+  console.log(`[context] runDir=${runDir}`)
+  for (const name of agentNames) {
+    console.log(`[context] agent=${name} socket=${contextSockets.paths[name] ?? '(disabled)'}`)
+  }
 
   let server: ServerType | null = null
   let syncLoops: SyncLoop[] | undefined
@@ -385,8 +378,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       console.error('stopAll:', err)
     }
     try {
-      if (contextSocket) await contextSocket.close()
-      await unlink(daemonSockPath).catch(() => {})
+      await contextSockets.close()
     } catch {
       // swallow
     }

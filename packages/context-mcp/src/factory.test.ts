@@ -82,6 +82,16 @@ describe('contextContainerMounts', () => {
     ])
   })
 
+  it('uses each agent host socket at the same container target', () => {
+    const alice = contextContainerMounts({ sockPath: '/data/run/context-alice.sock' })
+    const bob = contextContainerMounts({ sockPath: '/data/run/context-bob.sock' })
+    const aliceSocket = alice.find((mount) => mount.target === CONTEXT_CONTAINER_SOCK)!
+    const bobSocket = bob.find((mount) => mount.target === CONTEXT_CONTAINER_SOCK)!
+    expect(aliceSocket.path).not.toBe(bobSocket.path)
+    expect(aliceSocket).toMatchObject({ target: CONTEXT_CONTAINER_SOCK, mode: 'rw' })
+    expect(bobSocket.target).toBe(CONTEXT_CONTAINER_SOCK)
+  })
+
   it('defaults the bin dir to the resolved package dist on disk', () => {
     const mounts = contextContainerMounts({ sockPath: '/tmp/x.sock' })
     const binMount = mounts.find((m) => m.target === CONTEXT_CONTAINER_BIN_DIR)!

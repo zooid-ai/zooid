@@ -44,7 +44,7 @@ describe('daemon-socket', () => {
       provider: defaultProvider,
     })
     const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
-    const server = await startDaemonSocketServer({ sockPath, registry })
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
     cleanup.push(() => server.close())
 
     const res = await callDaemon(sockPath, {
@@ -91,7 +91,7 @@ describe('daemon-socket', () => {
       provider,
     })
     const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
-    const server = await startDaemonSocketServer({ sockPath, registry })
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
     cleanup.push(() => server.close())
 
     const overview = (await callDaemon(sockPath, {
@@ -112,12 +112,12 @@ describe('daemon-socket', () => {
   it('returns an error envelope for unknown spawn-ids', async () => {
     const registry = new SpawnRegistry()
     const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
-    const server = await startDaemonSocketServer({ sockPath, registry })
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
     cleanup.push(() => server.close())
 
     await expect(
       callDaemon(sockPath, { spawnId: 'unknown', method: 'getRoomHistory', params: {} }),
-    ).rejects.toThrow(/unknown spawn/i)
+    ).rejects.toThrow(/binding not owned by caller/)
   })
 
   it('routes getChannelMembers and getChannelInfo', async () => {
@@ -128,7 +128,7 @@ describe('daemon-socket', () => {
       provider: defaultProvider,
     })
     const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
-    const server = await startDaemonSocketServer({ sockPath, registry })
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
     cleanup.push(() => server.close())
 
     const members = await callDaemon(sockPath, { spawnId, method: 'getChannelMembers', params: {} })
@@ -155,17 +155,17 @@ describe('daemon-socket', () => {
     })
     const registry = new SpawnRegistry()
     const spawnA = registry.register({
-      agentName: 'architect',
+      agentName: 'a',
       threadRef: { channelId: '!a:hs', threadId: '!a:hs' },
       provider: providerA,
     })
     const spawnB = registry.register({
-      agentName: 'product-owner',
+      agentName: 'a',
       threadRef: { channelId: '!b:hs', threadId: '!b:hs' },
       provider: providerB,
     })
     const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
-    const server = await startDaemonSocketServer({ sockPath, registry })
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
     cleanup.push(() => server.close())
 
     const [resA, resB] = await Promise.all([
@@ -200,12 +200,12 @@ describe('daemon-socket', () => {
       provider: providerA,
     })
     const spawnB = registry.register({
-      agentName: 'b',
+      agentName: 'a',
       threadRef: { channelId: 'b', threadId: 'b' },
       provider: providerB,
     })
     const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
-    const server = await startDaemonSocketServer({ sockPath, registry })
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
     cleanup.push(() => server.close())
 
     for (let i = 0; i < 20; i++) {
@@ -230,7 +230,7 @@ describe('close()', () => {
     // `zooid dev` hung on shutdown for as long as those processes lived.
     const sockPath = join(tmpdir(), `zooid-close-${randomUUID()}.sock`)
     const registry = new SpawnRegistry()
-    const handle = await startDaemonSocketServer({ sockPath, registry })
+    const handle = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
 
     const client = createConnection(sockPath)
     await new Promise<void>((resolve, reject) => {
@@ -246,3 +246,41 @@ describe('close()', () => {
     expect(closed).toBe('closed')
   })
 })
+
+describe('daemon-socket caller identity', () => {
+  it('refuses bindings belonging to another agent through either addressing key', async () => {
+    const registry = new SpawnRegistry()
+    const spawnId = registry.register({
+      agentName: 'alice', threadRef: { channelId: 'c', threadId: 't' }, provider: defaultProvider, sessionKey: 't',
+    })
+    registry.linkSession('alice', 't', 'acp-session-1')
+    const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'bob' })
+    cleanup.push(() => server.close())
+
+    await expect(callDaemon(sockPath, { spawnId, method: 'getRoomHistory', params: {} })).rejects.toThrow(NOT_OWNED)
+    await expect(callDaemon(sockPath, { acpSessionId: 'acp-session-1', method: 'getChannelMembers', params: {} })).rejects.toThrow(NOT_OWNED)
+  })
+
+  it('serves its owner and makes unknown and unowned ids indistinguishable', async () => {
+    const registry = new SpawnRegistry()
+    const spawnId = registry.register({
+      agentName: 'alice', threadRef: { channelId: 'c', threadId: 't' }, provider: defaultProvider,
+    })
+    const alicePath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
+    const bobPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
+    const alice = await startDaemonSocketServer({ sockPath: alicePath, registry, agentName: 'alice' })
+    const bob = await startDaemonSocketServer({ sockPath: bobPath, registry, agentName: 'bob' })
+    cleanup.push(() => alice.close())
+    cleanup.push(() => bob.close())
+
+    await expect(callDaemon(alicePath, { spawnId, method: 'getChannelMembers', params: {} })).resolves.toEqual([
+      { id: '@alice:hs', name: 'alice', is_agent: false },
+    ])
+    const unowned = await callDaemon(bobPath, { spawnId, method: 'getChannelInfo', params: {} }).catch((e: Error) => e.message)
+    const unknown = await callDaemon(bobPath, { acpSessionId: 'no-such-session', method: 'getChannelInfo', params: {} }).catch((e: Error) => e.message)
+    expect(unowned).toBe(unknown)
+  })
+})
+
+const NOT_OWNED = 'binding not owned by caller'

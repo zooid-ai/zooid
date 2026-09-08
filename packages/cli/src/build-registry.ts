@@ -37,13 +37,13 @@ export interface BuildAcpRegistryOptions {
   agentsDir?: string
   /**
    * Per-spawn binding store for the zooid-context MCP server. When set
-   * together with `daemonSockPath`, agents bound to a transport that owns
+   * together with `daemonSockPaths`, agents bound to a transport that owns
    * conversation context get a `contextSpawn` factory threaded into their
    * AcpClient so `session/new mcpServers` includes the zooid-context entry.
    */
   contextSpawnRegistry?: SpawnRegistry
-  /** Path to the daemon's context Unix socket. Passed to the MCP server bin. */
-  daemonSockPath?: string
+  /** Agent → host path to that agent's context Unix socket. */
+  daemonSockPaths?: Record<string, string | undefined>
   /**
    * Directory containing zooid.yaml. Required when any agent uses the
    * workspace auto-mount (the default under `runtime: docker | podman`):
@@ -275,12 +275,14 @@ export function buildAcpRegistry(
 
   // Extensions run in the agent process (rather than an MCP child), so all
   // context-enabled agents inherit the daemon socket address directly.
-  if (opts.daemonSockPath && contextSpawns) {
+  if (contextSpawns) {
     for (const name of Object.keys(cfg.agents)) {
       if (!contextSpawns[name]) continue
+      const agentSock = opts.daemonSockPaths?.[name]
+      if (!agentSock) continue
       env[name] = {
         ZOOID_DAEMON_SOCK:
-          cfg.runtime === 'local' ? opts.daemonSockPath : CONTEXT_CONTAINER_SOCK,
+          cfg.runtime === 'local' ? agentSock : CONTEXT_CONTAINER_SOCK,
         ...env[name],
       }
     }
@@ -290,12 +292,14 @@ export function buildAcpRegistry(
   // its container, so the daemon socket + the (self-contained) bin must be
   // bind-mounted in. Local runtime needs neither — the host spec resolves
   // directly. Only agents that actually got a context factory get the mounts.
-  if (cfg.runtime !== 'local' && opts.daemonSockPath && contextSpawns) {
+  if (cfg.runtime !== 'local' && contextSpawns) {
     for (const name of Object.keys(cfg.agents)) {
       if (!contextSpawns[name]) continue
+      const agentSock = opts.daemonSockPaths?.[name]
+      if (!agentSock) continue
       mountsByAgent[name] = [
         ...(mountsByAgent[name] ?? []),
-        ...contextContainerMounts({ sockPath: opts.daemonSockPath }),
+        ...contextContainerMounts({ sockPath: agentSock }),
       ]
     }
   }
@@ -321,9 +325,8 @@ function buildContextSpawns(
   cfg: ZooidConfig,
   opts: BuildAcpRegistryOptions,
 ): Record<string, ContextSpawnFactory | undefined> | undefined {
-  if (!opts.contextSpawnRegistry || !opts.daemonSockPath) return undefined
+  if (!opts.contextSpawnRegistry || !opts.daemonSockPaths) return undefined
   const registry = opts.contextSpawnRegistry
-  const sockPath = opts.daemonSockPath
 
   const matrixClients = new Map<string, MatrixClient>()
   const agentBots = new Map<string, string>()
@@ -340,7 +343,8 @@ function buildContextSpawns(
 
   const result: Record<string, ContextSpawnFactory | undefined> = {}
   for (const [name, agent] of Object.entries(cfg.agents)) {
-    if (agent.matrix && matrixClients.has(agent.matrix.transport)) {
+    const sockPath = opts.daemonSockPaths[name]
+    if (agent.matrix && matrixClients.has(agent.matrix.transport) && sockPath) {
       const client = matrixClients.get(agent.matrix.transport)!
       const provider: TransportContextProvider = new MatrixContextProvider({
         client,
@@ -365,6 +369,18 @@ function buildContextSpawns(
     }
   }
   return result
+}
+
+/** Agents on configured Matrix transports get a context listener and binding. */
+export function contextEligibleAgents(cfg: ZooidConfig): string[] {
+  const matrixTransports = new Set(
+    Object.entries(cfg.transports)
+      .filter(([, transport]) => transport.type === 'matrix')
+      .map(([name]) => name),
+  )
+  return Object.entries(cfg.agents)
+    .filter(([, agent]) => agent.matrix && matrixTransports.has(agent.matrix.transport))
+    .map(([name]) => name)
 }
 
 function defaultRuntimeFor(cfg: ZooidConfig): AcpRuntime {

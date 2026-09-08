@@ -2,6 +2,7 @@ import { createServer, createConnection, type Server, type Socket } from 'node:n
 import { unlink } from 'node:fs/promises'
 import type { SpawnRegistry } from './spawn-registry.js'
 import type { CompleteTaskInput, StartTasksInput } from '@zooid/core'
+import { agentSocketPath } from './socket-paths.js'
 
 export interface DaemonRequest {
   spawnId?: string
@@ -31,9 +32,20 @@ export interface DaemonSocketHandle {
   close(): Promise<void>
 }
 
+export interface AgentSocketsHandle {
+  /** Agent → host socket path. A missing path means its listener failed. */
+  paths: Record<string, string | undefined>
+  close(): Promise<void>
+}
+
+/** Same wire error for absent and foreign bindings, so sockets are not an ID oracle. */
+const NOT_OWNED = 'binding not owned by caller'
+
 export async function startDaemonSocketServer(opts: {
   sockPath: string
   registry: SpawnRegistry
+  /** The only agent whose bindings this listener may serve. */
+  agentName: string
 }): Promise<DaemonSocketHandle> {
   await unlink(opts.sockPath).catch(() => {})
   // net.Server.close() waits for every open connection and — unlike
@@ -56,7 +68,7 @@ export async function startDaemonSocketServer(opts: {
         const line = buf.slice(0, idx)
         buf = buf.slice(idx + 1)
         if (!line) continue
-        await handleLine(line, socket, opts.registry)
+        await handleLine(line, socket, opts.registry, opts.agentName)
       }
     })
     socket.on('error', () => {})
@@ -81,7 +93,12 @@ export async function startDaemonSocketServer(opts: {
   }
 }
 
-async function handleLine(line: string, socket: Socket, registry: SpawnRegistry) {
+async function handleLine(
+  line: string,
+  socket: Socket,
+  registry: SpawnRegistry,
+  callerAgent: string,
+) {
   let req: DaemonRequest
   try {
     req = JSON.parse(line) as DaemonRequest
@@ -107,9 +124,17 @@ async function handleLine(line: string, socket: Socket, registry: SpawnRegistry)
     socket.write(
       JSON.stringify({
         ok: false,
-        error: req.acpSessionId ? `unknown session: ${req.acpSessionId}` : `unknown spawn-id: ${req.spawnId ?? ''}`,
+        error: NOT_OWNED,
       } satisfies DaemonError) + '\n',
     )
+    return
+  }
+  if (binding.agentName !== callerAgent) {
+    process.stderr.write(
+      `[context-mcp] daemon: refused ${req.method} — binding owned by ${binding.agentName}, ` +
+        `caller is ${callerAgent}\n`,
+    )
+    socket.write(JSON.stringify({ ok: false, error: NOT_OWNED } satisfies DaemonError) + '\n')
     return
   }
   process.stderr.write(
@@ -167,6 +192,43 @@ async function handleLine(line: string, socket: Socket, registry: SpawnRegistry)
         error: String(err instanceof Error ? err.message : err),
       } satisfies DaemonError) + '\n',
     )
+  }
+}
+
+/** Start independent context listeners; a bind failure disables only that agent. */
+export async function startAgentSocketServers(opts: {
+  runDir: string
+  registry: SpawnRegistry
+  agentNames: string[]
+  listen?: (sockPath: string, agentName: string) => Promise<DaemonSocketHandle>
+}): Promise<AgentSocketsHandle> {
+  const listen =
+    opts.listen ??
+    ((sockPath: string, agentName: string) =>
+      startDaemonSocketServer({ sockPath, registry: opts.registry, agentName }))
+  const derived = opts.agentNames.map((agentName) => ({
+    agentName,
+    sockPath: agentSocketPath({ runDir: opts.runDir, agentName }),
+  }))
+  const paths: Record<string, string | undefined> = {}
+  const handles: Array<{ handle: DaemonSocketHandle; path: string }> = []
+  for (const { agentName, sockPath } of derived) {
+    try {
+      const handle = await listen(sockPath, agentName)
+      paths[agentName] = sockPath
+      handles.push({ handle, path: sockPath })
+    } catch (err) {
+      console.warn(`[context] socket bind failed for agent=${agentName}; context disabled for it:`, err)
+    }
+  }
+  return {
+    paths,
+    close: async () => {
+      for (const { handle, path } of handles) {
+        await handle.close()
+        await unlink(path).catch(() => {})
+      }
+    },
   }
 }
 
