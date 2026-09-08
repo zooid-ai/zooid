@@ -28,7 +28,7 @@ import {
 } from '@zooid/transport-matrix'
 import { SpawnRegistry, startDaemonSocketServer, type DaemonSocketHandle } from '@zooid/context-mcp'
 import { buildAcpRegistry } from '../build-registry.js'
-import { installPiExtension } from '../pi-extension-install.js'
+import { installPiExtension, resolvePiAgentDir } from '../pi-extension-install.js'
 import { resolvePiExtensionBundle } from '@zooid/pi-extension'
 import { prepullImages } from '../prepull-images.js'
 import { mountPushGateway } from '../push-gateway/index.js'
@@ -140,14 +140,31 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   })
   const agentNames = Object.keys(config.agents)
 
-  if (agentNames.some((name) => (config.agents[name].acp as { preset?: string } | undefined)?.preset === 'pi')) {
-    const result = installPiExtension({
-      daemonHome: process.env.HOME ?? '',
-      bundlePath: resolvePiExtensionBundle(),
-    })
-    const where = result.target ? ` extension=${result.target}` : ''
-    const why = result.reason ? ` reason=${result.reason}` : ''
-    console.log(`[pi]${where} status=${result.status}${why}`)
+  const piAgents = agentNames.filter(
+    (name) => (config.agents[name].acp as { preset?: string } | undefined)?.preset === 'pi',
+  )
+  if (piAgents.length > 0) {
+    const bundlePath = resolvePiExtensionBundle()
+    // PI_CODING_AGENT_DIR is normally relative, so each agent gets its own
+    // extensions dir; an absolute value (or none) collapses them into one.
+    const installed = new Set<string>()
+    for (const name of piAgents) {
+      const { dir, scope } = resolvePiAgentDir({
+        agentWorkdir: resolve(configDir, config.agents[name].workdir),
+        daemonHome: process.env.HOME ?? '',
+        env: process.env,
+      })
+      if (installed.has(dir)) continue
+      installed.add(dir)
+      const result = installPiExtension({
+        agentDir: dir,
+        bundlePath,
+        createMissing: scope === 'project',
+      })
+      const where = result.target ? ` extension=${result.target}` : ''
+      const why = result.reason ? ` reason=${result.reason}` : ''
+      console.log(`[pi] agent=${name}${where} status=${result.status}${why}`)
+    }
   }
 
   if (config.runtime !== 'local') {
