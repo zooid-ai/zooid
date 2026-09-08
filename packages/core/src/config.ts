@@ -16,9 +16,12 @@ import type {
   RoomBinding,
   TransportConfig,
   TriggerConfig,
+  WebhookTriggerConfig,
   ZooidConfig,
   ZooidContainerConfig,
 } from './types.js'
+
+const WEBHOOK_PROVIDERS = ['github', 'stripe', 'slack', 'standard', 'custom'] as const
 
 const SLUG_RE = /^[a-z0-9-]+$/
 
@@ -849,6 +852,8 @@ function parseTriggers(
   agents: Record<string, AgentConfig>,
   transports: Record<string, TransportConfig>,
   validateCron: (name: string, expr: string) => void,
+  processEnv: NodeJS.ProcessEnv,
+  configDir: string | undefined,
 ): Record<string, TriggerConfig> {
   if (raw === undefined || raw === null) return {}
   if (typeof raw !== 'object' || Array.isArray(raw)) {
@@ -868,13 +873,26 @@ function parseTriggers(
       )
     }
 
-    if (t.schedule === undefined) {
-      throw new Error(`triggers.${name}: must specify schedule:`)
+    if (t.schedule === undefined && t.webhook === undefined) {
+      throw new Error(`triggers.${name}: must specify schedule: or webhook:`)
     }
-    if (typeof t.schedule !== 'string' || t.schedule.length === 0) {
-      throw new Error(`triggers.${name}.schedule: must be a non-empty string`)
+    if (t.schedule !== undefined && t.webhook !== undefined) {
+      throw new Error(`triggers.${name}: specify either schedule: or webhook:, not both`)
     }
-    validateCron(name, t.schedule)
+
+    let schedule: string | undefined
+    if (t.schedule !== undefined) {
+      if (typeof t.schedule !== 'string' || t.schedule.length === 0) {
+        throw new Error(`triggers.${name}.schedule: must be a non-empty string`)
+      }
+      validateCron(name, t.schedule)
+      schedule = t.schedule
+    }
+
+    let webhook: WebhookTriggerConfig | undefined
+    if (t.webhook !== undefined) {
+      webhook = parseWebhookTrigger(name, t.webhook, processEnv, configDir)
+    }
 
     if (typeof t.as !== 'string' || t.as.length === 0) {
       throw new Error(`triggers.${name}.as: must be a non-empty string`)
@@ -918,15 +936,97 @@ function parseTriggers(
       throw new Error(`triggers.${name}.text: must be a non-empty string`)
     }
 
-    result[name] = {
-      schedule: t.schedule,
+    const entry: TriggerConfig = {
       as,
       room: t.room,
       mention: t.mention,
       text: t.text,
     }
+    if (schedule !== undefined) entry.schedule = schedule
+    if (webhook !== undefined) entry.webhook = webhook
+    result[name] = entry
   }
   return result
+}
+
+/**
+ * Parse and validate a `webhook:` block. The secret is interpolated through
+ * `interpolateString` (not `interpolateEnv`'s deny-listed map form) — it is a
+ * single scalar value, and `ZOOID_*` references are legitimate here just as
+ * they are for a transport's `as_token` — [[ZOD082]] §Design 4, Secrets.
+ */
+function parseWebhookTrigger(
+  name: string,
+  raw: unknown,
+  processEnv: NodeJS.ProcessEnv,
+  configDir: string | undefined,
+): WebhookTriggerConfig {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`triggers.${name}.webhook: must be a mapping`)
+  }
+  const w = raw as Record<string, unknown>
+
+  if (typeof w.provider !== 'string' || w.provider.length === 0) {
+    throw new Error(`triggers.${name}.webhook.provider: must be a non-empty string`)
+  }
+  if (!(WEBHOOK_PROVIDERS as readonly string[]).includes(w.provider)) {
+    throw new Error(
+      `triggers.${name}.webhook.provider: unknown provider ${JSON.stringify(w.provider)} ` +
+        `(expected one of: ${WEBHOOK_PROVIDERS.join(', ')})`,
+    )
+  }
+  const provider = w.provider as WebhookTriggerConfig['provider']
+
+  let event: string | undefined
+  if (w.event !== undefined) {
+    if (typeof w.event !== 'string' || w.event.length === 0) {
+      throw new Error(`triggers.${name}.webhook.event: must be a non-empty string`)
+    }
+    event = w.event
+  }
+
+  if (typeof w.secret !== 'string' || w.secret.length === 0) {
+    throw new Error(`triggers.${name}.webhook.secret: is required`)
+  }
+  const secret = interpolateString(w.secret, processEnv)
+
+  const config: WebhookTriggerConfig = { provider, secret }
+  if (event !== undefined) config.event = event
+
+  if (provider !== 'custom') {
+    // Silently ignoring this would leave an operator believing they had
+    // configured a verifier that never ran.
+    if (w.verify !== undefined) {
+      throw new Error(
+        `triggers.${name}.webhook.verify: only applies to provider: custom ` +
+          `(this trigger uses provider: ${provider}, whose signing scheme is built in)`,
+      )
+    }
+    return config
+  }
+
+  // provider: custom — verification is a function the operator supplies,
+  // since no set of declarative fields covers every scheme (ed25519, SHA-1
+  // over sorted params, bespoke timestamped base strings). Resolved here;
+  // the daemon imports it at startup so a bad path fails fast.
+  if (typeof w.verify !== 'string' || w.verify.length === 0) {
+    throw new Error(
+      `triggers.${name}.webhook.verify: is required when provider: custom ` +
+        `(path to a module exporting the verifier function)`,
+    )
+  }
+  if (isAbsolute(w.verify)) {
+    config.verify = w.verify
+  } else if (!configDir) {
+    throw new Error(
+      `triggers.${name}.webhook.verify: relative path ${JSON.stringify(w.verify)} requires ` +
+        `configDir (zooid.yaml directory) — pass it via loadZooidConfig(yaml, { configDir })`,
+    )
+  } else {
+    config.verify = pathResolve(configDir, w.verify)
+  }
+
+  return config
 }
 
 function parseRuntime(raw: unknown): 'local' | 'docker' | 'podman' {
@@ -1004,6 +1104,8 @@ export function loadZooidConfig(
     agents,
     transports,
     opts.validateCron ?? defaultValidateCron,
+    processEnv,
+    opts.configDir,
   )
 
   const cfg: ZooidConfig = {

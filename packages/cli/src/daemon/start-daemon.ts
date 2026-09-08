@@ -36,6 +36,8 @@ import { makeSyncCursorStore } from './sync-cursors.js'
 import { makeTaskJournal } from './task-journal.js'
 import { shouldBindHttpListener } from './pull-wiring.js'
 import { startTriggerScheduler, validateCron } from './trigger-scheduler.js'
+import { mountWebhookRoutes } from './webhook-routes.js'
+import { loadCustomVerifiers } from './load-custom-verifiers.js'
 
 export interface StartDaemonOpts {
   configPath?: string
@@ -321,24 +323,56 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
 
     if (Object.keys(config.triggers).length > 0) {
       const agentUserIds = Object.fromEntries(bindings.map((b) => [b.name, b.userId]))
+      const resolveRoom = async (r: string): Promise<string | null> =>
+        r.startsWith('!') ? r : await client.resolveAlias(r)
+      const ensureBot = async (mxid: string, roomId: string): Promise<void> => {
+        await client.registerBot(localpart(mxid)).catch(() => {})
+        // Agent rooms are created restricted to workforce-space members
+        // (BotPool.bootstrap): a trigger bot needs space membership too,
+        // or its join to the target room 403s.
+        if (spaceRoomId) {
+          await client.invite({ roomId: spaceRoomId, asUserId, targetUserId: mxid }).catch(() => {})
+          await client.joinRoom(spaceRoomId, mxid).catch(() => {})
+        }
+        await client.joinRoom(roomId, mxid)
+      }
       triggers = startTriggerScheduler({
         triggers: config.triggers,
         agentUserIds,
-        resolveRoom: async (r) => (r.startsWith('!') ? r : await client.resolveAlias(r)),
-        ensureBot: async (mxid, roomId) => {
-          await client.registerBot(localpart(mxid)).catch(() => {})
-          // Agent rooms are created restricted to workforce-space members
-          // (BotPool.bootstrap): a trigger bot needs space membership too,
-          // or its join to the target room 403s.
-          if (spaceRoomId) {
-            await client.invite({ roomId: spaceRoomId, asUserId, targetUserId: mxid }).catch(() => {})
-            await client.joinRoom(spaceRoomId, mxid).catch(() => {})
-          }
-          await client.joinRoom(roomId, mxid)
-        },
+        resolveRoom,
+        ensureBot,
         sendMessage: (m) => client.sendMessage(m),
       })
-      console.log(`[trigger] scheduled ${Object.keys(config.triggers).length} trigger(s)`)
+      const scheduled = Object.values(config.triggers).filter((t) => t.schedule).length
+      if (scheduled > 0) console.log(`[trigger] scheduled ${scheduled} trigger(s)`)
+
+      // Webhook triggers ride the appservice listener, alongside the push
+      // gateway. A separate port would buy no isolation — same process — and
+      // the AS transaction endpoint is already internet-reachable under
+      // [ZOD063]. What matters is that each route authenticates its own
+      // callers: hs_token for transactions, HMAC for webhooks.
+      const webhookTriggers = Object.entries(config.triggers).filter(([, t]) => t.webhook)
+      if (webhookTriggers.length > 0) {
+        if (!shouldBindHttpListener(mode)) {
+          console.warn(
+            `[webhook] ${webhookTriggers.length} webhook trigger(s) configured, but pull mode ` +
+              `binds no inbound listener — these will never fire.`,
+          )
+        } else {
+          // Imported before serving so a bad `verify:` path fails the daemon
+          // start, not the first delivery.
+          const customVerifiers = await loadCustomVerifiers(config.triggers)
+          mountWebhookRoutes(transport.app, {
+            triggers: config.triggers,
+            customVerifiers,
+            agentUserIds,
+            resolveRoom,
+            ensureBot,
+            sendMessage: (m) => client.sendMessage(m),
+          })
+          for (const [name] of webhookTriggers) console.log(`[webhook] POST /webhook/${name}`)
+        }
+      }
     }
 
     // Pull mode: start the outbound /sync loops after bootstrap so the rooms

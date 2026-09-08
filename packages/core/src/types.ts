@@ -288,19 +288,45 @@ export interface CliFlags {
 }
 
 /**
+ * A webhook trigger: exposes `POST /webhook/<name>`, verifies an HMAC
+ * signature over the raw request body, and fires like a schedule trigger
+ * once accepted. See [[ZOD082]] §Design 4.
+ */
+export interface WebhookTriggerConfig {
+  provider: 'github' | 'stripe' | 'slack' | 'standard' | 'custom'
+  /** Provider event name to accept; other events are acknowledged and ignored. */
+  event?: string
+  /** Required. Interpolated from env — see [[ZOD081]] §Design 4, Secrets. */
+  secret: string
+  /**
+   * `custom` only, required: path to a module exporting the verifier
+   * function, resolved to an absolute path against the zooid.yaml directory
+   * at parse time. The escape hatch for any scheme without a named provider
+   * — ed25519, SHA-1 over sorted params, bespoke timestamped base strings.
+   * Code rather than declarative fields, because a config language for
+   * signing schemes is a security-critical mini-DSL that still would not
+   * cover them all. The daemon imports it at startup — see
+   * `loadCustomVerifiers` in the CLI.
+   */
+  verify?: string
+}
+
+/**
  * A schedule trigger: fires on a cron and posts `text` into `room` as `as`,
  * structurally mentioning `mention` so the agent starts a fresh turn through
  * the ordinary message path. No emitter/command tier — see [[ZOD081]] §Concept.
  */
 export interface TriggerConfig {
-  /** Cron expression. `webhook:` joins this as an alternative in [[ZOD082]]. */
+  /** Cron expression. Mutually exclusive with `webhook:` — exactly one is required. */
   schedule?: string
+  /** Webhook ingress config. Mutually exclusive with `schedule:` — [[ZOD082]]. */
+  webhook?: WebhookTriggerConfig
   /** Full MXID the trigger posts as, e.g. `@cron:example.org`. */
   as: string
   /** Room id or alias the message goes to. */
   room: string
   /** Agent name (key in `agents`) to mention. Structural, never templated — §Design 3. */
   mention: string
-  /** The message body. Literal for a scheduled trigger. */
+  /** The message body. Literal for a scheduled trigger; `${output}` is filled for a webhook trigger. */
   text: string
 }
