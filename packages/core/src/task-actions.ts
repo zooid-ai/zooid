@@ -23,6 +23,9 @@ export type StartTaskResult =
     }
 export interface StartTasksOutput {
   results: StartTaskResult[]
+  notify: 'caller' | 'none'
+  /** Stated at the point of decision, where the model actually reads it. */
+  delivery: string
 }
 export interface CompleteTaskInput {
   summary: string
@@ -31,9 +34,15 @@ export interface CompleteTaskOutput {
   status: 'recorded' | 'already_recorded' | 'refused'
   reason?: string
 }
+/** What this session is, so the surface can gate itself instead of refusing later. */
+export interface TaskRole {
+  is_task_assignee: boolean
+  can_start_task_threads: boolean
+}
 export interface TaskActions {
   startTasks(caller: TaskCallerRef, input: StartTasksInput): Promise<StartTasksOutput>
   completeTask(caller: TaskCallerRef, input: CompleteTaskInput): Promise<CompleteTaskOutput>
+  describeRole(caller: TaskCallerRef): Promise<TaskRole>
 }
 /** One in-thread handoff inside a delegated task. */
 export type InvocationState = 'outstanding' | 'returned' | 'cancelled'

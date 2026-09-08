@@ -26,7 +26,7 @@ function fakeProvider(over: Partial<TransportContextProvider> = {}): TransportCo
     getRecentThreads: async () => ({ threads: [], has_more: false }),
     getThreadHistory: async () => ({ messages: [], has_more: false }),
     getChannelMembers: async () => [],
-    getChannelInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
+    getRoomInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
     ...over,
   }
 }
@@ -68,15 +68,18 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
       await client.close()
     })
 
+    // No taskActions registered on this registry, so the daemon-side
+    // describeRole query fails, bin.ts's role stays undefined, and neither
+    // task tool registers ([[ZOD084]] role-conditional registration).
     const list = await client.listTools()
     expect(list.tools.map((t) => t.name).sort()).toEqual([
-      'zooid_complete_task',
-      'zooid_get_channel_info',
       'zooid_get_history',
       'zooid_get_members',
       'zooid_get_recent_threads',
+      'zooid_get_room_info',
+      'zooid_get_rooms',
       'zooid_get_thread_history',
-      'zooid_start_tasks',
+      'zooid_send_message',
     ])
 
     const result = await client.callTool({
@@ -101,7 +104,7 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
         ],
         has_more: false,
       }),
-      getChannelInfo: async () => ({
+      getRoomInfo: async () => ({
         id: '!a:hs',
         name: 'room-A',
         transport: 'matrix',
@@ -120,7 +123,7 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
         ],
         has_more: false,
       }),
-      getChannelInfo: async () => ({
+      getRoomInfo: async () => ({
         id: '!b:hs',
         name: 'room-B',
         transport: 'matrix',
@@ -167,11 +170,11 @@ describe.skipIf(!existsSync(BIN))('zooid-context MCP server (out-of-process)', (
     expect(payloadB.messages[0].id).toBe('B1')
 
     const infoA = await clientA.callTool({
-      name: 'zooid_get_channel_info',
+      name: 'zooid_get_room_info',
       arguments: {},
     })
     const infoB = await clientB.callTool({
-      name: 'zooid_get_channel_info',
+      name: 'zooid_get_room_info',
       arguments: {},
     })
     expect(JSON.parse((infoA.content as Array<{ text: string }>)[0].text).id).toBe('!a:hs')
@@ -185,20 +188,20 @@ describe('per-agent sockets (integration)', () => {
     const aliceSpawn = registry.register({
       agentName: 'alice',
       threadRef: { channelId: '!alice:hs', threadId: 'a' },
-      provider: fakeProvider({ getChannelInfo: async () => ({ id: '!alice:hs', name: 'alice', transport: 'matrix' }) }),
+      provider: fakeProvider({ getRoomInfo: async () => ({ id: '!alice:hs', name: 'alice', transport: 'matrix' }) }),
     })
     const bobSpawn = registry.register({
       agentName: 'bob',
       threadRef: { channelId: '!bob:hs', threadId: 'b' },
-      provider: fakeProvider({ getChannelInfo: async () => ({ id: '!bob:hs', name: 'bob', transport: 'matrix' }) }),
+      provider: fakeProvider({ getRoomInfo: async () => ({ id: '!bob:hs', name: 'bob', transport: 'matrix' }) }),
     })
     const runDir = mkdtempSync(join(tmpdir(), 'zooid-run-'))
     const sockets = await startAgentSocketServers({ runDir, registry, agentNames: ['alice', 'bob'] })
     cleanup.push(() => sockets.close())
     expect(sockets.paths.alice).toBe(agentSocketPath({ runDir, agentName: 'alice' }))
-    await expect(callDaemon(sockets.paths.alice!, { spawnId: aliceSpawn, method: 'getChannelInfo', params: {} })).resolves.toMatchObject({ id: '!alice:hs' })
-    await expect(callDaemon(sockets.paths.bob!, { spawnId: aliceSpawn, method: 'getChannelInfo', params: {} })).rejects.toThrow(/binding not owned by caller/)
-    await expect(callDaemon(sockets.paths.bob!, { spawnId: bobSpawn, method: 'getChannelInfo', params: {} })).resolves.toMatchObject({ id: '!bob:hs' })
+    await expect(callDaemon(sockets.paths.alice!, { spawnId: aliceSpawn, method: 'getRoomInfo', params: {} })).resolves.toMatchObject({ id: '!alice:hs' })
+    await expect(callDaemon(sockets.paths.bob!, { spawnId: aliceSpawn, method: 'getRoomInfo', params: {} })).rejects.toThrow(/binding not owned by caller/)
+    await expect(callDaemon(sockets.paths.bob!, { spawnId: bobSpawn, method: 'getRoomInfo', params: {} })).resolves.toMatchObject({ id: '!bob:hs' })
   })
 
   it('keeps other listeners serving when one bind fails', async () => {

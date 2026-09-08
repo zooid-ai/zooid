@@ -4,7 +4,9 @@ import type {
   HistoryPage,
   Message,
   Member,
-  ChannelInfo,
+  RoomInfo,
+  SendMessageInput,
+  SendMessageResult,
   ThreadOverviewPage,
 } from './transport-context.js'
 
@@ -20,11 +22,16 @@ describe('TransportContextProvider', () => {
     >()
     expectTypeOf<TransportContextProvider['getThreadHistory']>().returns.resolves.toEqualTypeOf<HistoryPage>()
     expectTypeOf<TransportContextProvider['getChannelMembers']>().returns.resolves.toEqualTypeOf<Member[]>()
-    expectTypeOf<TransportContextProvider['getChannelInfo']>().returns.resolves.toEqualTypeOf<ChannelInfo>()
+    expectTypeOf<TransportContextProvider['getRoomInfo']>().returns.resolves.toEqualTypeOf<RoomInfo>()
+    expectTypeOf<TransportContextProvider['getRooms']>().returns.resolves.toEqualTypeOf<RoomInfo[]>()
+    expectTypeOf<TransportContextProvider['sendMessage']>().parameters.toEqualTypeOf<
+      [SendMessageInput]
+    >()
+    expectTypeOf<TransportContextProvider['sendMessage']>().returns.resolves.toEqualTypeOf<SendMessageResult>()
   })
 
-  it('ChannelInfo.transport is the two-transport MVP union', () => {
-    expectTypeOf<ChannelInfo['transport']>().toEqualTypeOf<'http' | 'matrix'>()
+  it('RoomInfo.transport is the two-transport MVP union', () => {
+    expectTypeOf<RoomInfo['transport']>().toEqualTypeOf<'http' | 'matrix'>()
   })
 
   it('Message and Member carry the is_agent flag', () => {

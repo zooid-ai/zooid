@@ -143,8 +143,8 @@ describe.skipIf(!dockerAvailable())('MatrixContextProvider against tuwunel', () 
     expect(threadTexts).toEqual(['kickoff topic', 'reply A', 'reply B'])
     expect(thread.messages.every((m) => m.thread_id === root)).toBe(true)
 
-    // 4. getChannelInfo + getChannelMembers
-    const info = await provider.getChannelInfo(roomId)
+    // 4. getRoomInfo + getChannelMembers
+    const info = await provider.getRoomInfo(roomId)
     expect(info).toEqual({ id: roomId, name: 'context test room', transport: 'matrix' })
 
     const members = await provider.getChannelMembers(roomId)

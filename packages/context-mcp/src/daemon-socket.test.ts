@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { createConnection } from 'node:net'
 import { SpawnRegistry } from './spawn-registry.js'
 import { startDaemonSocketServer, callDaemon } from './daemon-socket.js'
-import type { TransportContextProvider } from '@zooid/core'
+import type { TaskActions, TransportContextProvider } from '@zooid/core'
 
 function fakeProvider(over: Partial<TransportContextProvider> = {}): TransportContextProvider {
   return {
@@ -13,7 +13,18 @@ function fakeProvider(over: Partial<TransportContextProvider> = {}): TransportCo
     getRecentThreads: async () => ({ threads: [], has_more: false }),
     getThreadHistory: async () => ({ messages: [], has_more: false }),
     getChannelMembers: async () => [],
-    getChannelInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
+    getRoomInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
+    getRooms: async () => [],
+    sendMessage: async () => ({ event_id: '$sent' }),
+    ...over,
+  }
+}
+
+function fakeTasks(over: Partial<TaskActions> = {}): TaskActions {
+  return {
+    startTasks: async () => ({ results: [], notify: 'caller', delivery: 'd' }),
+    completeTask: async () => ({ status: 'recorded' }),
+    describeRole: async () => ({ is_task_assignee: false, can_start_task_threads: true }),
     ...over,
   }
 }
@@ -26,7 +37,7 @@ const defaultProvider = fakeProvider({
     has_more: false,
   }),
   getChannelMembers: async () => [{ id: '@alice:hs', name: 'alice', is_agent: false }],
-  getChannelInfo: async () => ({ id: '!r:hs', name: 'general', transport: 'matrix' }),
+  getRoomInfo: async () => ({ id: '!r:hs', name: 'general', transport: 'matrix' }),
 })
 
 const cleanup: Array<() => Promise<void>> = []
@@ -120,7 +131,7 @@ describe('daemon-socket', () => {
     ).rejects.toThrow(/binding not owned by caller/)
   })
 
-  it('routes getChannelMembers and getChannelInfo', async () => {
+  it('routes getChannelMembers and getRoomInfo', async () => {
     const registry = new SpawnRegistry()
     const spawnId = registry.register({
       agentName: 'a',
@@ -134,7 +145,7 @@ describe('daemon-socket', () => {
     const members = await callDaemon(sockPath, { spawnId, method: 'getChannelMembers', params: {} })
     expect(members).toEqual([{ id: '@alice:hs', name: 'alice', is_agent: false }])
 
-    const info = await callDaemon(sockPath, { spawnId, method: 'getChannelInfo', params: {} })
+    const info = await callDaemon(sockPath, { spawnId, method: 'getRoomInfo', params: {} })
     expect(info).toEqual({ id: '!r:hs', name: 'general', transport: 'matrix' })
   })
 
@@ -144,14 +155,14 @@ describe('daemon-socket', () => {
         messages: [{ id: 'A1', sender: 'alice', text: 'from A', timestamp: 'T', is_agent: false }],
         has_more: false,
       }),
-      getChannelInfo: async () => ({ id: '!a:hs', name: 'room-A', transport: 'matrix' }),
+      getRoomInfo: async () => ({ id: '!a:hs', name: 'room-A', transport: 'matrix' }),
     })
     const providerB = fakeProvider({
       getRoomHistory: async () => ({
         messages: [{ id: 'B1', sender: 'bob', text: 'from B', timestamp: 'T', is_agent: false }],
         has_more: false,
       }),
-      getChannelInfo: async () => ({ id: '!b:hs', name: 'room-B', transport: 'matrix' }),
+      getRoomInfo: async () => ({ id: '!b:hs', name: 'room-B', transport: 'matrix' }),
     })
     const registry = new SpawnRegistry()
     const spawnA = registry.register({
@@ -176,7 +187,7 @@ describe('daemon-socket', () => {
     expect((resA as { messages: Array<{ id: string }> }).messages[0].id).toBe('A1')
     expect((resB as { messages: Array<{ id: string }> }).messages[0].id).toBe('B1')
 
-    const infoB = await callDaemon(sockPath, { spawnId: spawnB, method: 'getChannelInfo', params: {} })
+    const infoB = await callDaemon(sockPath, { spawnId: spawnB, method: 'getRoomInfo', params: {} })
     expect((infoB as { id: string }).id).toBe('!b:hs')
   })
 
@@ -218,6 +229,90 @@ describe('daemon-socket', () => {
       })) as { messages: Array<{ id: string }> }
       expect(res.messages[0].id).toBe(expected)
     }
+  })
+
+  it('routes describeRole to task actions with the bound caller', async () => {
+    const seen: unknown[] = []
+    const registry = new SpawnRegistry()
+    registry.setTaskActions(
+      fakeTasks({
+        describeRole: async (caller) => {
+          seen.push(caller)
+          return { is_task_assignee: false, can_start_task_threads: true }
+        },
+      }),
+    )
+    const spawnId = registry.register({
+      agentName: 'agent-a',
+      threadRef: { channelId: 'c', threadId: '$root' },
+      provider: defaultProvider,
+    })
+    const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'agent-a' })
+    cleanup.push(() => server.close())
+
+    const res = await callDaemon(sockPath, { spawnId, method: 'describeRole', params: {} })
+    expect(res).toEqual({ is_task_assignee: false, can_start_task_threads: true })
+    expect(seen[0]).toMatchObject({ agentName: 'agent-a', threadRoot: '$root' })
+  })
+
+  it('routes sendMessage and getRooms to the provider', async () => {
+    const providerCalls: unknown[] = []
+    const provider = fakeProvider({
+      sendMessage: async (input) => {
+        providerCalls.push({ method: 'sendMessage', input })
+        return { event_id: '$e' }
+      },
+      getRooms: async () => {
+        providerCalls.push({ method: 'getRooms' })
+        return [{ id: '!a:localhost', name: 'general', transport: 'matrix' as const }]
+      },
+    })
+    const registry = new SpawnRegistry()
+    const spawnId = registry.register({
+      agentName: 'a',
+      threadRef: { channelId: 'c', threadId: 't' },
+      provider,
+    })
+    const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
+    cleanup.push(() => server.close())
+
+    await callDaemon(sockPath, {
+      spawnId,
+      method: 'sendMessage',
+      params: { room: '!a:localhost', text: 'noted' },
+    })
+    await callDaemon(sockPath, { spawnId, method: 'getRooms', params: {} })
+    expect(providerCalls).toEqual([
+      { method: 'sendMessage', input: { room: '!a:localhost', text: 'noted' } },
+      { method: 'getRooms' },
+    ])
+  })
+
+  it('refuses sendMessage into a room the caller is not bound to', async () => {
+    const provider = fakeProvider({
+      sendMessage: async () => {
+        throw new Error('not_in_room: this agent is not a member of !elsewhere:localhost')
+      },
+    })
+    const registry = new SpawnRegistry()
+    const spawnId = registry.register({
+      agentName: 'a',
+      threadRef: { channelId: 'c', threadId: 't' },
+      provider,
+    })
+    const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'a' })
+    cleanup.push(() => server.close())
+
+    await expect(
+      callDaemon(sockPath, {
+        spawnId,
+        method: 'sendMessage',
+        params: { room: '!elsewhere:localhost', text: 'hi' },
+      }),
+    ).rejects.toThrow(/not_in_room/)
   })
 })
 
@@ -277,8 +372,8 @@ describe('daemon-socket caller identity', () => {
     await expect(callDaemon(alicePath, { spawnId, method: 'getChannelMembers', params: {} })).resolves.toEqual([
       { id: '@alice:hs', name: 'alice', is_agent: false },
     ])
-    const unowned = await callDaemon(bobPath, { spawnId, method: 'getChannelInfo', params: {} }).catch((e: Error) => e.message)
-    const unknown = await callDaemon(bobPath, { acpSessionId: 'no-such-session', method: 'getChannelInfo', params: {} }).catch((e: Error) => e.message)
+    const unowned = await callDaemon(bobPath, { spawnId, method: 'getRoomInfo', params: {} }).catch((e: Error) => e.message)
+    const unknown = await callDaemon(bobPath, { acpSessionId: 'no-such-session', method: 'getRoomInfo', params: {} }).catch((e: Error) => e.message)
     expect(unowned).toBe(unknown)
   })
 })

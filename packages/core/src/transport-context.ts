@@ -27,10 +27,22 @@ export interface Member {
   agent_name?: string
 }
 
-export interface ChannelInfo {
+/** Renamed from ChannelInfo — "channel" is not a Matrix primitive ([[ZOD084]]). */
+export interface RoomInfo {
   id: string
   name: string
   transport: 'http' | 'matrix'
+}
+
+export interface SendMessageInput {
+  room: string
+  thread_id?: string
+  text: string
+}
+
+export interface SendMessageResult {
+  event_id: string
+  thread_id?: string
 }
 
 export interface HistoryPage {
@@ -87,5 +99,9 @@ export interface TransportContextProvider {
     opts: HistoryOptions,
   ): Promise<HistoryPage>
   getChannelMembers(channelId: string): Promise<Member[]>
-  getChannelInfo(channelId: string): Promise<ChannelInfo>
+  /** Renamed from getChannelInfo. */
+  getRoomInfo(channelId: string): Promise<RoomInfo>
+  /** Rooms this agent is bound to. Targets for sendMessage. */
+  getRooms(): Promise<RoomInfo[]>
+  sendMessage(input: SendMessageInput): Promise<SendMessageResult>
 }

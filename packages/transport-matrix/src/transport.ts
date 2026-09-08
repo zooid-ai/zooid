@@ -36,7 +36,14 @@ import { NO_PENDING_INPUT } from '@zooid/core'
 import { TaskRegistry, MAX_OPEN_TASKS_PER_ROOM, type TaskJournal, type TaskRecord } from './task-registry.js'
 import { InvocationRegistry } from './invocation-registry.js'
 import { evaluateCompletion, type StopReason } from './task-completion.js'
-import { buildAssignmentContent, checkDelegable, renderCompletionPrompt, renderInvocationReturn } from './task-dispatch.js'
+import {
+  buildAssignmentContent,
+  checkDelegable,
+  renderCompletionPrompt,
+  renderInvocationReturn,
+  renderAssigneeEnvelope,
+  renderDelivery,
+} from './task-dispatch.js'
 
 export interface MediaClientLike {
   download(input: {
@@ -102,6 +109,12 @@ interface TurnInput {
   sessionKey: string
   promptText?: string
   event?: MatrixEvent
+  /**
+   * Set only on the root turn of a task thread, for the assignee. Wraps the
+   * computed promptText with `renderAssigneeEnvelope` in runTurn — later
+   * turns in the same thread carry no envelope.
+   */
+  taskEnvelope?: { parentAgent: string }
 }
 
 interface MatrixEvent {
@@ -894,11 +907,16 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       console.log(`[matrix] → ${a.name} (${a.userId})`)
       if (!promotedRoot || !evt.room_id) continue
       const sessionKey = sessionKeyFor(a.name, promotedRoot, threadStates.get(promotedRoot))
+      const taskEnvelope =
+        taskCtx?.isRoot && a.name === taskRec!.assignee
+          ? { parentAgent: taskRec!.parent.agent }
+          : undefined
       void enqueueTurn(a, {
         roomId: evt.room_id,
         threadRoot: promotedRoot,
         sessionKey,
         event: evt,
+        ...(taskEnvelope ? { taskEnvelope } : {}),
       })
     }
   }
@@ -996,7 +1014,13 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     let stopReason: StopReason | undefined
     try {
       const rawBody = input.event?.content?.body ?? ''
-      const promptText = input.promptText ?? stripMention(rawBody, agent.userId)
+      const strippedPromptText = input.promptText ?? stripMention(rawBody, agent.userId)
+      const promptText = input.taskEnvelope
+        ? renderAssigneeEnvelope({
+            parentAgent: input.taskEnvelope.parentAgent,
+            prompt: strippedPromptText,
+          })
+        : strippedPromptText
 
       // Drain pending media for this sender+thread and prepend as ACP content blocks.
       const pendingItems = pendingMedia.drain(
@@ -1305,7 +1329,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           }
         }),
       )
-      return { results }
+      return { results, notify, delivery: renderDelivery(notify) }
     },
     async completeTask(caller, input) {
       const summary = input.summary.trim()
@@ -1319,6 +1343,14 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       if (invocations.outstandingFor(caller.sessionKey).length)
         return { status: 'refused', reason: 'outstanding_handoff: wait for delegated work to return' }
       return { status: taskRegistry.recordSummary(rec.taskId, summary) }
+    },
+    async describeRole(caller) {
+      const enclosing = taskRegistry.taskForRoot(caller.threadRoot)
+      const openTask = taskRegistry.openTaskFor(caller.agentName, caller.threadRoot)
+      return {
+        is_task_assignee: openTask !== undefined && openTask.threadRoot === caller.sessionKey,
+        can_start_task_threads: enclosing === undefined,
+      }
     },
   }
 

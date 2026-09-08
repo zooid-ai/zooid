@@ -353,9 +353,14 @@ export class MatrixClient {
       user_id: opts.asUserId,
     })
     if (opts.from) params.set('from', opts.from)
+    // The 3-segment relations endpoint (rel_type + event_type) scopes both the
+    // returned chunk AND the next_batch cursor to m.room.message server-side —
+    // without it we'd paginate over every m.thread relation (edits, reactions,
+    // redactions) and toMessage()'s client-side filtering would desync from
+    // has_more/next_before (zooid-ai/zooid#21).
     const url =
       `${this.homeserver}/_matrix/client/v1/rooms/${encodeURIComponent(opts.roomId)}` +
-      `/relations/${encodeURIComponent(opts.rootEventId)}/m.thread?${params.toString()}`
+      `/relations/${encodeURIComponent(opts.rootEventId)}/m.thread/m.room.message?${params.toString()}`
     const r = await this.fetch(url, {
       method: 'GET',
       headers: { Authorization: `Bearer ${this.asToken}` },

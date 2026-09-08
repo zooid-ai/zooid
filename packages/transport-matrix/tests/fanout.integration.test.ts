@@ -28,72 +28,94 @@ async function settle() {
   for (let i = 0; i < 12; i++) await new Promise((r) => setImmediate(r))
 }
 
+function setup() {
+  const sent: Array<{
+    type: string
+    input: Record<string, unknown>
+    event_id: string
+  }> = []
+  const prompts: Array<{ name: string; threadId: string; text: string }> = []
+  let n = 0
+  const registry = {
+    ensureSession: vi.fn(async (name: string, threadId: string) => `sess:${name}:${threadId}`),
+    endSession: vi.fn(),
+    cancelSession: vi.fn(),
+    stopAll: vi.fn(),
+    hasAgent: vi.fn(() => true),
+    hasContextSpawn: vi.fn(() => true),
+    getApprovalTimeoutMs: vi.fn(() => 0),
+    onApprovalRequest: vi.fn(),
+    onEvent: vi.fn() as unknown as (name: string, event: unknown) => void,
+    prompt: vi.fn(
+      async (name: string, input: { threadId: string; content: Array<{ text?: string }> }) => {
+        prompts.push({
+          name,
+          threadId: input.threadId,
+          text: input.content.map((x) => x.text ?? '').join(''),
+        })
+        if (name === 'worker')
+          registry.onEvent(name, {
+            type: 'agent_message_chunk',
+            sessionId: `sess:${name}:${input.threadId}`,
+            content: { type: 'text', text: 'audit is clean' },
+          })
+        return { stopReason: 'end_turn' as const }
+      },
+    ),
+  }
+  const client = {
+    registerBot: vi.fn(),
+    joinRoom: vi.fn(),
+    leaveRoom: vi.fn(),
+    setTyping: vi.fn(async () => {}),
+    setPresence: vi.fn(async () => {}),
+    sendMessage: vi.fn(async (input: Record<string, unknown>) => {
+      const event_id = `$${++n}`
+      sent.push({ type: 'm.room.message', input, event_id })
+      return { event_id }
+    }),
+    sendCustomEvent: vi.fn(async (input: Record<string, unknown>) => {
+      const event_id = `$${++n}`
+      sent.push({ type: String(input.eventType), input, event_id })
+      return { event_id }
+    }),
+  }
+  const transport = createMatrixTransport({
+    agents: registry as never,
+    approvals: Object.assign(new EventEmitter(), {
+      register: vi.fn(),
+      resolve: vi.fn(),
+      cancelSession: vi.fn(),
+      listPending: vi.fn(),
+    }) as never,
+    client: client as never,
+    bindings,
+    hsToken: 'secret',
+    drainQuietMs: 0,
+  })
+  async function deliver(evt: {
+    type: string
+    event_id: string
+    sender: string
+    content: Record<string, unknown>
+  }) {
+    await transport.app.request('/_matrix/app/v1/transactions/' + evt.event_id, {
+      method: 'PUT',
+      headers: {
+        authorization: 'Bearer secret',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        events: [{ ...evt, room_id: roomId }],
+      }),
+    })
+  }
+  return { transport, sent, prompts, client, deliver }
+}
+
 describe('thread fan-out', () => {
   it('dispatches only the assignee and returns its terminal result to the exact caller session', async () => {
-    const sent: Array<{
-      type: string
-      input: Record<string, unknown>
-      event_id: string
-    }> = []
-    const prompts: Array<{ name: string; threadId: string; text: string }> = []
-    let n = 0
-    const registry = {
-      ensureSession: vi.fn(async (name: string, threadId: string) => `sess:${name}:${threadId}`),
-      endSession: vi.fn(),
-      cancelSession: vi.fn(),
-      stopAll: vi.fn(),
-      hasAgent: vi.fn(() => true),
-      hasContextSpawn: vi.fn(() => true),
-      getApprovalTimeoutMs: vi.fn(() => 0),
-      onApprovalRequest: vi.fn(),
-      onEvent: vi.fn() as unknown as (name: string, event: unknown) => void,
-      prompt: vi.fn(
-        async (name: string, input: { threadId: string; content: Array<{ text?: string }> }) => {
-          prompts.push({
-            name,
-            threadId: input.threadId,
-            text: input.content.map((x) => x.text ?? '').join(''),
-          })
-          if (name === 'worker')
-            registry.onEvent(name, {
-              type: 'agent_message_chunk',
-              sessionId: `sess:${name}:${input.threadId}`,
-              content: { type: 'text', text: 'audit is clean' },
-            })
-          return { stopReason: 'end_turn' as const }
-        },
-      ),
-    }
-    const client = {
-      registerBot: vi.fn(),
-      joinRoom: vi.fn(),
-      leaveRoom: vi.fn(),
-      setTyping: vi.fn(async () => {}),
-      setPresence: vi.fn(async () => {}),
-      sendMessage: vi.fn(async (input: Record<string, unknown>) => {
-        const event_id = `$${++n}`
-        sent.push({ type: 'm.room.message', input, event_id })
-        return { event_id }
-      }),
-      sendCustomEvent: vi.fn(async (input: Record<string, unknown>) => {
-        const event_id = `$${++n}`
-        sent.push({ type: String(input.eventType), input, event_id })
-        return { event_id }
-      }),
-    }
-    const transport = createMatrixTransport({
-      agents: registry as never,
-      approvals: Object.assign(new EventEmitter(), {
-        register: vi.fn(),
-        resolve: vi.fn(),
-        cancelSession: vi.fn(),
-        listPending: vi.fn(),
-      }) as never,
-      client: client as never,
-      bindings,
-      hsToken: 'secret',
-      drainQuietMs: 0,
-    })
+    const { transport, sent, prompts, deliver } = setup()
     const started = await transport.taskActions.startTasks(
       {
         agentName: 'supervisor',
@@ -105,23 +127,11 @@ describe('thread fan-out', () => {
     )
     expect(started.results[0]).toMatchObject({ status: 'started' })
     const root = sent[0]!
-    await transport.app.request('/_matrix/app/v1/transactions/root', {
-      method: 'PUT',
-      headers: {
-        authorization: 'Bearer secret',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        events: [
-          {
-            type: root.type,
-            event_id: root.event_id,
-            room_id: roomId,
-            sender: '@supervisor:hs',
-            content: root.input.content,
-          },
-        ],
-      }),
+    await deliver({
+      type: root.type,
+      event_id: root.event_id,
+      sender: '@supervisor:hs',
+      content: root.input.content as Record<string, unknown>,
     })
     await settle()
     expect(prompts.filter((p) => p.name === 'worker')).toHaveLength(1)
@@ -131,5 +141,67 @@ describe('thread fan-out', () => {
       sent.some((e) => (e.input.content as Record<string, unknown>)['dev.zooid.thread_result']),
     ).toBe(true)
     expect(prompts.filter((p) => p.name === 'supervisor')).toMatchObject([{ threadId: '$parent' }])
+  })
+
+  it('prefixes the assignee opening prompt with the task envelope', async () => {
+    const { transport, sent, prompts, deliver } = setup()
+    const started = await transport.taskActions.startTasks(
+      { agentName: 'supervisor', channelId: roomId, threadRoot: '$parent', sessionKey: '$parent' },
+      { tasks: [{ agent: 'worker', prompt: 'Write the bug report.' }] },
+    )
+    expect(started.results[0]).toMatchObject({ status: 'started' })
+    const root = sent[0]!
+    await deliver({
+      type: root.type,
+      event_id: root.event_id,
+      sender: '@supervisor:hs',
+      content: root.input.content as Record<string, unknown>,
+    })
+    await settle()
+    const assigneePrompt = prompts.find((p) => p.name === 'worker')!.text
+    expect(assigneePrompt).toMatch(/^\[task\] from supervisor/)
+    expect(assigneePrompt).toContain('Write the bug report.')
+  })
+
+  it('does not envelope a plain in-thread mention', async () => {
+    const { transport, sent, prompts, deliver } = setup()
+    const started = await transport.taskActions.startTasks(
+      { agentName: 'supervisor', channelId: roomId, threadRoot: '$parent', sessionKey: '$parent' },
+      { tasks: [{ agent: 'worker', prompt: 'audit' }] },
+    )
+    const root = sent[0]!
+    await deliver({
+      type: root.type,
+      event_id: root.event_id,
+      sender: '@supervisor:hs',
+      content: root.input.content as Record<string, unknown>,
+    })
+    await settle()
+    // A human follow-up inside worker's task thread, mentioning eager.
+    await deliver({
+      type: 'm.room.message',
+      event_id: '$chat',
+      sender: '@alice:hs',
+      content: {
+        msgtype: 'm.text',
+        body: '@eager:hs quick question',
+        'm.relates_to': { rel_type: 'm.thread', event_id: root.event_id },
+        'm.mentions': { user_ids: ['@eager:hs'] },
+      },
+    })
+    await settle()
+    const plain = prompts.find((p) => p.name === 'eager')?.text
+    expect(plain).toBeDefined()
+    expect(plain).not.toMatch(/^\[task\]/)
+  })
+
+  it('returns the delivery contract to the caller at spawn time', async () => {
+    const { transport } = setup()
+    const out = await transport.taskActions.startTasks(
+      { agentName: 'supervisor', channelId: roomId, threadRoot: '$parent', sessionKey: '$parent' },
+      { tasks: [{ agent: 'worker', prompt: 'go' }] },
+    )
+    expect(out.notify).toBe('caller')
+    expect(out.delivery).toMatch(/End your turn now/)
   })
 })

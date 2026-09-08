@@ -7,7 +7,9 @@ const fakeProvider: TransportContextProvider = {
   getRecentThreads: async () => ({ threads: [], has_more: false }),
   getThreadHistory: async () => ({ messages: [], has_more: false }),
   getChannelMembers: async () => [],
-  getChannelInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
+  getRoomInfo: async () => ({ id: 'r', name: 'r', transport: 'matrix' }),
+  getRooms: async () => [],
+  sendMessage: async () => ({ event_id: '$sent' }),
 }
 
 describe('SpawnRegistry', () => {
