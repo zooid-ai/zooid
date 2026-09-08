@@ -77,6 +77,7 @@ ${HTTP_TRANSPORT.trimStart()}${QA_AGENTS}`)
         },
       },
       hooks: {},
+      triggers: {},
     })
   })
 

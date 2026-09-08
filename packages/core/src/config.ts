@@ -15,6 +15,7 @@ import type {
   MountConfig,
   RoomBinding,
   TransportConfig,
+  TriggerConfig,
   ZooidConfig,
   ZooidContainerConfig,
 } from './types.js'
@@ -29,6 +30,13 @@ export interface LoadZooidConfigOptions {
    * path.
    */
   configDir?: string
+  /**
+   * Cron-expression validator, called as `validateCron(name, expr)` and
+   * expected to throw on an invalid expression. `core` takes no cron
+   * dependency — `cli` passes croner's parser at load time. Defaults to a
+   * field-count check sufficient to catch malformed input at parse time.
+   */
+  validateCron?: (name: string, expr: string) => void
 }
 
 const AGENT_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/
@@ -790,6 +798,137 @@ function parseAgents(
   return result
 }
 
+function defaultValidateCron(name: string, expr: string): void {
+  const parts = expr.trim().split(/\s+/)
+  if (parts.length < 5 || parts.length > 7) {
+    throw new Error(
+      `triggers.${name}.schedule: invalid cron expression ${JSON.stringify(expr)}`,
+    )
+  }
+}
+
+/**
+ * Expand a trigger's `as:` to a full MXID. Mirrors the explicit-`user_id`
+ * path in `parseTransportBinding`: a value already containing `:` is used
+ * as given (and validated); a bare localpart (`cron` or `@cron`) gets
+ * `:<server>` appended from the workforce's sole matrix transport. Unlike
+ * the *default* user_id (omitted case), this never auto-prefixes a
+ * workstation — an explicit value is used as written, so a
+ * workstation-scoped bot is written explicitly (`as: myworkstation.cron`).
+ */
+function expandTriggerAs(
+  name: string,
+  as: string,
+  transports: Record<string, TransportConfig>,
+): string {
+  if (as.includes(':')) {
+    if (!MATRIX_USER_ID_RE.test(as)) {
+      throw new Error(`triggers.${name}.as: must be a full MXID (got ${JSON.stringify(as)})`)
+    }
+    return as
+  }
+  const bare = as.startsWith('@') ? as : `@${as}`
+  if (!MATRIX_USER_LOCALPART_RE.test(bare)) {
+    throw new Error(`triggers.${name}.as: must be a full MXID (got ${JSON.stringify(as)})`)
+  }
+  const matrixTransports = Object.values(transports).filter(
+    (t): t is MatrixTransportConfig => t.type === 'matrix',
+  )
+  if (matrixTransports.length !== 1) {
+    throw new Error(
+      `triggers.${name}.as: "${as}" is a bare localpart, which requires exactly one matrix ` +
+        `transport to expand against (found ${matrixTransports.length}). Use a full MXID instead.`,
+    )
+  }
+  const serverName = deriveServerName(matrixTransports[0]!.user_namespace)
+  return `${bare}:${serverName}`
+}
+
+function parseTriggers(
+  raw: unknown,
+  agents: Record<string, AgentConfig>,
+  transports: Record<string, TransportConfig>,
+  validateCron: (name: string, expr: string) => void,
+): Record<string, TriggerConfig> {
+  if (raw === undefined || raw === null) return {}
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('triggers: must be a mapping')
+  }
+  const result: Record<string, TriggerConfig> = {}
+  for (const [name, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!val || typeof val !== 'object' || Array.isArray(val)) {
+      throw new Error(`triggers.${name} must be a mapping`)
+    }
+    const t = val as Record<string, unknown>
+
+    if (t.run !== undefined) {
+      throw new Error(
+        `triggers.${name}.run: is not supported — a trigger posts a message and the ` +
+          `agent runs what needs running. See [ZOD081] §Concept.`,
+      )
+    }
+
+    if (t.schedule === undefined) {
+      throw new Error(`triggers.${name}: must specify schedule:`)
+    }
+    if (typeof t.schedule !== 'string' || t.schedule.length === 0) {
+      throw new Error(`triggers.${name}.schedule: must be a non-empty string`)
+    }
+    validateCron(name, t.schedule)
+
+    if (typeof t.as !== 'string' || t.as.length === 0) {
+      throw new Error(`triggers.${name}.as: must be a non-empty string`)
+    }
+    const as = expandTriggerAs(name, t.as, transports)
+
+    if (typeof t.room !== 'string' || t.room.length === 0) {
+      throw new Error(`triggers.${name}.room: must be a non-empty string`)
+    }
+    if (!MATRIX_ROOM_IDENT_RE.test(t.room)) {
+      throw new Error(
+        `triggers.${name}.room: must start with '#' or '!' (got ${JSON.stringify(t.room)})`,
+      )
+    }
+
+    if (typeof t.mention !== 'string' || t.mention.length === 0) {
+      throw new Error(`triggers.${name}.mention: must be a non-empty string`)
+    }
+    const mentionedAgent = agents[t.mention]
+    if (!mentionedAgent) {
+      throw new Error(`triggers.${name}.mention: unknown agent "${t.mention}"`)
+    }
+    if (!mentionedAgent.matrix) {
+      throw new Error(
+        `triggers.${name}.mention: agent "${t.mention}" has no matrix: binding — a trigger ` +
+          `posts through Matrix, so the mentioned agent must be matrix-bound.`,
+      )
+    }
+    // router.ts never routes an event back to its own sender
+    // (`event.sender === a.userId` short-circuits the match), so a trigger
+    // that posts as the very agent it mentions would silently never wake it.
+    if (as === mentionedAgent.matrix.user_id) {
+      throw new Error(
+        `triggers.${name}.as: must not equal the mentioned agent's own MXID (${as}) — a message ` +
+          `an agent sends never routes back to itself, so this trigger would silently never wake ` +
+          `"${t.mention}". Post as a different identity (a dedicated bot, or another agent's).`,
+      )
+    }
+
+    if (typeof t.text !== 'string' || t.text.length === 0) {
+      throw new Error(`triggers.${name}.text: must be a non-empty string`)
+    }
+
+    result[name] = {
+      schedule: t.schedule,
+      as,
+      room: t.room,
+      mention: t.mention,
+      text: t.text,
+    }
+  }
+  return result
+}
+
 function parseRuntime(raw: unknown): 'local' | 'docker' | 'podman' {
   const runtime = raw ?? 'docker'
   if (runtime !== 'local' && runtime !== 'docker' && runtime !== 'podman') {
@@ -860,12 +999,19 @@ export function loadZooidConfig(
   const transports = parseTransports(r.transports, processEnv, workstation)
   const hooks = zooidHooks(r)
   const agents = parseAgents(r.agents, runtime, transports, hooks, processEnv, opts.configDir)
+  const triggers = parseTriggers(
+    r.triggers,
+    agents,
+    transports,
+    opts.validateCron ?? defaultValidateCron,
+  )
 
   const cfg: ZooidConfig = {
     runtime,
     transports,
     agents,
     hooks,
+    triggers,
   }
   if (workstation !== undefined) cfg.workstation = workstation
   if (r.container !== undefined && r.container !== null) {
@@ -955,6 +1101,7 @@ export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
     transports: base.transports,
     agents: base.agents,
     hooks: { ...base.hooks },
+    triggers: base.triggers,
   }
   if (runtime === 'docker' || runtime === 'podman') {
     const image = flags.image ?? base.container?.image

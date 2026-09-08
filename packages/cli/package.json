@@ -50,6 +50,7 @@
     "@zooid/transport-matrix": "workspace:^",
     "cac": "^6.7.14",
     "chalk": "^5.4.1",
+    "croner": "^10.0.1",
     "hono": "^4.6.0",
     "listr2": "^8.2.5",
     "marked": "^18.0.4",

@@ -277,10 +277,30 @@ export interface ZooidConfig {
     pre_turn?: string
     post_turn?: string
   }
+  /** Optional. Map of trigger name → trigger. Empty map when the block is absent. */
+  triggers: Record<string, TriggerConfig>
 }
 
 export interface CliFlags {
   runtime?: string
   /** Container image override (shorthand for container.image). */
   image?: string
+}
+
+/**
+ * A schedule trigger: fires on a cron and posts `text` into `room` as `as`,
+ * structurally mentioning `mention` so the agent starts a fresh turn through
+ * the ordinary message path. No emitter/command tier — see [[ZOD081]] §Concept.
+ */
+export interface TriggerConfig {
+  /** Cron expression. `webhook:` joins this as an alternative in [[ZOD082]]. */
+  schedule?: string
+  /** Full MXID the trigger posts as, e.g. `@cron:example.org`. */
+  as: string
+  /** Room id or alias the message goes to. */
+  room: string
+  /** Agent name (key in `agents`) to mention. Structural, never templated — §Design 3. */
+  mention: string
+  /** The message body. Literal for a scheduled trigger. */
+  text: string
 }

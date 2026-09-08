@@ -38,6 +38,7 @@ export type {
   Transport,
   InboundMessage,
   ThreadRef,
+  TriggerConfig,
 } from './types.js'
 export type {
   HistoryOptions,

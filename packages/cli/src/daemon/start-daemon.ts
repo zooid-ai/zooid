@@ -35,6 +35,7 @@ import { mountPushGateway } from '../push-gateway/index.js'
 import { makeSyncCursorStore } from './sync-cursors.js'
 import { makeTaskJournal } from './task-journal.js'
 import { shouldBindHttpListener } from './pull-wiring.js'
+import { startTriggerScheduler, validateCron } from './trigger-scheduler.js'
 
 export interface StartDaemonOpts {
   configPath?: string
@@ -102,12 +103,18 @@ function closeAsync(server: ServerType): Promise<void> {
   })
 }
 
+function localpart(userId: string): string {
+  const m = /^@([^:]+):/.exec(userId)
+  if (!m) throw new Error(`bad user id: ${userId}`)
+  return m[1]!
+}
+
 export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHandle> {
   const cwd = opts.cwd ?? process.cwd()
   const found = opts.configPath ? { path: opts.configPath } : findConfigFile(cwd)
   if (!found) throw new Error('zooid.yaml is required')
   const configDir = dirname(found.path)
-  const base = loadZooidConfig(readFileSync(found.path, 'utf8'), { configDir })
+  const base = loadZooidConfig(readFileSync(found.path, 'utf8'), { configDir, validateCron })
   const config = mergeCliFlags(base, opts.cliFlags ?? {})
 
   const approvals = new ApprovalCorrelator()
@@ -180,6 +187,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
 
   let server: ServerType | null = null
   let syncLoops: SyncLoop[] | undefined
+  let triggers: { stop(): Promise<void> } | undefined
   let stopped = false
   let resolveStopped!: () => void
   const whenStopped = new Promise<void>((r) => {
@@ -311,6 +319,28 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     // m.space.child while joining it.
     await transport.bootstrap({ spaceRoomId, asUserId, adminUserIds })
 
+    if (Object.keys(config.triggers).length > 0) {
+      const agentUserIds = Object.fromEntries(bindings.map((b) => [b.name, b.userId]))
+      triggers = startTriggerScheduler({
+        triggers: config.triggers,
+        agentUserIds,
+        resolveRoom: async (r) => (r.startsWith('!') ? r : await client.resolveAlias(r)),
+        ensureBot: async (mxid, roomId) => {
+          await client.registerBot(localpart(mxid)).catch(() => {})
+          // Agent rooms are created restricted to workforce-space members
+          // (BotPool.bootstrap): a trigger bot needs space membership too,
+          // or its join to the target room 403s.
+          if (spaceRoomId) {
+            await client.invite({ roomId: spaceRoomId, asUserId, targetUserId: mxid }).catch(() => {})
+            await client.joinRoom(spaceRoomId, mxid).catch(() => {})
+          }
+          await client.joinRoom(roomId, mxid)
+        },
+        sendMessage: (m) => client.sendMessage(m),
+      })
+      console.log(`[trigger] scheduled ${Object.keys(config.triggers).length} trigger(s)`)
+    }
+
     // Pull mode: start the outbound /sync loops after bootstrap so the rooms
     // each agent syncs already exist. Loops long-poll until stop().
     syncLoops = transport.syncLoops
@@ -362,6 +392,11 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   const stop = async (): Promise<void> => {
     if (stopped) return whenStopped
     stopped = true
+    try {
+      await triggers?.stop()
+    } catch {
+      // swallow
+    }
     try {
       if (syncLoops) for (const loop of syncLoops) loop.stop()
     } catch {
