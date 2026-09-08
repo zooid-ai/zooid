@@ -28,6 +28,8 @@ import {
 } from '@zooid/transport-matrix'
 import { SpawnRegistry, startDaemonSocketServer, type DaemonSocketHandle } from '@zooid/context-mcp'
 import { buildAcpRegistry } from '../build-registry.js'
+import { installPiExtension } from '../pi-extension-install.js'
+import { resolvePiExtensionBundle } from '@zooid/pi-extension'
 import { prepullImages } from '../prepull-images.js'
 import { mountPushGateway } from '../push-gateway/index.js'
 import { makeSyncCursorStore } from './sync-cursors.js'
@@ -137,6 +139,16 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     daemonHome: process.env.HOME,
   })
   const agentNames = Object.keys(config.agents)
+
+  if (agentNames.some((name) => (config.agents[name].acp as { preset?: string } | undefined)?.preset === 'pi')) {
+    const result = installPiExtension({
+      daemonHome: process.env.HOME ?? '',
+      bundlePath: resolvePiExtensionBundle(),
+    })
+    const where = result.target ? ` extension=${result.target}` : ''
+    const why = result.reason ? ` reason=${result.reason}` : ''
+    console.log(`[pi]${where} status=${result.status}${why}`)
+  }
 
   if (config.runtime !== 'local') {
     await prepullImages(registry, {

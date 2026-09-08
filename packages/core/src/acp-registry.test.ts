@@ -21,6 +21,7 @@ vi.mock('@zooid/acp-client', async (orig) => {
     ...real,
     AcpClient: vi.fn().mockImplementation(() => ({
       start: vi.fn().mockResolvedValue(undefined),
+      ensureSession: vi.fn().mockResolvedValue('acp-session-1'),
       prompt: vi.fn().mockResolvedValue({ stopReason: 'end_turn' }),
       stop: vi.fn().mockResolvedValue(undefined),
     })),
@@ -135,6 +136,19 @@ describe('AcpAgentRegistry', () => {
     await registry.prompt('triage', { threadId: 't', content: [] })
     const opts = AcpClient.mock.calls[0][0]
     expect(opts.runtime).toBe(runtime)
+  })
+
+  it('links every established ACP session, including a resumed one', async () => {
+    const linked = vi.fn()
+    registry = new AcpAgentRegistry({
+      runtime,
+      agents: registry.opts.agents,
+      onSessionEstablished: linked,
+    })
+    await registry.ensureSession('triage', 'thread|handoff', '!room:hs')
+    await registry.ensureSession('triage', 'thread|handoff', '!room:hs')
+    expect(linked).toHaveBeenCalledTimes(2)
+    expect(linked).toHaveBeenLastCalledWith('triage', 'thread|handoff', 'acp-session-1')
   })
 
   it('stopAll() invokes stop on every started client', async () => {

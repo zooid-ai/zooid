@@ -1,0 +1,28 @@
+{
+  "name": "@zooid/pi-extension",
+  "version": "0.13.0",
+  "description": "Native Pi extension exposing Zooid context and task tools.",
+  "type": "module",
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": { "types": "./src/index.ts", "import": "./src/index.ts" },
+    "./bundle": "./dist/zooid-tasks.js"
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@zooid/context-mcp": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.5.0",
+    "vitest": "^3.2.0"
+  }
+}

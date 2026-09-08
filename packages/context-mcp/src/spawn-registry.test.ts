@@ -55,4 +55,15 @@ describe('SpawnRegistry', () => {
     const r = new SpawnRegistry()
     expect(r.get('not-a-real-id')).toBeUndefined()
   })
+
+  it('resolves bindings by ACP session after linking without crossing agents', () => {
+    const r = new SpawnRegistry()
+    const a = r.register({ agentName: 'a', threadRef: { channelId: 'c', threadId: 't' }, sessionKey: 't', provider: fakeProvider })
+    const b = r.register({ agentName: 'b', threadRef: { channelId: 'c', threadId: 't' }, sessionKey: 't', provider: fakeProvider })
+    r.linkSession('a', 't', 'acp-a')
+    r.linkSession('b', 't', 'acp-b')
+    expect(r.getByAcpSession('acp-a')?.spawnId).toBe(a)
+    expect(r.getByAcpSession('acp-b')?.spawnId).toBe(b)
+    expect(r.getByAcpSession('orphan')).toBeUndefined()
+  })
 })

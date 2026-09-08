@@ -108,6 +108,12 @@ export interface AcpAgentRegistryOptions {
    * when the workspace mount is active; falls back to `agent.workdir`.
    */
   cwd?: Record<string, string>
+  /**
+   * Called after an ACP session is created or recovered.  Context adapters
+   * which cannot receive an MCP spawn id (Pi) use this to resolve their
+   * daemon-side binding by the ACP session id instead.
+   */
+  onSessionEstablished?: (agentName: string, sessionKey: string, sessionId: string) => void
 }
 
 export type ContextSpawnFactory = (
@@ -188,7 +194,9 @@ export class AcpAgentRegistry implements AcpRegistry {
   ): Promise<string> {
     if (!this.hasAgent(name)) throw new Error(`unknown agent: ${name}`)
     const client = await this.ensureClient(name)
-    return client.ensureSession(threadId, channelId, contextThreadId)
+    const sessionId = await client.ensureSession(threadId, channelId, contextThreadId)
+    this.opts.onSessionEstablished?.(name, threadId, sessionId)
+    return sessionId
   }
 
   endSession(name: string, threadId: string): void {

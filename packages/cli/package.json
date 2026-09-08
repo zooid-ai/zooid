@@ -43,6 +43,7 @@
     "@zooid/acp-client": "workspace:^",
     "@zooid/context-mcp": "workspace:^",
     "@zooid/core": "workspace:^",
+    "@zooid/pi-extension": "workspace:^",
     "@zooid/runtime-docker": "workspace:^",
     "@zooid/runtime-local": "workspace:^",
     "@zooid/transport-http": "workspace:^",

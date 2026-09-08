@@ -96,6 +96,11 @@ Zooid publishes a small set of base images on GHCR. Drop one into `zooid.yaml` u
 - `ghcr.io/zooid-ai/agent-opencode` — agent-base + opencode.
 - `ghcr.io/zooid-ai/agent-pi` — agent-base + pi + pi-acp.
 
+Pi does not expose MCP servers. When a Pi agent starts, Zooid installs its
+native extension at `~/.pi/agent/extensions/zooid-tasks.js`; it gives the agent
+the `zooid_*` room-reading and task tools while preserving any operator-owned
+extensions already in that directory.
+
 The persona — `CLAUDE.md` / `AGENTS.md`, `.claude/settings.json`, skills, MCP servers — lives in the agent's `workdir` on the host. Zooid bind-mounts that directory into the container at runtime, so the shim picks it up the same way it would on your laptop. No `docker build`, no custom image, no rebuild when you tweak instructions.
 
 ## Development

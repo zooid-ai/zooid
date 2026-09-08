@@ -3,8 +3,9 @@ import { unlink } from 'node:fs/promises'
 import type { SpawnRegistry } from './spawn-registry.js'
 import type { CompleteTaskInput, StartTasksInput } from '@zooid/core'
 
-interface DaemonRequest {
-  spawnId: string
+export interface DaemonRequest {
+  spawnId?: string
+  acpSessionId?: string
   method:
     | 'getRoomHistory'
     | 'getRecentThreads'
@@ -93,21 +94,26 @@ async function handleLine(line: string, socket: Socket, registry: SpawnRegistry)
     )
     return
   }
-  const binding = registry.get(req.spawnId)
+  const binding = req.spawnId
+    ? registry.get(req.spawnId)
+    : req.acpSessionId
+      ? registry.getByAcpSession(req.acpSessionId)
+      : undefined
   if (!binding) {
+    const address = req.acpSessionId ? `session: ${req.acpSessionId}` : `spawn-id: ${req.spawnId ?? ''}`
     process.stderr.write(
-      `[context-mcp] daemon: unknown spawn-id ${req.spawnId} for method=${req.method}\n`,
+      `[context-mcp] daemon: unknown ${address} for method=${req.method}\n`,
     )
     socket.write(
       JSON.stringify({
         ok: false,
-        error: `unknown spawn-id: ${req.spawnId}`,
+        error: req.acpSessionId ? `unknown session: ${req.acpSessionId}` : `unknown spawn-id: ${req.spawnId ?? ''}`,
       } satisfies DaemonError) + '\n',
     )
     return
   }
   process.stderr.write(
-    `[context-mcp] daemon: ${req.method} spawn=${req.spawnId.slice(0, 8)} agent=${binding.agentName}\n`,
+    `[context-mcp] daemon: ${req.method} spawn=${binding.spawnId.slice(0, 8)} agent=${binding.agentName}\n`,
   )
   try {
     let result: unknown
