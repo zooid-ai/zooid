@@ -35,6 +35,27 @@ export interface TaskActions {
   startTasks(caller: TaskCallerRef, input: StartTasksInput): Promise<StartTasksOutput>
   completeTask(caller: TaskCallerRef, input: CompleteTaskInput): Promise<CompleteTaskOutput>
 }
+/** One in-thread handoff inside a delegated task. */
+export type InvocationState = 'outstanding' | 'returned' | 'cancelled'
+export interface InvocationRecord {
+  invocationId: string
+  taskId: string
+  callerAgent: string
+  callerSessionKey: string
+  calleeAgent: string
+  callEventId?: string
+  calleeSessionKey?: string
+  state: InvocationState
+}
+/** Open human-input requests for a session. ZOD078 supplies the implementation. */
+export interface PendingInputRegistry {
+  countFor(sessionKey: string): number
+  cancelFor(sessionKeys: string[]): void
+}
+export const NO_PENDING_INPUT: PendingInputRegistry = {
+  countFor: () => 0,
+  cancelFor: () => {},
+}
 export const THREAD_START_FIELD = 'dev.zooid.thread_start'
 export const THREAD_RESULT_FIELD = 'dev.zooid.thread_result'
 export interface ThreadStartContent {

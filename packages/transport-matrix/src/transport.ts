@@ -5,6 +5,7 @@ import type {
   ApprovalCorrelator,
   RegisteredApproval,
   TaskActions,
+  PendingInputRegistry,
   StartTaskResult,
   StartTaskSpec,
   ThreadCompletion,
@@ -31,8 +32,11 @@ import { PendingMediaStore, type PendingMediaItem } from './pending-media.js'
 import { MediaClient, MAX_INLINE_IMAGE_BYTES, INLINE_IMAGE_MIMES } from './media-client.js'
 import { writeAttachment } from './attachments.js'
 import { SyncLoop } from './sync-loop.js'
-import { TaskRegistry, MAX_OPEN_TASKS_PER_ROOM, type TaskRecord } from './task-registry.js'
-import { buildAssignmentContent, checkDelegable, renderCompletionPrompt } from './task-dispatch.js'
+import { NO_PENDING_INPUT } from '@zooid/core'
+import { TaskRegistry, MAX_OPEN_TASKS_PER_ROOM, type TaskJournal, type TaskRecord } from './task-registry.js'
+import { InvocationRegistry } from './invocation-registry.js'
+import { evaluateCompletion, type StopReason } from './task-completion.js'
+import { buildAssignmentContent, checkDelegable, renderCompletionPrompt, renderInvocationReturn } from './task-dispatch.js'
 
 export interface MediaClientLike {
   download(input: {
@@ -80,6 +84,10 @@ export interface CreateMatrixTransportOptions {
   loadSince?: (agentUserId: string) => string | null
   /** Pull mode: persist the `since` cursor after each sync poll. */
   saveSince?: (agentUserId: string, since: string) => void
+  /** Durable lifecycle state; supplied by the daemon when it has a data directory. */
+  taskJournal?: TaskJournal
+  taskRunId?: string
+  pendingInput?: PendingInputRegistry
 }
 
 interface SessionContext {
@@ -288,7 +296,10 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const sendQueue = new Map<string, Promise<void>>()
   // Thread participation index: keyed by thread root event_id.
   const threadStates = new Map<string, ThreadState>()
-  const taskRegistry = new TaskRegistry()
+  const taskRegistry = new TaskRegistry({ journal: opts.taskJournal, runId: opts.taskRunId })
+  const interruptedTasks = taskRegistry.restore()
+  const invocations = new InvocationRegistry()
+  const pendingInput = opts.pendingInput ?? NO_PENDING_INPUT
   const bindingFor = (name: string) => bindings.find((b) => b.name === name)
   const turnQueues = new Map<string, Promise<void>>()
   // Drop events older than this — in push (appservice) mode Tuwunel may replay
@@ -358,20 +369,50 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     lastFlushed.set(sessionId, text)
     flushedCounts.set(sessionId, (flushedCounts.get(sessionId) ?? 0) + 1)
     const content = buildTextContent(text)
+    const pendingInvocations = registerOutgoingHandoffs(sessionId, text)
     const tail = (sendQueue.get(sessionId) ?? Promise.resolve()).then(async () => {
       try {
-        await client.sendMessage({
+        const { event_id } = await client.sendMessage({
           roomId: ctx.roomId,
           asUserId: ctx.agent.userId,
           content,
           threadRoot: ctx.threadRoot,
         })
+        for (const invocation of pendingInvocations)
+          invocations.attachCallEvent(
+            invocation.invocationId,
+            event_id,
+            composeHandoffKey(ctx.threadRoot, event_id),
+          )
       } catch (err) {
         console.warn(`[matrix:${ctx.agent.name}] sendMessage flush failed:`, err)
       }
     })
     sendQueue.set(sessionId, tail)
     return true
+  }
+
+  function registerOutgoingHandoffs(sessionId: string, text: string) {
+    const ctx = sessions.get(sessionId)
+    if (!ctx) return []
+    const task = taskRegistry.taskForRoot(ctx.threadRoot)
+    if (!task || task.phase !== 'open') return []
+    const sessionKey = sessionKeyFor(ctx.agent.name, ctx.threadRoot, threadStates.get(ctx.threadRoot))
+    const opened = []
+    for (const userId of extractMentions({ content: { body: text } })) {
+      const callee = bindings.find((binding) => binding.userId === userId)
+      if (!callee || callee.name === ctx.agent.name) continue
+      if (invocations.isOutstandingAncestor(sessionKey, callee.name)) {
+        void client.sendCustomEvent({
+          roomId: ctx.roomId, asUserId: ctx.agent.userId, eventType: 'dev.zooid.error',
+          content: { body: `⚠ [handoff_circular] Cannot hand off to ${callee.name}: it is waiting on ${ctx.agent.name}`, code: 'handoff_circular', message: `Cannot hand off to ${callee.name}: it is waiting on ${ctx.agent.name}`, transient: false, 'm.relates_to': { rel_type: 'm.thread', event_id: ctx.threadRoot } },
+        })
+        continue
+      }
+      opened.push(invocations.open({ taskId: task.taskId, callerAgent: ctx.agent.name, callerSessionKey: sessionKey, calleeAgent: callee.name }))
+      taskRegistry.clearSummary(task.taskId)
+    }
+    return opened
   }
 
   agents.onEvent = async (name, event: AgentEvent) => {
@@ -699,6 +740,18 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
             console.error(`[matrix] cancelSession(${t.agent}, ${t.sessionId}) failed:`, err)
           })
         }
+        // A live session will report ACP's `cancelled` stop reason and finish
+        // in its turn boundary, preserving any prose it already emitted. A
+        // restored/no-session task has no such boundary, so close it here.
+        const task = taskRegistry.taskForRoot(threadRoot)
+        if (task?.phase === 'open' && !targets.some((t) => t.agent === task.assignee)) {
+          const assignee = bindingFor(task.assignee)
+          if (assignee)
+            await finishTask(task, {
+              agent: assignee,
+              completion: { agent: assignee.name, thread_id: threadRoot, status: 'cancelled' },
+            })
+        }
         return
       }
       // Legacy form: explicit session_id in content.
@@ -796,7 +849,14 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
             isRoot: !inboundRel && evt.event_id === taskRec.threadRoot,
           }
         : undefined
-    const matches = route(evt, bindings, threadStates, taskCtx)
+    let matches = route(evt, bindings, threadStates, taskCtx)
+    // In a delegated task, agent-to-agent messages dispatch only when the
+    // outgoing flush registered a matching invocation. This prevents a
+    // circular handoff that was visibly refused from still waking its target.
+    if (taskCtx && !taskCtx.isRoot && evt.event_id && bindings.some((b) => b.userId === evt.sender)) {
+      const invocation = invocations.byCallEvent(evt.event_id)
+      matches = invocation ? matches.filter((match) => match.name === invocation.calleeAgent) : []
+    }
     // Suppress the no-match warning for events sent by our own bots.
     const senderIsBot = bindings.some((b) => b.userId === evt.sender)
     if (evt.type === 'm.room.message' && matches.length === 0 && !senderIsBot) {
@@ -933,6 +993,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     }, TYPING_REFRESH_MS)
 
     let turnError: unknown
+    let stopReason: StopReason | undefined
     try {
       const rawBody = input.event?.content?.body ?? ''
       const promptText = input.promptText ?? stripMention(rawBody, agent.userId)
@@ -959,12 +1020,13 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       })
 
       const fullPromptText = [promptText, ...pathLines].filter(Boolean).join('\n')
-      await agents.prompt(agent.name, {
+      const promptResult = await agents.prompt(agent.name, {
         threadId: sessionKey,
         channelId: roomId,
         contextThreadId: threadRoot,
         content: [...blocks, { type: 'text', text: fullPromptText }],
       })
+      stopReason = promptResult.stopReason as StopReason
       // Drain: the prompt promise resolves on the stopReason response, but
       // trailing chunks may still arrive (see DRAIN_* above). Wait until the
       // buffer is quiet for DRAIN_QUIET_MS, re-arming on each new chunk.
@@ -1029,13 +1091,24 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           ),
         })
         .catch((e) => console.warn(`[matrix:${agent.name}] turn.end send failed:`, e))
-      const openTask = taskRegistry.openTaskFor(agent.name, threadRoot)
-      if (openTask && openTask.threadRoot === sessionKey) {
-        await finishTask(openTask, {
-          agent,
-          prose: lastFlushed.get(sessionId),
+      const task = taskRegistry.taskForRoot(threadRoot)
+      const invocation = invocations.forCalleeSession(sessionKey)
+      const isAssignee = task?.phase === 'open' && task.assignee === agent.name && task.threadRoot === sessionKey
+      if (task?.phase === 'open' && (isAssignee || invocation?.state === 'outstanding')) {
+        const decision = evaluateCompletion({
+          agent: agent.name,
+          threadId: isAssignee ? threadRoot : (invocation?.calleeSessionKey ?? sessionKey),
+          stopReason,
           error: turnError,
-        }).catch((e) => console.warn(`[matrix:${agent.name}] finishTask failed:`, e))
+          summary: isAssignee ? task.summary : undefined,
+          prose: lastFlushed.get(sessionId),
+          outstanding: invocations.outstandingFor(sessionKey).length,
+          awaitingHuman: pendingInput.countFor(sessionKey),
+        })
+        if (decision.decision === 'finish') {
+          if (isAssignee) await finishTask(task, { agent, completion: decision.completion })
+          else if (invocation) returnInvocation(invocation, decision.completion, task)
+        }
       }
       buffers.delete(sessionId)
       bufferMessageIds.delete(sessionId)
@@ -1047,40 +1120,13 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
 
   async function finishTask(
     task: TaskRecord,
-    ctx: { agent: AgentBinding; prose?: string; error?: unknown },
+    ctx: { agent: AgentBinding; completion: ThreadCompletion },
   ): Promise<void> {
     const threadId = task.threadRoot!
-    const prose = ctx.prose?.trim()
-    const completion: ThreadCompletion = ctx.error
-      ? {
-          agent: ctx.agent.name,
-          thread_id: threadId,
-          status: 'failed',
-          error: ctx.error instanceof Error ? ctx.error.message : String(ctx.error),
-          ...(prose ? { output: { type: 'message' as const, text: prose } } : {}),
-        }
-      : task.summary
-        ? {
-            agent: ctx.agent.name,
-            thread_id: threadId,
-            status: 'complete',
-            output: { type: 'message', text: task.summary },
-          }
-        : prose
-          ? {
-              agent: ctx.agent.name,
-              thread_id: threadId,
-              status: 'complete',
-              output: { type: 'message', text: prose },
-            }
-          : {
-              agent: ctx.agent.name,
-              thread_id: threadId,
-              status: 'failed',
-              reason: 'no_result',
-              error: 'No result produced',
-            }
+    const completion = ctx.completion
     if (!taskRegistry.close(task.taskId)) return
+    const cancelled = invocations.cancelForTask(task.taskId)
+    pendingInput.cancelFor([threadId, ...cancelled.map((i) => i.calleeSessionKey).filter((x): x is string => Boolean(x))])
     await client.sendCustomEvent({
       roomId: task.roomId,
       asUserId: ctx.agent.userId,
@@ -1090,7 +1136,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         'm.relates_to': { rel_type: 'm.thread', event_id: threadId },
       },
     })
-    if (task.summary && task.summary !== prose)
+    if (task.summary && task.summary !== completion.output?.text)
       await client.sendMessage({
         roomId: task.roomId,
         asUserId: ctx.agent.userId,
@@ -1120,6 +1166,19 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       threadRoot: task.parent.threadRoot,
       sessionKey: task.parent.sessionKey,
       promptText: renderCompletionPrompt(completion),
+    })
+  }
+
+  function returnInvocation(invocation: import('@zooid/core').InvocationRecord, completion: ThreadCompletion, task: TaskRecord): void {
+    const resolved = invocations.resolve(invocation.invocationId)
+    if (!resolved || task.phase !== 'open') return
+    const caller = bindingFor(resolved.callerAgent)
+    if (!caller || !task.threadRoot) return
+    void enqueueTurn(caller, {
+      roomId: task.roomId,
+      threadRoot: task.threadRoot,
+      sessionKey: resolved.callerSessionKey,
+      promptText: renderInvocationReturn(completion),
     })
   }
 
@@ -1257,9 +1316,48 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           status: 'refused',
           reason: 'no_open_task: this session is not the assignee of an open task',
         }
+      if (invocations.outstandingFor(caller.sessionKey).length)
+        return { status: 'refused', reason: 'outstanding_handoff: wait for delegated work to return' }
       return { status: taskRegistry.recordSummary(rec.taskId, summary) }
     },
   }
+
+  // Journal reconciliation happens after functions are initialized, but before
+  // the daemon starts accepting work. A prior run has no ACP turn to supply a
+  // terminal boundary, so publish its durable cancellation directly.
+  queueMicrotask(() => {
+    for (const task of interruptedTasks) {
+      if (!task.threadRoot) continue
+      const assignee = bindingFor(task.assignee)
+      if (!assignee) continue
+      const completion: ThreadCompletion = {
+        agent: task.assignee, thread_id: task.threadRoot, status: 'cancelled', reason: 'interrupted_by_restart',
+      }
+      void client.sendCustomEvent({
+        roomId: task.roomId, asUserId: assignee.userId, eventType: THREAD_RESULT_FIELD,
+        content: { ...completion, 'm.relates_to': { rel_type: 'm.thread', event_id: task.threadRoot } },
+      })
+      if (task.notify !== 'none') {
+        const parent = bindingFor(task.parent.agent)
+        if (
+          parent &&
+          taskRegistry.generationOf(task.parent.agent, task.parent.sessionKey) === task.parent.generation
+        ) {
+          void client.sendMessage({
+            roomId: task.roomId,
+            asUserId: assignee.userId,
+            threadRoot: task.parent.threadRoot,
+            content: {
+              msgtype: 'm.notice',
+              body: renderCompletionPrompt(completion),
+              [THREAD_RESULT_FIELD]: completion,
+            },
+          })
+          void enqueueTurn(parent, { roomId: task.roomId, threadRoot: task.parent.threadRoot, sessionKey: task.parent.sessionKey, promptText: renderCompletionPrompt(completion) })
+        }
+      }
+    }
+  })
 
   const syncLoops: SyncLoop[] | undefined =
     mode === 'client'

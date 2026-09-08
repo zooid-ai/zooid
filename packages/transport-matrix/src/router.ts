@@ -100,7 +100,9 @@ export function route(
       }
       const senderAgent = agents.find((x) => x.userId === event.sender)
       if (senderAgent) {
-        if (threadState?.callers[senderAgent.name] === a.name) matches.push(a)
+        // A delegated task returns at an invocation terminal boundary, never
+        // because a callee happened to post progress prose.
+        continue
       } else if (a.name === task.assignee) {
         matches.push(a)
       }

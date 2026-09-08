@@ -43,3 +43,11 @@ export function renderCompletionPrompt(c: ThreadCompletion) {
     ...(c.output?.text ? ['', c.output.text] : []),
   ].join('\n')
 }
+export function renderInvocationReturn(c: ThreadCompletion) {
+  return [
+    `[handoff result] ${c.agent} — status: ${c.status}`,
+    ...(c.reason ? [`reason: ${c.reason}`] : []),
+    ...(c.error ? [`error: ${c.error}`] : []),
+    ...(c.output?.text ? ['', c.output.text] : []),
+  ].join('\n')
+}

@@ -31,6 +31,7 @@ import { buildAcpRegistry } from '../build-registry.js'
 import { prepullImages } from '../prepull-images.js'
 import { mountPushGateway } from '../push-gateway/index.js'
 import { makeSyncCursorStore } from './sync-cursors.js'
+import { makeTaskJournal } from './task-journal.js'
 import { shouldBindHttpListener } from './pull-wiring.js'
 
 export interface StartDaemonOpts {
@@ -223,6 +224,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       adminUserId: opts.adminUserId,
       botUserId: asUserId,
       media: mediaClient,
+      taskJournal: dataDir ? makeTaskJournal(dataDir) : undefined,
       mode,
       loadSince: (uid) => {
         const name = nameByUserId.get(uid)
