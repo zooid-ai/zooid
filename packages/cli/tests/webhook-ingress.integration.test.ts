@@ -179,6 +179,31 @@ describe('loadCustomVerifiers', () => {
   })
 })
 
+/**
+ * Hono builds its route matcher on the first request and then refuses new
+ * routes. The daemon's AS transaction endpoint starts taking pushes during
+ * bootstrap, so mounting the webhook route after serve() threw
+ * "Can not add a route since the matcher is already built" on a real box —
+ * invisible to every test that mounts onto a fresh app.
+ */
+describe('mount ordering', () => {
+  it('is mounted before the app serves its first request', async () => {
+    const app = new Hono()
+    app.get('/_matrix/ping', (c) => c.text('pong'))
+    expect((await app.request('/_matrix/ping')).status).toBe(200)
+
+    expect(() =>
+      mountWebhookRoutes(app, {
+        triggers: loadZooidConfig(yaml).triggers,
+        agentUserIds: { product: '@product:example.org' },
+        resolveRoom: async (r: string) => r,
+        ensureBot: async () => {},
+        sendMessage: async () => ({ event_id: '$1' }),
+      }),
+    ).toThrow(/matcher is already built/)
+  })
+})
+
 describe('webhook ingress', () => {
   it('accepts a correctly signed delivery and posts into the room', async () => {
     const { app, sent } = mk()

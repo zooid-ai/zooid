@@ -268,6 +268,25 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       },
     })
     contextSpawnRegistry.setTaskActions(transport.taskActions)
+
+    // Declared here, assigned after the listener is up. The closures below
+    // read it at call time, so they can be built before the space exists.
+    let spaceRoomId: string | undefined
+    const agentUserIds = Object.fromEntries(bindings.map((b) => [b.name, b.userId]))
+    const resolveRoom = async (r: string): Promise<string | null> =>
+      r.startsWith('!') ? r : await client.resolveAlias(r)
+    const ensureBot = async (mxid: string, roomId: string): Promise<void> => {
+      await client.registerBot(localpart(mxid)).catch(() => {})
+      // Agent rooms are created restricted to workforce-space members
+      // (BotPool.bootstrap): a trigger bot needs space membership too,
+      // or its join to the target room 403s.
+      if (spaceRoomId) {
+        await client.invite({ roomId: spaceRoomId, asUserId, targetUserId: mxid }).catch(() => {})
+        await client.joinRoom(spaceRoomId, mxid).catch(() => {})
+      }
+      await client.joinRoom(roomId, mxid)
+    }
+
     if (shouldBindHttpListener(mode)) {
       const requestedPort = matrix.transport.port ?? 9000
       // The gateway rides the appservice listener, not webStatic: webStatic
@@ -280,6 +299,32 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
           subject: `https://${serverName}`,
         }).publicKey
       }
+      // Webhook ingress rides this same listener, alongside the push gateway.
+      // A separate port would buy no isolation — same process — and the AS
+      // transaction endpoint is already internet-reachable under [ZOD063].
+      // What matters is that each route authenticates its own callers:
+      // hs_token for transactions, HMAC over the raw body for webhooks.
+      //
+      // MUST be mounted before serve(): Hono builds its route matcher on the
+      // first request and then refuses new routes ("matcher is already
+      // built"), and the AS transaction endpoint starts taking pushes during
+      // bootstrap below.
+      const webhookTriggers = Object.entries(config.triggers).filter(([, t]) => t.webhook)
+      if (webhookTriggers.length > 0) {
+        // Imported before serving so a bad `verify:` path fails the daemon
+        // start, not the first delivery.
+        const customVerifiers = await loadCustomVerifiers(config.triggers)
+        mountWebhookRoutes(transport.app, {
+          triggers: config.triggers,
+          customVerifiers,
+          agentUserIds,
+          resolveRoom,
+          ensureBot,
+          sendMessage: (m) => client.sendMessage(m),
+        })
+        for (const [name] of webhookTriggers) console.log(`[webhook] POST /webhook/${name}`)
+      }
+
       // Bind 0.0.0.0 explicitly — @hono/node-server defaults to IPv6-only on
       // macOS, which Docker's NAT bridge can't reach when Tuwunel pushes AS
       // events back to host.docker.internal:<port>.
@@ -295,7 +340,6 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     }
     const spaceLocalpart = matrix.transport.space ?? 'dev'
     const adminUserIds = opts.adminUserId ? [opts.adminUserId] : []
-    let spaceRoomId: string | undefined
     try {
       spaceRoomId = await ensureWorkforceSpace({
         client,
@@ -322,20 +366,6 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     await transport.bootstrap({ spaceRoomId, asUserId, adminUserIds })
 
     if (Object.keys(config.triggers).length > 0) {
-      const agentUserIds = Object.fromEntries(bindings.map((b) => [b.name, b.userId]))
-      const resolveRoom = async (r: string): Promise<string | null> =>
-        r.startsWith('!') ? r : await client.resolveAlias(r)
-      const ensureBot = async (mxid: string, roomId: string): Promise<void> => {
-        await client.registerBot(localpart(mxid)).catch(() => {})
-        // Agent rooms are created restricted to workforce-space members
-        // (BotPool.bootstrap): a trigger bot needs space membership too,
-        // or its join to the target room 403s.
-        if (spaceRoomId) {
-          await client.invite({ roomId: spaceRoomId, asUserId, targetUserId: mxid }).catch(() => {})
-          await client.joinRoom(spaceRoomId, mxid).catch(() => {})
-        }
-        await client.joinRoom(roomId, mxid)
-      }
       triggers = startTriggerScheduler({
         triggers: config.triggers,
         agentUserIds,
@@ -345,32 +375,13 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       })
       const scheduled = Object.values(config.triggers).filter((t) => t.schedule).length
       if (scheduled > 0) console.log(`[trigger] scheduled ${scheduled} trigger(s)`)
-
-      // Webhook triggers ride the appservice listener, alongside the push
-      // gateway. A separate port would buy no isolation — same process — and
-      // the AS transaction endpoint is already internet-reachable under
-      // [ZOD063]. What matters is that each route authenticates its own
-      // callers: hs_token for transactions, HMAC for webhooks.
-      const webhookTriggers = Object.entries(config.triggers).filter(([, t]) => t.webhook)
-      if (webhookTriggers.length > 0) {
-        if (!shouldBindHttpListener(mode)) {
+      if (!shouldBindHttpListener(mode)) {
+        const webhooks = Object.values(config.triggers).filter((t) => t.webhook).length
+        if (webhooks > 0) {
           console.warn(
-            `[webhook] ${webhookTriggers.length} webhook trigger(s) configured, but pull mode ` +
-              `binds no inbound listener — these will never fire.`,
+            `[webhook] ${webhooks} webhook trigger(s) configured, but pull mode binds no ` +
+              `inbound listener — these will never fire.`,
           )
-        } else {
-          // Imported before serving so a bad `verify:` path fails the daemon
-          // start, not the first delivery.
-          const customVerifiers = await loadCustomVerifiers(config.triggers)
-          mountWebhookRoutes(transport.app, {
-            triggers: config.triggers,
-            customVerifiers,
-            agentUserIds,
-            resolveRoom,
-            ensureBot,
-            sendMessage: (m) => client.sendMessage(m),
-          })
-          for (const [name] of webhookTriggers) console.log(`[webhook] POST /webhook/${name}`)
         }
       }
     }
