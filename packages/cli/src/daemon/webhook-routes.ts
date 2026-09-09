@@ -1,4 +1,4 @@
-import type { Hono } from 'hono'
+import type { Context, Hono } from 'hono'
 import type { MatchContext, TriggerConfig, WebhookTriggerConfig } from '@zooid/core'
 import { evaluateMatch, renderTemplate } from '@zooid/core'
 import { fireTrigger, type FireTriggerDeps } from './trigger-runner.js'
@@ -154,10 +154,12 @@ async function handleDelivery(
   }
 }
 
+export const WEBHOOK_ROUTE_PREFIX = '/_zooid/webhooks'
+
 export function mountWebhookRoutes(app: Hono, deps: WebhookDeps): void {
   const cache = new DeliveryCache(DELIVERY_CACHE_TTL_MS)
 
-  app.post('/webhook/:name', async (c) => {
+  const receive = async (c: Context<any, '/:name'>) => {
     const name = c.req.param('name')
     const trigger = deps.triggers[name]
 
@@ -194,5 +196,7 @@ export function mountWebhookRoutes(app: Hono, deps: WebhookDeps): void {
     // 10s and an agent turn does not fit in that.
     void handleDelivery(deps, name, trigger, raw, headers, cache, customDeliveryId)
     return c.text('accepted', 202)
-  })
+  }
+
+  app.post(`${WEBHOOK_ROUTE_PREFIX}/:name`, receive)
 }

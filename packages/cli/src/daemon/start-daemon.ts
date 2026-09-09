@@ -36,7 +36,7 @@ import { makeSyncCursorStore } from './sync-cursors.js'
 import { makeTaskJournal } from './task-journal.js'
 import { shouldBindHttpListener } from './pull-wiring.js'
 import { startTriggerScheduler, validateCron } from './trigger-scheduler.js'
-import { mountWebhookRoutes } from './webhook-routes.js'
+import { mountWebhookRoutes, WEBHOOK_ROUTE_PREFIX } from './webhook-routes.js'
 import { loadCustomVerifiers } from './load-custom-verifiers.js'
 import { joinTriggerRooms } from './trigger-rooms.js'
 
@@ -323,7 +323,9 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
           ensureBot,
           sendMessage: (m) => client.sendMessage(m),
         })
-        for (const [name] of webhookTriggers) console.log(`[webhook] POST /webhook/${name}`)
+        for (const [name] of webhookTriggers) {
+          console.log(`[webhook] POST ${WEBHOOK_ROUTE_PREFIX}/${name}`)
+        }
       }
 
       // Bind 0.0.0.0 explicitly — @hono/node-server defaults to IPv6-only on

@@ -288,9 +288,9 @@ export interface CliFlags {
 }
 
 /**
- * A webhook trigger: exposes `POST /webhook/<name>`, verifies an HMAC
+ * A webhook trigger: exposes `POST /_zooid/webhooks/<name>`, verifies an HMAC
  * signature over the raw request body, and fires like a schedule trigger
- * once accepted. See [[ZOD082]] §Design 4.
+ * once accepted. See [[ZOD082]] §Design 4 and [[ZOD086]].
  */
 export interface WebhookTriggerConfig {
   provider: 'github' | 'stripe' | 'slack' | 'standard' | 'custom'

@@ -60,8 +60,10 @@ const mk = () => {
   return { app, sent }
 }
 
+const webhookUrl = '/_zooid/webhooks/github'
+
 const post = (app: Hono, body: string, headers: Record<string, string>) =>
-  app.request('/webhook/github', {
+  app.request(webhookUrl, {
     method: 'POST',
     body,
     headers: { 'x-hub-signature-256': sign(body), ...headers },
@@ -130,7 +132,7 @@ describe('messages', () => {
 
   it('still rejects a bad signature before any match runs', async () => {
     const { app, sent } = mk()
-    const res = await app.request('/webhook/github', {
+    const res = await app.request(webhookUrl, {
       method: 'POST',
       body: issueOpened,
       headers: { 'x-hub-signature-256': sign(issueOpened, 'wrong'), 'x-github-event': 'issues' },

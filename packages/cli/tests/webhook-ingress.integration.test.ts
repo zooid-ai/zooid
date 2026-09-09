@@ -37,6 +37,7 @@ triggers:
 `
 
 const body = JSON.stringify({ action: 'closed', pull_request: { merged: true, number: 42 } })
+const webhookUrl = '/_zooid/webhooks/reconcile'
 const sign = (b: string, s = secret) =>
   `sha256=${createHmac('sha256', s).update(b).digest('hex')}`
 
@@ -57,7 +58,7 @@ const mk = () => {
 }
 
 const post = (app: Hono, headers: Record<string, string>, b = body) =>
-  app.request('/webhook/reconcile', { method: 'POST', body: b, headers })
+  app.request(webhookUrl, { method: 'POST', body: b, headers })
 
 /**
  * The custom provider is verified by the operator's own function, loaded
@@ -98,7 +99,7 @@ describe('webhook ingress — a custom provider', () => {
 
   const b64 = (b: string, s = secret) => createHmac('sha256', s).update(b).digest('base64')
   const postCustom = (app: Hono, headers: Record<string, string>) =>
-    app.request('/webhook/reconcile', { method: 'POST', body, headers })
+    app.request(webhookUrl, { method: 'POST', body, headers })
 
   it('accepts what the operator verifier accepts, and posts into the room', async () => {
     const { app, sent } = await mkCustom()
@@ -231,7 +232,7 @@ describe('webhook ingress', () => {
 
   it('returns the same 401 for an unknown trigger — the endpoint must not enumerate triggers', async () => {
     const { app } = mk()
-    const unknown = await app.request('/webhook/does-not-exist', { method: 'POST', body })
+    const unknown = await app.request('/_zooid/webhooks/does-not-exist', { method: 'POST', body })
     const badsig = await post(app, { 'x-hub-signature-256': sign(body, 'wrong') })
     expect(unknown.status).toBe(401)
     expect(badsig.status).toBe(401)
@@ -273,7 +274,7 @@ describe('webhook ingress', () => {
         return { event_id: '$1' }
       },
     })
-    const res = await slow.request('/webhook/reconcile', {
+    const res = await slow.request(webhookUrl, {
       method: 'POST',
       body,
       headers: { 'x-hub-signature-256': sign(body), 'x-github-delivery': 'd3' },
