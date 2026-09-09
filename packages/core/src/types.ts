@@ -288,19 +288,64 @@ export interface CliFlags {
 }
 
 /**
- * A schedule trigger: fires on a cron and posts `text` into `room` as `as`,
- * structurally mentioning `mention` so the agent starts a fresh turn through
- * the ordinary message path. No emitter/command tier — see [[ZOD081]] §Concept.
+ * A webhook trigger: exposes `POST /webhook/<name>`, verifies an HMAC
+ * signature over the raw request body, and fires like a schedule trigger
+ * once accepted. See [[ZOD082]] §Design 4.
  */
-export interface TriggerConfig {
-  /** Cron expression. `webhook:` joins this as an alternative in [[ZOD082]]. */
-  schedule?: string
-  /** Full MXID the trigger posts as, e.g. `@cron:example.org`. */
-  as: string
+export interface WebhookTriggerConfig {
+  provider: 'github' | 'stripe' | 'slack' | 'standard' | 'custom'
+  /** Required. Interpolated from env — see [[ZOD081]] §Design 4, Secrets. */
+  secret: string
+  /**
+   * `custom` only, required: path to a module exporting the verifier
+   * function, resolved to an absolute path against the zooid.yaml directory
+   * at parse time. The escape hatch for any scheme without a named provider
+   * — ed25519, SHA-1 over sorted params, bespoke timestamped base strings.
+   * Code rather than declarative fields, because a config language for
+   * signing schemes is a security-critical mini-DSL that still would not
+   * cover them all. The daemon imports it at startup — see
+   * `loadCustomVerifiers` in the CLI.
+   */
+  verify?: string
+}
+
+/**
+ * One message a trigger can post: a room, the agent to mention, the body
+ * template, and — webhook triggers only — a CEL `match:` predicate gating
+ * whether this message fires for a given delivery. See [[ZOD085]] §Design 4.
+ */
+export interface TriggerMessage {
   /** Room id or alias the message goes to. */
   room: string
   /** Agent name (key in `agents`) to mention. Structural, never templated — §Design 3. */
   mention: string
-  /** The message body. Literal for a scheduled trigger. */
+  /** The message body. Literal for a scheduled trigger; `${...}` is CEL-interpolated for a webhook trigger. */
   text: string
+  /**
+   * CEL predicate over the delivery (`event`, `body`, `headers`, `output`).
+   * Absent means always fire. Only valid on a `webhook:` trigger — a
+   * schedule trigger has no delivery to evaluate.
+   */
+  match?: string
+}
+
+/**
+ * A trigger: fires on a cron or a webhook delivery and posts one or more
+ * `messages`, each structurally mentioning its agent so the turn starts
+ * through the ordinary message path. No emitter/command tier — see
+ * [[ZOD081]] §Concept.
+ */
+export interface TriggerConfig {
+  /** Cron expression. Mutually exclusive with `webhook:` — exactly one is required. */
+  schedule?: string
+  /** Webhook ingress config. Mutually exclusive with `schedule:` — [[ZOD082]]. */
+  webhook?: WebhookTriggerConfig
+  /** Full MXID the trigger posts as, e.g. `@cron:example.org`. */
+  as: string
+  /**
+   * The messages this trigger can post. A flat `room:`/`mention:`/`text:`/
+   * `match:` at the trigger level desugars into a single-entry list here at
+   * config load — nothing downstream branches on which spelling was used.
+   */
+  messages: TriggerMessage[]
 }

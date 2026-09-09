@@ -1,10 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { fireTrigger } from './trigger-runner.js'
-import type { TriggerConfig } from '@zooid/core'
+import type { TriggerMessage } from '@zooid/core'
 
-const trigger: TriggerConfig = {
-  schedule: '0 6 * * 1',
-  as: '@cron:example.org',
+const message: TriggerMessage = {
   room: '#ops:example.org',
   mention: 'architect',
   text: 'Check the pinned agent CLI versions.',
@@ -12,7 +10,8 @@ const trigger: TriggerConfig = {
 
 const deps = (over: Record<string, unknown> = {}) => ({
   name: 'image-currency',
-  trigger,
+  as: '@cron:example.org',
+  message,
   agentUserId: '@architect:example.org',
   resolveRoom: vi.fn(async () => '!room:example.org'),
   ensureBot: vi.fn(async () => {}),

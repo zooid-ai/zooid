@@ -4,6 +4,7 @@ import { parse } from 'yaml'
 import type { AcpAgentSpec } from './acp-types.js'
 import { isPreset } from '@zooid/acp-client'
 import { interpolateEnv, interpolateString } from './env-interpolation.js'
+import { compileMatch } from './match-expression.js'
 import type {
   AgentConfig,
   CliFlags,
@@ -16,9 +17,13 @@ import type {
   RoomBinding,
   TransportConfig,
   TriggerConfig,
+  TriggerMessage,
+  WebhookTriggerConfig,
   ZooidConfig,
   ZooidContainerConfig,
 } from './types.js'
+
+const WEBHOOK_PROVIDERS = ['github', 'stripe', 'slack', 'standard', 'custom'] as const
 
 const SLUG_RE = /^[a-z0-9-]+$/
 
@@ -849,6 +854,8 @@ function parseTriggers(
   agents: Record<string, AgentConfig>,
   transports: Record<string, TransportConfig>,
   validateCron: (name: string, expr: string) => void,
+  processEnv: NodeJS.ProcessEnv,
+  configDir: string | undefined,
 ): Record<string, TriggerConfig> {
   if (raw === undefined || raw === null) return {}
   if (typeof raw !== 'object' || Array.isArray(raw)) {
@@ -868,65 +875,223 @@ function parseTriggers(
       )
     }
 
-    if (t.schedule === undefined) {
-      throw new Error(`triggers.${name}: must specify schedule:`)
+    if (t.schedule === undefined && t.webhook === undefined) {
+      throw new Error(`triggers.${name}: must specify schedule: or webhook:`)
     }
-    if (typeof t.schedule !== 'string' || t.schedule.length === 0) {
-      throw new Error(`triggers.${name}.schedule: must be a non-empty string`)
+    if (t.schedule !== undefined && t.webhook !== undefined) {
+      throw new Error(`triggers.${name}: specify either schedule: or webhook:, not both`)
     }
-    validateCron(name, t.schedule)
+
+    let schedule: string | undefined
+    if (t.schedule !== undefined) {
+      if (typeof t.schedule !== 'string' || t.schedule.length === 0) {
+        throw new Error(`triggers.${name}.schedule: must be a non-empty string`)
+      }
+      validateCron(name, t.schedule)
+      schedule = t.schedule
+    }
+
+    let webhook: WebhookTriggerConfig | undefined
+    if (t.webhook !== undefined) {
+      webhook = parseWebhookTrigger(name, t.webhook, processEnv, configDir)
+    }
 
     if (typeof t.as !== 'string' || t.as.length === 0) {
       throw new Error(`triggers.${name}.as: must be a non-empty string`)
     }
     const as = expandTriggerAs(name, t.as, transports)
 
-    if (typeof t.room !== 'string' || t.room.length === 0) {
-      throw new Error(`triggers.${name}.room: must be a non-empty string`)
-    }
-    if (!MATRIX_ROOM_IDENT_RE.test(t.room)) {
+    const hasFlat = t.room !== undefined || t.mention !== undefined || t.text !== undefined ||
+      t.match !== undefined
+    const hasMessages = t.messages !== undefined
+    if (hasFlat && hasMessages) {
       throw new Error(
-        `triggers.${name}.room: must start with '#' or '!' (got ${JSON.stringify(t.room)})`,
+        `triggers.${name}: specify either room:/mention:/text: or messages:, not both`,
       )
     }
-
-    if (typeof t.mention !== 'string' || t.mention.length === 0) {
-      throw new Error(`triggers.${name}.mention: must be a non-empty string`)
-    }
-    const mentionedAgent = agents[t.mention]
-    if (!mentionedAgent) {
-      throw new Error(`triggers.${name}.mention: unknown agent "${t.mention}"`)
-    }
-    if (!mentionedAgent.matrix) {
-      throw new Error(
-        `triggers.${name}.mention: agent "${t.mention}" has no matrix: binding — a trigger ` +
-          `posts through Matrix, so the mentioned agent must be matrix-bound.`,
-      )
-    }
-    // router.ts never routes an event back to its own sender
-    // (`event.sender === a.userId` short-circuits the match), so a trigger
-    // that posts as the very agent it mentions would silently never wake it.
-    if (as === mentionedAgent.matrix.user_id) {
-      throw new Error(
-        `triggers.${name}.as: must not equal the mentioned agent's own MXID (${as}) — a message ` +
-          `an agent sends never routes back to itself, so this trigger would silently never wake ` +
-          `"${t.mention}". Post as a different identity (a dedicated bot, or another agent's).`,
-      )
+    if (!hasFlat && !hasMessages) {
+      throw new Error(`triggers.${name}: must specify room:/mention:/text: or messages:`)
     }
 
-    if (typeof t.text !== 'string' || t.text.length === 0) {
-      throw new Error(`triggers.${name}.text: must be a non-empty string`)
+    let rawMessages: unknown[]
+    if (hasFlat) {
+      // Only a flat trigger's own top-level `match:` gets this unindexed
+      // name — once desugared, per-entry validation always speaks in terms
+      // of `messages[i]`, whether the entry came from `flat` or `messages:`.
+      if (t.match !== undefined && !webhook) {
+        throw new Error(`triggers.${name}.match: only applies to a webhook: trigger`)
+      }
+      rawMessages = [{ room: t.room, mention: t.mention, text: t.text, match: t.match }]
+    } else {
+      if (!Array.isArray(t.messages)) {
+        throw new Error(`triggers.${name}.messages: must be a list`)
+      }
+      if (t.messages.length === 0) {
+        throw new Error(`triggers.${name}.messages: must not be empty`)
+      }
+      rawMessages = t.messages
     }
 
-    result[name] = {
-      schedule: t.schedule,
-      as,
-      room: t.room,
-      mention: t.mention,
-      text: t.text,
-    }
+    const messages = rawMessages.map((m, i) =>
+      parseTriggerMessage(name, i, m, agents, as, !!webhook),
+    )
+
+    const entry: TriggerConfig = { as, messages }
+    if (schedule !== undefined) entry.schedule = schedule
+    if (webhook !== undefined) entry.webhook = webhook
+    result[name] = entry
   }
   return result
+}
+
+/**
+ * Parse and validate one entry of `messages:` (or the single entry a flat
+ * trigger desugars into). Indexed error names (`triggers.<name>.messages[i]`)
+ * apply uniformly here regardless of which spelling produced the entry —
+ * only the flat-level `match:` presence check (in `parseTriggers`) still
+ * speaks in the unindexed, trigger-level name.
+ */
+function parseTriggerMessage(
+  name: string,
+  index: number,
+  raw: unknown,
+  agents: Record<string, AgentConfig>,
+  as: string,
+  hasWebhook: boolean,
+): TriggerMessage {
+  const label = `triggers.${name}.messages[${index}]`
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${label}: must be a mapping`)
+  }
+  const m = raw as Record<string, unknown>
+
+  if (typeof m.room !== 'string' || m.room.length === 0) {
+    throw new Error(`${label}.room: must be a non-empty string`)
+  }
+  if (!MATRIX_ROOM_IDENT_RE.test(m.room)) {
+    throw new Error(`${label}.room: must start with '#' or '!' (got ${JSON.stringify(m.room)})`)
+  }
+
+  if (typeof m.mention !== 'string' || m.mention.length === 0) {
+    throw new Error(`${label}.mention: must be a non-empty string`)
+  }
+  const mentionedAgent = agents[m.mention]
+  if (!mentionedAgent) {
+    throw new Error(`${label}.mention: unknown agent "${m.mention}"`)
+  }
+  if (!mentionedAgent.matrix) {
+    throw new Error(
+      `${label}.mention: agent "${m.mention}" has no matrix: binding — a trigger posts ` +
+        `through Matrix, so the mentioned agent must be matrix-bound.`,
+    )
+  }
+  // router.ts never routes an event back to its own sender
+  // (`event.sender === a.userId` short-circuits the match), so a trigger
+  // that posts as the very agent it mentions would silently never wake it.
+  if (as === mentionedAgent.matrix.user_id) {
+    throw new Error(
+      `triggers.${name}.as: must not equal the mentioned agent's own MXID (${as}) — a message ` +
+        `an agent sends never routes back to itself, so this trigger would silently never wake ` +
+        `"${m.mention}". Post as a different identity (a dedicated bot, or another agent's).`,
+    )
+  }
+
+  if (typeof m.text !== 'string' || m.text.length === 0) {
+    throw new Error(`${label}.text: must be a non-empty string`)
+  }
+
+  const message: TriggerMessage = { room: m.room, mention: m.mention, text: m.text }
+
+  if (m.match !== undefined) {
+    if (typeof m.match !== 'string' || m.match.length === 0) {
+      throw new Error(`${label}.match: must be a non-empty string`)
+    }
+    if (!hasWebhook) {
+      throw new Error(`${label}.match: only applies to a webhook: trigger`)
+    }
+    try {
+      message.match = compileMatch(m.match)
+    } catch (err) {
+      throw new Error(`${label}.match: ${(err as Error).message}`)
+    }
+  }
+
+  return message
+}
+
+/**
+ * Parse and validate a `webhook:` block. The secret is interpolated through
+ * `interpolateString` (not `interpolateEnv`'s deny-listed map form) — it is a
+ * single scalar value, and `ZOOID_*` references are legitimate here just as
+ * they are for a transport's `as_token` — [[ZOD082]] §Design 4, Secrets.
+ */
+function parseWebhookTrigger(
+  name: string,
+  raw: unknown,
+  processEnv: NodeJS.ProcessEnv,
+  configDir: string | undefined,
+): WebhookTriggerConfig {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`triggers.${name}.webhook: must be a mapping`)
+  }
+  const w = raw as Record<string, unknown>
+
+  if (typeof w.provider !== 'string' || w.provider.length === 0) {
+    throw new Error(`triggers.${name}.webhook.provider: must be a non-empty string`)
+  }
+  if (!(WEBHOOK_PROVIDERS as readonly string[]).includes(w.provider)) {
+    throw new Error(
+      `triggers.${name}.webhook.provider: unknown provider ${JSON.stringify(w.provider)} ` +
+        `(expected one of: ${WEBHOOK_PROVIDERS.join(', ')})`,
+    )
+  }
+  const provider = w.provider as WebhookTriggerConfig['provider']
+
+  if (w.event !== undefined) {
+    throw new Error(`triggers.${name}.webhook.event: no longer supported — use match:`)
+  }
+
+  if (typeof w.secret !== 'string' || w.secret.length === 0) {
+    throw new Error(`triggers.${name}.webhook.secret: is required`)
+  }
+  const secret = interpolateString(w.secret, processEnv)
+
+  const config: WebhookTriggerConfig = { provider, secret }
+
+  if (provider !== 'custom') {
+    // Silently ignoring this would leave an operator believing they had
+    // configured a verifier that never ran.
+    if (w.verify !== undefined) {
+      throw new Error(
+        `triggers.${name}.webhook.verify: only applies to provider: custom ` +
+          `(this trigger uses provider: ${provider}, whose signing scheme is built in)`,
+      )
+    }
+    return config
+  }
+
+  // provider: custom — verification is a function the operator supplies,
+  // since no set of declarative fields covers every scheme (ed25519, SHA-1
+  // over sorted params, bespoke timestamped base strings). Resolved here;
+  // the daemon imports it at startup so a bad path fails fast.
+  if (typeof w.verify !== 'string' || w.verify.length === 0) {
+    throw new Error(
+      `triggers.${name}.webhook.verify: is required when provider: custom ` +
+        `(path to a module exporting the verifier function)`,
+    )
+  }
+  if (isAbsolute(w.verify)) {
+    config.verify = w.verify
+  } else if (!configDir) {
+    throw new Error(
+      `triggers.${name}.webhook.verify: relative path ${JSON.stringify(w.verify)} requires ` +
+        `configDir (zooid.yaml directory) — pass it via loadZooidConfig(yaml, { configDir })`,
+    )
+  } else {
+    config.verify = pathResolve(configDir, w.verify)
+  }
+
+  return config
 }
 
 function parseRuntime(raw: unknown): 'local' | 'docker' | 'podman' {
@@ -1004,6 +1169,8 @@ export function loadZooidConfig(
     agents,
     transports,
     opts.validateCron ?? defaultValidateCron,
+    processEnv,
+    opts.configDir,
   )
 
   const cfg: ZooidConfig = {

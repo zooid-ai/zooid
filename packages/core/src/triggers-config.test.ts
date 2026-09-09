@@ -80,15 +80,15 @@ describe('triggers: config', () => {
     expect(t).toEqual({
       schedule: '0 6 * * 1',
       as: '@cron:example.org',
-      room: '#ops:example.org',
-      mention: 'architect',
-      text: 'Check the pinned agent CLI versions.',
+      messages: [
+        { room: '#ops:example.org', mention: 'architect', text: 'Check the pinned agent CLI versions.' },
+      ],
     })
   })
 
   it('accepts a room id as well as an alias', () => {
     const cfg = loadZooidConfig(withTriggers(ok.replace('"#ops:example.org"', '"!abc:example.org"')))
-    expect(cfg.triggers['image-currency'].room).toBe('!abc:example.org')
+    expect(cfg.triggers['image-currency'].messages[0].room).toBe('!abc:example.org')
   })
 
   it('rejects run: — the emitter tier was dropped, and a stale config must fail loudly', () => {
@@ -100,7 +100,7 @@ describe('triggers: config', () => {
   it('rejects a mention that names no configured agent', () => {
     expect(() =>
       loadZooidConfig(withTriggers(ok.replace('mention: architect', 'mention: nobody'))),
-    ).toThrow(/triggers\.image-currency\.mention: unknown agent "nobody"/)
+    ).toThrow(/triggers\.image-currency\.messages\[0\]\.mention: unknown agent "nobody"/)
   })
 
   it('rejects an invalid cron expression at load time, not at first fire', () => {
@@ -141,19 +141,21 @@ describe('triggers: config', () => {
   it('rejects mention: of an agent with no matrix: binding', () => {
     const block = ok.replace('mention: architect', 'mention: worker')
     expect(() => loadZooidConfig(`${baseWithHttpAgent}\ntriggers:\n${block}`)).toThrow(
-      /triggers\.image-currency\.mention: agent "worker" has no matrix: binding/,
+      /triggers\.image-currency\.messages\[0\]\.mention: agent "worker" has no matrix: binding/,
     )
   })
 
   it('requires as, room, mention and text', () => {
+    const indexed = new Set(['room', 'mention', 'text'])
     for (const field of ['as', 'room', 'mention', 'text']) {
       const block = ok
         .split('\n')
         .filter((l) => !l.trim().startsWith(`${field}:`))
         .join('\n')
-      expect(() => loadZooidConfig(withTriggers(block))).toThrow(
-        new RegExp(`triggers\\.image-currency\\.${field}`),
-      )
+      const label = indexed.has(field)
+        ? `triggers\\.image-currency\\.messages\\[0\\]\\.${field}`
+        : `triggers\\.image-currency\\.${field}`
+      expect(() => loadZooidConfig(withTriggers(block))).toThrow(new RegExp(label))
     }
   })
 
