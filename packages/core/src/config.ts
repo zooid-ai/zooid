@@ -4,6 +4,7 @@ import { parse } from 'yaml'
 import type { AcpAgentSpec } from './acp-types.js'
 import { isPreset } from '@zooid/acp-client'
 import { interpolateEnv, interpolateString } from './env-interpolation.js'
+import { compileMatch } from './match-expression.js'
 import type {
   AgentConfig,
   CliFlags,
@@ -16,6 +17,7 @@ import type {
   RoomBinding,
   TransportConfig,
   TriggerConfig,
+  TriggerMessage,
   WebhookTriggerConfig,
   ZooidConfig,
   ZooidContainerConfig,
@@ -899,54 +901,122 @@ function parseTriggers(
     }
     const as = expandTriggerAs(name, t.as, transports)
 
-    if (typeof t.room !== 'string' || t.room.length === 0) {
-      throw new Error(`triggers.${name}.room: must be a non-empty string`)
-    }
-    if (!MATRIX_ROOM_IDENT_RE.test(t.room)) {
+    const hasFlat = t.room !== undefined || t.mention !== undefined || t.text !== undefined ||
+      t.match !== undefined
+    const hasMessages = t.messages !== undefined
+    if (hasFlat && hasMessages) {
       throw new Error(
-        `triggers.${name}.room: must start with '#' or '!' (got ${JSON.stringify(t.room)})`,
+        `triggers.${name}: specify either room:/mention:/text: or messages:, not both`,
       )
     }
-
-    if (typeof t.mention !== 'string' || t.mention.length === 0) {
-      throw new Error(`triggers.${name}.mention: must be a non-empty string`)
-    }
-    const mentionedAgent = agents[t.mention]
-    if (!mentionedAgent) {
-      throw new Error(`triggers.${name}.mention: unknown agent "${t.mention}"`)
-    }
-    if (!mentionedAgent.matrix) {
-      throw new Error(
-        `triggers.${name}.mention: agent "${t.mention}" has no matrix: binding — a trigger ` +
-          `posts through Matrix, so the mentioned agent must be matrix-bound.`,
-      )
-    }
-    // router.ts never routes an event back to its own sender
-    // (`event.sender === a.userId` short-circuits the match), so a trigger
-    // that posts as the very agent it mentions would silently never wake it.
-    if (as === mentionedAgent.matrix.user_id) {
-      throw new Error(
-        `triggers.${name}.as: must not equal the mentioned agent's own MXID (${as}) — a message ` +
-          `an agent sends never routes back to itself, so this trigger would silently never wake ` +
-          `"${t.mention}". Post as a different identity (a dedicated bot, or another agent's).`,
-      )
+    if (!hasFlat && !hasMessages) {
+      throw new Error(`triggers.${name}: must specify room:/mention:/text: or messages:`)
     }
 
-    if (typeof t.text !== 'string' || t.text.length === 0) {
-      throw new Error(`triggers.${name}.text: must be a non-empty string`)
+    let rawMessages: unknown[]
+    if (hasFlat) {
+      // Only a flat trigger's own top-level `match:` gets this unindexed
+      // name — once desugared, per-entry validation always speaks in terms
+      // of `messages[i]`, whether the entry came from `flat` or `messages:`.
+      if (t.match !== undefined && !webhook) {
+        throw new Error(`triggers.${name}.match: only applies to a webhook: trigger`)
+      }
+      rawMessages = [{ room: t.room, mention: t.mention, text: t.text, match: t.match }]
+    } else {
+      if (!Array.isArray(t.messages)) {
+        throw new Error(`triggers.${name}.messages: must be a list`)
+      }
+      if (t.messages.length === 0) {
+        throw new Error(`triggers.${name}.messages: must not be empty`)
+      }
+      rawMessages = t.messages
     }
 
-    const entry: TriggerConfig = {
-      as,
-      room: t.room,
-      mention: t.mention,
-      text: t.text,
-    }
+    const messages = rawMessages.map((m, i) =>
+      parseTriggerMessage(name, i, m, agents, as, !!webhook),
+    )
+
+    const entry: TriggerConfig = { as, messages }
     if (schedule !== undefined) entry.schedule = schedule
     if (webhook !== undefined) entry.webhook = webhook
     result[name] = entry
   }
   return result
+}
+
+/**
+ * Parse and validate one entry of `messages:` (or the single entry a flat
+ * trigger desugars into). Indexed error names (`triggers.<name>.messages[i]`)
+ * apply uniformly here regardless of which spelling produced the entry —
+ * only the flat-level `match:` presence check (in `parseTriggers`) still
+ * speaks in the unindexed, trigger-level name.
+ */
+function parseTriggerMessage(
+  name: string,
+  index: number,
+  raw: unknown,
+  agents: Record<string, AgentConfig>,
+  as: string,
+  hasWebhook: boolean,
+): TriggerMessage {
+  const label = `triggers.${name}.messages[${index}]`
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`${label}: must be a mapping`)
+  }
+  const m = raw as Record<string, unknown>
+
+  if (typeof m.room !== 'string' || m.room.length === 0) {
+    throw new Error(`${label}.room: must be a non-empty string`)
+  }
+  if (!MATRIX_ROOM_IDENT_RE.test(m.room)) {
+    throw new Error(`${label}.room: must start with '#' or '!' (got ${JSON.stringify(m.room)})`)
+  }
+
+  if (typeof m.mention !== 'string' || m.mention.length === 0) {
+    throw new Error(`${label}.mention: must be a non-empty string`)
+  }
+  const mentionedAgent = agents[m.mention]
+  if (!mentionedAgent) {
+    throw new Error(`${label}.mention: unknown agent "${m.mention}"`)
+  }
+  if (!mentionedAgent.matrix) {
+    throw new Error(
+      `${label}.mention: agent "${m.mention}" has no matrix: binding — a trigger posts ` +
+        `through Matrix, so the mentioned agent must be matrix-bound.`,
+    )
+  }
+  // router.ts never routes an event back to its own sender
+  // (`event.sender === a.userId` short-circuits the match), so a trigger
+  // that posts as the very agent it mentions would silently never wake it.
+  if (as === mentionedAgent.matrix.user_id) {
+    throw new Error(
+      `triggers.${name}.as: must not equal the mentioned agent's own MXID (${as}) — a message ` +
+        `an agent sends never routes back to itself, so this trigger would silently never wake ` +
+        `"${m.mention}". Post as a different identity (a dedicated bot, or another agent's).`,
+    )
+  }
+
+  if (typeof m.text !== 'string' || m.text.length === 0) {
+    throw new Error(`${label}.text: must be a non-empty string`)
+  }
+
+  const message: TriggerMessage = { room: m.room, mention: m.mention, text: m.text }
+
+  if (m.match !== undefined) {
+    if (typeof m.match !== 'string' || m.match.length === 0) {
+      throw new Error(`${label}.match: must be a non-empty string`)
+    }
+    if (!hasWebhook) {
+      throw new Error(`${label}.match: only applies to a webhook: trigger`)
+    }
+    try {
+      message.match = compileMatch(m.match)
+    } catch (err) {
+      throw new Error(`${label}.match: ${(err as Error).message}`)
+    }
+  }
+
+  return message
 }
 
 /**
@@ -977,12 +1047,8 @@ function parseWebhookTrigger(
   }
   const provider = w.provider as WebhookTriggerConfig['provider']
 
-  let event: string | undefined
   if (w.event !== undefined) {
-    if (typeof w.event !== 'string' || w.event.length === 0) {
-      throw new Error(`triggers.${name}.webhook.event: must be a non-empty string`)
-    }
-    event = w.event
+    throw new Error(`triggers.${name}.webhook.event: no longer supported — use match:`)
   }
 
   if (typeof w.secret !== 'string' || w.secret.length === 0) {
@@ -991,7 +1057,6 @@ function parseWebhookTrigger(
   const secret = interpolateString(w.secret, processEnv)
 
   const config: WebhookTriggerConfig = { provider, secret }
-  if (event !== undefined) config.event = event
 
   if (provider !== 'custom') {
     // Silently ignoring this would leave an operator believing they had

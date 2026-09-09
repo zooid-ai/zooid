@@ -26,7 +26,6 @@ triggers:
   reconcile:
     webhook:
       provider: github
-      event: pull_request
       secret: "${secret}"
     as: "@hook:example.org"
     room: "!product:example.org"
@@ -70,7 +69,6 @@ const post = (app: Hono, headers: Record<string, string>, b = body) =>
 describe('webhook ingress — a custom provider', () => {
   const customYaml = yaml.replace(
     `      provider: github
-      event: pull_request
       secret: "${secret}"`,
     `      provider: custom
       verify: ./__fixtures__/shopify-verifier.mjs
@@ -152,7 +150,6 @@ describe('loadCustomVerifiers', () => {
   const withVerify = (path: string) =>
     yaml.replace(
       `      provider: github
-      event: pull_request
       secret: "${secret}"`,
       `      provider: custom
       verify: ${path}

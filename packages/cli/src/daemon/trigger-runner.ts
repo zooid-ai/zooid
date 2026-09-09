@@ -1,8 +1,9 @@
-import type { TriggerConfig } from '@zooid/core'
+import type { TriggerMessage } from '@zooid/core'
 
 export interface FireTriggerDeps {
   name: string
-  trigger: TriggerConfig
+  as: string
+  message: TriggerMessage
   agentUserId: string
   resolveRoom: (room: string) => Promise<string | null>
   ensureBot: (asUserId: string, roomId: string) => Promise<void>
@@ -14,20 +15,20 @@ export interface FireTriggerDeps {
 }
 
 export async function fireTrigger(deps: FireTriggerDeps): Promise<void> {
-  const { name, trigger, agentUserId, resolveRoom, ensureBot, sendMessage } = deps
+  const { name, as, message, agentUserId, resolveRoom, ensureBot, sendMessage } = deps
   try {
-    const roomId = await resolveRoom(trigger.room)
+    const roomId = await resolveRoom(message.room)
     if (!roomId) {
-      console.warn(`[trigger:${name}] cannot resolve room ${trigger.room} — skipping`)
+      console.warn(`[trigger:${name}] cannot resolve room ${message.room} — skipping`)
       return
     }
-    await ensureBot(trigger.as, roomId)
+    await ensureBot(as, roomId)
     await sendMessage({
       roomId,
-      asUserId: trigger.as,
+      asUserId: as,
       content: {
         msgtype: 'm.text',
-        body: trigger.text,
+        body: message.text,
         // Structural mention: routes deterministically AND disarms the raw-body
         // fallback in extractMentions, which only fires when nothing matched.
         'm.mentions': { user_ids: [agentUserId] },

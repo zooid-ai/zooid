@@ -30,6 +30,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@bufbuild/cel": "^0.6.1",
     "@zooid/acp-client": "workspace:^",
     "dotenv-expand": "^13.0.0",
     "yaml": "^2.5.0"

@@ -7,7 +7,9 @@ export {
   findConfigFile,
 } from './config.js'
 export type { LoadZooidConfigOptions } from './config.js'
-export { renderTriggerBody } from './trigger-render.js'
+export { renderTemplate } from './render-template.js'
+export { compileMatch, evaluateMatch } from './match-expression.js'
+export type { MatchContext } from './match-expression.js'
 export { AcpAgentRegistry, resolveAcpAgentSpec } from './acp-registry.js'
 export {
   ApprovalCorrelator,
@@ -40,6 +42,7 @@ export type {
   InboundMessage,
   ThreadRef,
   TriggerConfig,
+  TriggerMessage,
   WebhookTriggerConfig,
 } from './types.js'
 export type {

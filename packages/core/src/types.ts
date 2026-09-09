@@ -294,8 +294,6 @@ export interface CliFlags {
  */
 export interface WebhookTriggerConfig {
   provider: 'github' | 'stripe' | 'slack' | 'standard' | 'custom'
-  /** Provider event name to accept; other events are acknowledged and ignored. */
-  event?: string
   /** Required. Interpolated from env — see [[ZOD081]] §Design 4, Secrets. */
   secret: string
   /**
@@ -312,9 +310,30 @@ export interface WebhookTriggerConfig {
 }
 
 /**
- * A schedule trigger: fires on a cron and posts `text` into `room` as `as`,
- * structurally mentioning `mention` so the agent starts a fresh turn through
- * the ordinary message path. No emitter/command tier — see [[ZOD081]] §Concept.
+ * One message a trigger can post: a room, the agent to mention, the body
+ * template, and — webhook triggers only — a CEL `match:` predicate gating
+ * whether this message fires for a given delivery. See [[ZOD085]] §Design 4.
+ */
+export interface TriggerMessage {
+  /** Room id or alias the message goes to. */
+  room: string
+  /** Agent name (key in `agents`) to mention. Structural, never templated — §Design 3. */
+  mention: string
+  /** The message body. Literal for a scheduled trigger; `${...}` is CEL-interpolated for a webhook trigger. */
+  text: string
+  /**
+   * CEL predicate over the delivery (`event`, `body`, `headers`, `output`).
+   * Absent means always fire. Only valid on a `webhook:` trigger — a
+   * schedule trigger has no delivery to evaluate.
+   */
+  match?: string
+}
+
+/**
+ * A trigger: fires on a cron or a webhook delivery and posts one or more
+ * `messages`, each structurally mentioning its agent so the turn starts
+ * through the ordinary message path. No emitter/command tier — see
+ * [[ZOD081]] §Concept.
  */
 export interface TriggerConfig {
   /** Cron expression. Mutually exclusive with `webhook:` — exactly one is required. */
@@ -323,10 +342,10 @@ export interface TriggerConfig {
   webhook?: WebhookTriggerConfig
   /** Full MXID the trigger posts as, e.g. `@cron:example.org`. */
   as: string
-  /** Room id or alias the message goes to. */
-  room: string
-  /** Agent name (key in `agents`) to mention. Structural, never templated — §Design 3. */
-  mention: string
-  /** The message body. Literal for a scheduled trigger; `${output}` is filled for a webhook trigger. */
-  text: string
+  /**
+   * The messages this trigger can post. A flat `room:`/`mention:`/`text:`/
+   * `match:` at the trigger level desugars into a single-entry list here at
+   * config load — nothing downstream branches on which spelling was used.
+   */
+  messages: TriggerMessage[]
 }

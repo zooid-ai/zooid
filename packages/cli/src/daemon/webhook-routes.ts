@@ -1,6 +1,6 @@
 import type { Hono } from 'hono'
-import type { TriggerConfig, WebhookTriggerConfig } from '@zooid/core'
-import { renderTriggerBody } from '@zooid/core'
+import type { MatchContext, TriggerConfig, WebhookTriggerConfig } from '@zooid/core'
+import { evaluateMatch, renderTemplate } from '@zooid/core'
 import { fireTrigger, type FireTriggerDeps } from './trigger-runner.js'
 import { verifySignature, verifyCustomSignature, type CustomVerifier } from './webhook-verify.js'
 import { DeliveryCache } from './delivery-cache.js'
@@ -105,36 +105,48 @@ async function handleDelivery(
     const webhook = trigger.webhook
     if (!webhook) return
 
-    // Only filter when the provider actually told us the event type — a
-    // request with no event header cannot be filtered, so it passes through
-    // rather than being silently dropped.
-    if (webhook.event) {
-      const eventHeader = EVENT_HEADER_BY_PROVIDER[webhook.provider]
-      const event = eventHeader ? headers[eventHeader] : undefined
-      if (event !== undefined && event !== webhook.event) return
-    }
-
     const idHeader = DELIVERY_ID_HEADER_BY_PROVIDER[webhook.provider]
     // A custom verifier reports its own delivery id, since only it knows
     // where the service puts one.
     const deliveryId = customDeliveryId ?? (idHeader ? headers[idHeader] : undefined)
     if (deliveryId !== undefined && cache.seen(`${name}:${deliveryId}`)) return
 
-    const agentUserId = deps.agentUserIds[trigger.mention]
-    if (!agentUserId) {
-      console.warn(`[webhook:${name}] unknown agent "${trigger.mention}" — skipping`)
-      return
+    const eventHeader = EVENT_HEADER_BY_PROVIDER[webhook.provider]
+    const event = eventHeader ? headers[eventHeader] : undefined
+
+    let body: unknown
+    try {
+      body = JSON.parse(raw)
+    } catch {
+      body = undefined
     }
 
-    const text = renderTriggerBody(trigger.text, renderPayload(raw))
-    await fireTrigger({
-      name,
-      trigger: { ...trigger, text },
-      agentUserId,
-      resolveRoom: deps.resolveRoom,
-      ensureBot: deps.ensureBot,
-      sendMessage: deps.sendMessage,
-    })
+    const ctx: MatchContext = {
+      event,
+      body,
+      headers: definedHeaders(headers),
+      output: renderPayload(raw),
+    }
+
+    for (const message of trigger.messages) {
+      if (message.match !== undefined && !evaluateMatch(message.match, ctx)) continue
+
+      const agentUserId = deps.agentUserIds[message.mention]
+      if (!agentUserId) {
+        console.warn(`[webhook:${name}] unknown agent "${message.mention}" — skipping`)
+        continue
+      }
+
+      await fireTrigger({
+        name,
+        as: trigger.as,
+        message: { ...message, text: renderTemplate(message.text, ctx) },
+        agentUserId,
+        resolveRoom: deps.resolveRoom,
+        ensureBot: deps.ensureBot,
+        sendMessage: deps.sendMessage,
+      })
+    }
   } catch (err) {
     // Never throw: the response has already been sent, and one bad delivery
     // must not take down the daemon.

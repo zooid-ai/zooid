@@ -19,7 +19,6 @@ triggers:
   reconcile:
     webhook:
       provider: github
-      event: pull_request
       secret: "topsecret"
     as: "@hook:example.org"
     room: "#product:example.org"
@@ -33,8 +32,14 @@ triggers:
 describe('webhook triggers: config', () => {
   it('parses a webhook trigger', () => {
     const t = loadZooidConfig(base).triggers.reconcile
-    expect(t.webhook).toEqual({ provider: 'github', event: 'pull_request', secret: 'topsecret' })
+    expect(t.webhook).toEqual({ provider: 'github', secret: 'topsecret' })
     expect(t.schedule).toBeUndefined()
+  })
+
+  it('no longer accepts event: — use match: instead', () => {
+    expect(() =>
+      loadZooidConfig(base.replace('provider: github', 'provider: github\n      event: pull_request')),
+    ).toThrow(/triggers\.reconcile\.webhook\.event: no longer supported — use match:/)
   })
 
   it('rejects a trigger with both schedule and webhook', () => {
@@ -77,7 +82,6 @@ describe('webhook triggers: the custom provider', () => {
   const custom = (block: string) =>
     base.replace(
       `      provider: github
-      event: pull_request
       secret: "topsecret"`,
       block,
     )

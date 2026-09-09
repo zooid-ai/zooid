@@ -38,6 +38,7 @@ import { shouldBindHttpListener } from './pull-wiring.js'
 import { startTriggerScheduler, validateCron } from './trigger-scheduler.js'
 import { mountWebhookRoutes } from './webhook-routes.js'
 import { loadCustomVerifiers } from './load-custom-verifiers.js'
+import { joinTriggerRooms } from './trigger-rooms.js'
 
 export interface StartDaemonOpts {
   configPath?: string
@@ -366,6 +367,14 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     await transport.bootstrap({ spaceRoomId, asUserId, adminUserIds })
 
     if (Object.keys(config.triggers).length > 0) {
+      // Join every trigger's rooms up front: a lazy join inside a webhook's
+      // 10s delivery window can 403 after the 202 already went out, silently
+      // losing the message.
+      await joinTriggerRooms({ triggers: config.triggers, resolveRoom, ensureBot })
+      console.log(
+        `[trigger] joined rooms for ${Object.keys(config.triggers).length} trigger(s)`,
+      )
+
       triggers = startTriggerScheduler({
         triggers: config.triggers,
         agentUserIds,
