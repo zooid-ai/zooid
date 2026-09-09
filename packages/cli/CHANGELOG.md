@@ -1,5 +1,22 @@
 # zooid
 
+## 0.14.0
+
+### Minor Changes
+
+- Add webhook ingress under `_zooid` with match-expression routing, schedule triggers to wake an agent through a room, and per-agent context-mcp sockets with a connection-bound identity and task/wake tool surface. Add native zooid task tools for pi agents, and task-thread handoff tracking with thread fan-out dispatch/completion in the Matrix transport. Fix a race where directional returns in the Matrix transport could fire before the current turn ended, and install the pi extension into pi's own resolved agent directory per agent. Bump the bundled `@zooid/web` to 0.12.0 (push notifications, space lobby, attachments, plain-text link rendering).
+
+### Patch Changes
+
+- @zooid/core@0.14.0
+- @zooid/acp-client@0.14.0
+- @zooid/context-mcp@0.14.0
+- @zooid/runtime-docker@0.14.0
+- @zooid/runtime-local@0.14.0
+- @zooid/transport-http@0.14.0
+- @zooid/transport-matrix@0.14.0
+- @zooid/pi-extension@0.13.1
+
 ## 0.13.0
 
 ### Minor Changes
