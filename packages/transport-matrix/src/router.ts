@@ -125,7 +125,7 @@ export function route(
         // sender (its caller), never to a callee. Directional continuation
         // keeps agent↔agent handoffs from looping — the call graph is a tree
         // rooted at the human, so returns only ever walk up.
-        if (threadState.callers[senderAgent.name] === a.name) matches.push(a)
+        if (isReturnRoute(event, a, agents, threadState)) matches.push(a)
       } else {
         // Human (or non-agent) follow-up: continue with the most-recent-posting
         // agent, or inherit the root mention if no agent has posted yet.
@@ -139,4 +139,55 @@ export function route(
     }
   }
   return matches
+}
+
+/**
+ * True when routing `event` to `agent` is a *return* — a callee's reply
+ * bubbling up to the agent that called it — rather than a fresh call or a
+ * human follow-up. A callee may address its existing caller explicitly and it
+ * is still a return.
+ *
+ * The transport defers returns to the sender's turn boundary. An agent turn
+ * posts one `m.room.message` per buffered chunk (every tool call forces a
+ * flush), so treating each chunk as a return woke the caller once per chunk
+ * and the two agents read as re-triggering each other. See [[ZOD039]]
+ * § Implicit triggers → Directional continuation.
+ */
+export function isReturnRoute(
+  event: MaybeEvent,
+  agent: AgentBinding,
+  agents: AgentBinding[],
+  threadState: ThreadState | undefined,
+): boolean {
+  if (!threadState || agent.trigger !== 'mention') return false
+  const sender = agents.find((x) => x.userId === event.sender)
+  if (!sender || sender.name === agent.name) return false
+  // Addressing the existing caller explicitly does not reverse the call edge:
+  // it is still the callee returning control. This matters for agents that
+  // naturally prefix their final answer with `@caller`; treating that as a new
+  // call creates the exact A ↔ B cycle directional continuation prevents.
+  return threadState.callers[sender.name] === agent.name
+}
+
+/**
+ * True when recording `callee`’s caller as `caller` would put a cycle in the
+ * call graph — i.e. `callee` is already an ancestor of `caller`. The graph has
+ * to stay a tree rooted at the human, because `route` walks it upward on every
+ * return; a 2-cycle (A calls B, B @mentions A back) would bounce forever.
+ * A mention that would close a cycle is a return, not a call, so it routes but
+ * records no edge.
+ */
+export function wouldCycleCallers(
+  callers: Record<string, string>,
+  callee: string,
+  caller: string,
+): boolean {
+  const seen = new Set<string>()
+  let cursor: string | undefined = caller
+  while (cursor !== undefined) {
+    if (cursor === callee || seen.has(cursor)) return true
+    seen.add(cursor)
+    cursor = callers[cursor]
+  }
+  return false
 }

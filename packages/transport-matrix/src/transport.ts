@@ -15,7 +15,14 @@ import { THREAD_RESULT_FIELD, THREAD_START_FIELD } from '@zooid/core'
 import type { AgentEvent, ContentBlock } from '@zooid/acp-client'
 import { MatrixClient } from './matrix-client.js'
 import { BotPool } from './bot-pool.js'
-import { route, isMediaMsgtype, type AgentBinding, type ThreadState } from './router.js'
+import {
+  route,
+  isMediaMsgtype,
+  isReturnRoute,
+  wouldCycleCallers,
+  type AgentBinding,
+  type ThreadState,
+} from './router.js'
 import { sessionKeyFor, composeHandoffKey } from './session-keys.js'
 import { stripMention, extractMentions } from './mentions.js'
 import {
@@ -95,6 +102,8 @@ export interface CreateMatrixTransportOptions {
   taskJournal?: TaskJournal
   taskRunId?: string
   pendingInput?: PendingInputRegistry
+  /** Deferred-return fallback window. Defaults to `RETURN_GRACE_MS`. */
+  returnGraceMs?: number
 }
 
 interface SessionContext {
@@ -102,6 +111,19 @@ interface SessionContext {
   roomId: string
   /** Always set — every session is thread-scoped via agent-promotion. */
   threadRoot: string
+}
+
+/** A callee's return to its caller, held until the callee's turn ends. */
+interface PendingReturn {
+  roomId: string
+  threadRoot: string
+  /** Last message of the turn so far; prompts the caller when released. */
+  event: MatrixEvent
+  /** Every chunk the callee posted this turn, in order. */
+  texts: string[]
+  /** Callers to wake, by agent name. */
+  targets: Map<string, AgentBinding>
+  timer?: ReturnType<typeof setTimeout>
 }
 interface TurnInput {
   roomId: string
@@ -134,6 +156,15 @@ interface MatrixEvent {
 }
 
 const STARTUP_GRACE_MS = 5_000
+
+/**
+ * How long a deferred return waits for the sending agent's `dev.zooid.turn.end`
+ * before firing anyway. The turn.end always follows the turn's messages on the
+ * wire, so this only matters when there is no turn behind them at all — the
+ * daemon restarted mid-turn, or a human posted as the agent's user from a
+ * plain Matrix client. Without it such a return would strand forever.
+ */
+const RETURN_GRACE_MS = 90_000
 
 interface MediaBlocksResult {
   blocks: ContentBlock[]
@@ -287,6 +318,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   } = opts
   const drainQuietMs = opts.drainQuietMs ?? DRAIN_QUIET_MS
   const drainMaxMs = opts.drainMaxMs ?? DRAIN_MAX_MS
+  const returnGraceMs = opts.returnGraceMs ?? RETURN_GRACE_MS
   const mediaClient = opts.media
   const writeAttachmentFn = opts.writeAttachmentFn ?? writeAttachment
   const pendingMedia = new PendingMediaStore()
@@ -315,6 +347,85 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const pendingInput = opts.pendingInput ?? NO_PENDING_INPUT
   const bindingFor = (name: string) => bindings.find((b) => b.name === name)
   const turnQueues = new Map<string, Promise<void>>()
+  /**
+   * Returns awaiting their sender's turn boundary, keyed `<agent>::<threadRoot>`.
+   * See `isReturnRoute`: an agent turn posts one message per buffered chunk, so
+   * a return must not fire per message or the caller wakes once per chunk (and
+   * its replies then read as the two agents re-triggering each other). We stash
+   * the callee's prose instead and hand the caller the whole turn at once.
+   */
+  const pendingReturns = new Map<string, PendingReturn>()
+  const returnKey = (agentName: string, threadRoot: string) => `${agentName}::${threadRoot}`
+
+  function stashReturn(
+    sender: AgentBinding,
+    threadRoot: string,
+    roomId: string,
+    evt: MatrixEvent,
+    targets: AgentBinding[],
+  ): void {
+    const key = returnKey(sender.name, threadRoot)
+    let pending = pendingReturns.get(key)
+    if (!pending) {
+      pending = { roomId, threadRoot, event: evt, texts: [], targets: new Map() }
+      pendingReturns.set(key, pending)
+    }
+    // Prompt the caller with the last event of the turn but the text of all of
+    // it — mid-turn chunks carry content the caller would otherwise never see.
+    pending.event = evt
+    const body = evt.content?.body?.trim()
+    if (body) pending.texts.push(body)
+    for (const t of targets) pending.targets.set(t.name, t)
+    if (pending.timer) clearTimeout(pending.timer)
+    pending.timer = setTimeout(() => releaseReturn(key), returnGraceMs)
+    pending.timer.unref?.()
+    console.log(
+      `[matrix] holding return ${sender.name} → ${[...pending.targets.keys()].join(',')} ` +
+        `until turn end (thread=${threadRoot})`,
+    )
+  }
+
+  function releaseReturn(key: string): void {
+    const pending = pendingReturns.get(key)
+    if (!pending) return
+    pendingReturns.delete(key)
+    if (pending.timer) clearTimeout(pending.timer)
+    const promptText = pending.texts.join('\n\n')
+    for (const target of pending.targets.values()) {
+      console.log(`[matrix] → ${target.name} (${target.userId}) [return]`)
+      void enqueueTurn(target, {
+        roomId: pending.roomId,
+        threadRoot: pending.threadRoot,
+        sessionKey: sessionKeyFor(
+          target.name,
+          pending.threadRoot,
+          threadStates.get(pending.threadRoot),
+        ),
+        event: pending.event,
+        ...(promptText ? { promptText } : {}),
+      })
+    }
+  }
+
+  /** Cancel a held return because its target is being woken by this event anyway. */
+  function dropPendingReturn(threadRoot: string, agentName: string): void {
+    for (const [key, pending] of pendingReturns) {
+      if (pending.threadRoot !== threadRoot) continue
+      if (!pending.targets.delete(agentName)) continue
+      if (pending.targets.size === 0) {
+        if (pending.timer) clearTimeout(pending.timer)
+        pendingReturns.delete(key)
+      }
+    }
+  }
+
+  function dropThreadReturns(threadRoot: string): void {
+    for (const [key, pending] of pendingReturns) {
+      if (pending.threadRoot !== threadRoot) continue
+      if (pending.timer) clearTimeout(pending.timer)
+      pendingReturns.delete(key)
+    }
+  }
   // Drop events older than this — in push (appservice) mode Tuwunel may replay
   // a backlog after the daemon was offline, and we don't want yesterday's
   // "@docs hi" to fire now. In pull (client) mode the persisted `since` cursor
@@ -694,6 +805,9 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         return
       }
       console.log(`[matrix] inbound dev.zooid.session_reset in ${evt.room_id} thread=${threadRoot}`)
+      // /clear must not allow a pre-reset deferred return to wake an agent up
+      // later via either its old turn.end or the fallback timer.
+      dropThreadReturns(threadRoot)
       // [[ZOD071]]: a thread's sessions are the thread-level one plus one per
       // handoff arc — end them all. Reset events aren't m.room.message, so
       // the self-heal rebuild above doesn't cover them; rebuild here if the
@@ -805,6 +919,22 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     }
     logInbound(evt)
 
+    // The callee's turn boundary: the daemon sends this only after that turn's
+    // whole send queue has drained, so every message it produced has already
+    // arrived above. Release the return it was holding.
+    if (evt.type === 'dev.zooid.turn.end') {
+      const agentId = evt.content?.agent_id as string | undefined
+      const endedRoot = inboundThreadRoot(evt)
+      const senderAgent = bindings.find((binding) => binding.userId === evt.sender)
+      // Bind the claimed agent_id to the Matrix sender. Besides rejecting a
+      // malformed boundary, this prevents another room member from releasing
+      // a held agent return early by forging custom-event content.
+      if (agentId && endedRoot && senderAgent?.name === agentId) {
+        releaseReturn(returnKey(agentId, endedRoot))
+      }
+      return
+    }
+
     // Capture media events in the pending store; never route them to agents.
     if (
       evt.type === 'm.room.message' &&
@@ -870,6 +1000,26 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       const invocation = invocations.byCallEvent(evt.event_id)
       matches = invocation ? matches.filter((match) => match.name === invocation.calleeAgent) : []
     }
+    // [[ZOD039]] A return fires at the callee's turn boundary, not per message.
+    // Every tool call forces a buffer flush, so one turn posts many
+    // `m.room.message`s; routing each as a return woke the caller once per
+    // chunk and the pair read as re-triggering each other. Hold them and let
+    // the sender's `dev.zooid.turn.end` release the lot as a single wake.
+    if (evt.type === 'm.room.message' && promotedRoot && evt.room_id) {
+      const senderBinding = bindings.find((b) => b.userId === evt.sender)
+      if (senderBinding) {
+        const st = threadStates.get(promotedRoot)
+        const held = matches.filter((m) => isReturnRoute(evt, m, bindings, st))
+        if (held.length > 0) {
+          matches = matches.filter((m) => !held.includes(m))
+          stashReturn(senderBinding, promotedRoot, evt.room_id, evt, held)
+        }
+      }
+      // Anything we are waking now supersedes a return it was owed: an explicit
+      // @mention (rule 1) or a human follow-up already carries the thread on.
+      for (const m of matches) dropPendingReturn(promotedRoot, m.name)
+    }
+
     // Suppress the no-match warning for events sent by our own bots.
     const senderIsBot = bindings.some((b) => b.userId === evt.sender)
     if (evt.type === 'm.room.message' && matches.length === 0 && !senderIsBot) {
@@ -893,7 +1043,14 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         for (const a of bindings) {
           if (!msgMentions.has(a.userId)) continue
           if (!st.rootMentions.includes(a.name)) st.rootMentions.push(a.name)
-          if (senderAgent && a.name !== senderAgent.name) {
+          // A mention that would close a cycle is a return addressed by name,
+          // not a call: record no edge and mint no arc, or the pair bounces
+          // forever and the callee loses its session to a fresh arc.
+          if (
+            senderAgent &&
+            a.name !== senderAgent.name &&
+            !wouldCycleCallers(st.callers, a.name, senderAgent.name)
+          ) {
             st.callers[a.name] = senderAgent.name
             if (evt.event_id) {
               const arcs = (st.handoffs[a.name] ??= [])
@@ -1462,7 +1619,11 @@ export async function rebuildThreadState(
     for (const a of bindings) {
       if (!rootMentions.has(a.userId)) continue
       if (!state.rootMentions.includes(a.name)) state.rootMentions.push(a.name)
-      if (rootSenderAgent && a.name !== rootSenderAgent.name) {
+      if (
+        rootSenderAgent &&
+        a.name !== rootSenderAgent.name &&
+        !wouldCycleCallers(state.callers, a.name, rootSenderAgent.name)
+      ) {
         state.callers[a.name] = rootSenderAgent.name
         const arcs = (state.handoffs[a.name] ??= [])
         if (!arcs.includes(rootEventId)) arcs.push(rootEventId)
@@ -1484,7 +1645,11 @@ export async function rebuildThreadState(
     for (const a of bindings) {
       if (!mentions.has(a.userId)) continue
       if (!state.rootMentions.includes(a.name)) state.rootMentions.push(a.name)
-      if (evSenderAgent && a.name !== evSenderAgent.name) {
+      if (
+        evSenderAgent &&
+        a.name !== evSenderAgent.name &&
+        !wouldCycleCallers(state.callers, a.name, evSenderAgent.name)
+      ) {
         state.callers[a.name] = evSenderAgent.name
         if (evId) {
           const arcs = (state.handoffs[a.name] ??= [])

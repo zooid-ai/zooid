@@ -91,6 +91,29 @@ async function postTxn(
   })
 }
 
+// A real agent turn ends with dev.zooid.turn.end, and that is what releases a
+// held return. Tests that inject agent replies must carry the boundary too.
+let turnEndCounter = 0
+function postTurnEnd(
+  app: ReturnType<typeof makeTransport>['transport']['app'],
+  o: { agent: string; root: string },
+) {
+  return postTxn(app, {
+    events: [
+      {
+        type: 'dev.zooid.turn.end',
+        event_id: `$turn-end-${++turnEndCounter}`,
+        room_id: '!r:example.com',
+        sender: `@${o.agent}:example.com`,
+        content: {
+          agent_id: o.agent,
+          'm.relates_to': { rel_type: 'm.thread', event_id: o.root },
+        },
+      },
+    ],
+  })
+}
+
 // runTurn is fire-and-forget; let any pending microtasks drain before
 // asserting on side-effects driven by the agent prompt.
 async function settleTurn(): Promise<void> {
@@ -2002,6 +2025,7 @@ describe('directional agent-to-agent handoffs', () => {
       sender: '@sub:example.com',
       root: '$root',
     })
+    await postTurnEnd(transport.app, { agent: 'sub', root: '$root' })
     await settleTurn()
     expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com', '$root')
     expect(agents.ensureSession.mock.calls.map((c) => c[0])).not.toContain('sub')
@@ -2017,6 +2041,54 @@ describe('directional agent-to-agent handoffs', () => {
     })
     await settleTurn()
     expect(agents.ensureSession).not.toHaveBeenCalled()
+  })
+
+  it('coalesces every message in a callee turn into one return, including an explicit @caller', async () => {
+    const { transport, agents } = makePairTransport()
+
+    await post(transport, {
+      id: '$root',
+      sender: '@alice:example.com',
+      mentions: ['@parent:example.com'],
+    })
+    await settleTurn()
+    await post(transport, {
+      id: '$p1',
+      sender: '@parent:example.com',
+      root: '$root',
+      mentions: ['@sub:example.com'],
+    })
+    await settleTurn()
+    agents.ensureSession.mockClear()
+    agents.prompt.mockClear()
+
+    // Tool boundaries can flush several assistant messages in one turn. The
+    // last one may explicitly address the caller; none may wake it early.
+    await post(transport, { id: '$s1', sender: '@sub:example.com', root: '$root' })
+    await post(transport, {
+      id: '$s2',
+      sender: '@sub:example.com',
+      root: '$root',
+      mentions: ['@parent:example.com'],
+    })
+    await settleTurn()
+    expect(agents.ensureSession).not.toHaveBeenCalled()
+
+    await postTurnEnd(transport.app, { agent: 'sub', root: '$root' })
+    await settleTurn()
+    expect(agents.ensureSession).toHaveBeenCalledTimes(1)
+    expect(agents.ensureSession).toHaveBeenCalledWith(
+      'parent',
+      '$root',
+      '!r:example.com',
+      '$root',
+    )
+    expect(agents.prompt).toHaveBeenCalledWith(
+      'parent',
+      expect.objectContaining({
+        content: [expect.objectContaining({ type: 'text', text: 'x\n\nx' })],
+      }),
+    )
   })
 
   it('rebuildThreadState reconstructs caller[] from the timeline after a restart', async () => {
@@ -2109,7 +2181,6 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
       ],
     })
   }
-
   const agentsCalled = (reg: ReturnType<typeof fakeRegistry>['reg']) =>
     reg.ensureSession.mock.calls.map((c) => c[0] as string)
 
@@ -2165,6 +2236,7 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
       sender: '@rocksteady:example.com',
       root: '$root',
     })
+    await postTurnEnd(transport.app, { agent: 'rocksteady', root: '$root' })
     await settleTurn()
     expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com', '$root')
     expect(agentsCalled(agents)).not.toContain('bebop')
@@ -2181,6 +2253,7 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
       sender: '@bebop:example.com',
       root: '$root',
     })
+    await postTurnEnd(transport.app, { agent: 'bebop', root: '$root' })
     await settleTurn()
     expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com', '$root')
     expect(agentsCalled(agents)).not.toContain('rocksteady')
@@ -2211,6 +2284,7 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
       sender: '@bebop:example.com',
       root: '$root',
     })
+    await postTurnEnd(transport.app, { agent: 'bebop', root: '$root' })
     await settleTurn()
 
     // Second delegation: arc $p2 — a NEW session key, not a resume.

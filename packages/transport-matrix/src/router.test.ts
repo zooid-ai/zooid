@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { route, isMediaMsgtype, type AgentBinding, type ThreadState } from './router.js'
+import {
+  route,
+  isMediaMsgtype,
+  wouldCycleCallers,
+  type AgentBinding,
+  type ThreadState,
+} from './router.js'
 
 const agents: AgentBinding[] = [
   {
@@ -320,6 +326,24 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
       states({ participants: ['parent'], callers: {} }),
     )
     expect(matches).toEqual([])
+  })
+})
+
+describe('caller graph cycle guard', () => {
+  it('rejects a reverse edge back to an existing caller', () => {
+    expect(wouldCycleCallers({ sub: 'parent' }, 'parent', 'sub')).toBe(true)
+  })
+
+  it('rejects a cycle through a deeper ancestor', () => {
+    expect(
+      wouldCycleCallers({ child: 'parent', grandchild: 'child' }, 'parent', 'grandchild'),
+    ).toBe(true)
+  })
+
+  it('allows a new downward or sibling edge', () => {
+    const callers = { child: 'parent' }
+    expect(wouldCycleCallers(callers, 'grandchild', 'child')).toBe(false)
+    expect(wouldCycleCallers(callers, 'sibling', 'parent')).toBe(false)
   })
 })
 
