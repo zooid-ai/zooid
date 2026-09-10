@@ -16,8 +16,42 @@ const TRUNCATION_MARKER = '\n\n… (truncated)'
 // Comfortably past any provider's redelivery window.
 const DELIVERY_CACHE_TTL_MS = 24 * 60 * 60 * 1000
 
-const EVENT_HEADER_BY_PROVIDER: Partial<Record<WebhookTriggerConfig['provider'], string>> = {
-  github: 'x-github-event',
+/**
+ * Where each provider puts its event name. GitHub is the only one that uses
+ * a header; the rest carry it in the payload. Reading it per provider is the
+ * point — it keeps provider knowledge in code (the same knowledge the
+ * signature table encodes) so `event` means the same thing in an operator's
+ * `match:` whatever the sender. `custom` is absent on purpose: only the
+ * operator knows their service's shape, so their predicate reads `body`.
+ */
+const EVENT_SOURCE_BY_PROVIDER: Partial<
+  Record<WebhookTriggerConfig['provider'], { header: string } | { path: readonly string[] }>
+> = {
+  github: { header: 'x-github-event' },
+  stripe: { path: ['type'] },
+  standard: { path: ['type'] },
+  slack: { path: ['event', 'type'] },
+}
+
+/** Follow a dotted path through a parsed payload, yielding a string or nothing. */
+function stringAt(body: unknown, path: readonly string[]): string | undefined {
+  let cursor: unknown = body
+  for (const key of path) {
+    if (typeof cursor !== 'object' || cursor === null) return undefined
+    cursor = (cursor as Record<string, unknown>)[key]
+  }
+  return typeof cursor === 'string' ? cursor : undefined
+}
+
+/** The `event` binding for `match:` and `${...}`, per provider. */
+export function eventNameFor(
+  provider: WebhookTriggerConfig['provider'],
+  headers: Record<string, string | undefined>,
+  body: unknown,
+): string | undefined {
+  const source = EVENT_SOURCE_BY_PROVIDER[provider]
+  if (!source) return undefined
+  return 'header' in source ? headers[source.header] : stringAt(body, source.path)
 }
 
 const DELIVERY_ID_HEADER_BY_PROVIDER: Partial<Record<WebhookTriggerConfig['provider'], string>> = {
@@ -111,15 +145,16 @@ async function handleDelivery(
     const deliveryId = customDeliveryId ?? (idHeader ? headers[idHeader] : undefined)
     if (deliveryId !== undefined && cache.seen(`${name}:${deliveryId}`)) return
 
-    const eventHeader = EVENT_HEADER_BY_PROVIDER[webhook.provider]
-    const event = eventHeader ? headers[eventHeader] : undefined
-
     let body: unknown
     try {
       body = JSON.parse(raw)
     } catch {
       body = undefined
     }
+
+    // After parsing: every provider but GitHub carries its event name in the
+    // payload, not a header.
+    const event = eventNameFor(webhook.provider, headers, body)
 
     const ctx: MatchContext = {
       event,

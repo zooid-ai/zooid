@@ -2,7 +2,7 @@ import { createHmac } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { loadZooidConfig } from '@zooid/core'
-import { mountWebhookRoutes } from './webhook-routes.js'
+import { eventNameFor, mountWebhookRoutes } from './webhook-routes.js'
 
 const secret = 'route-secret'
 const body = JSON.stringify({ action: 'opened' })
@@ -70,5 +70,35 @@ describe('webhook route contract', () => {
     const { app, sent } = makeApp()
     expect((await post(app, '/webhook/triage')).status).toBe(404)
     expect(sent).toHaveLength(0)
+  })
+})
+
+describe('event name binding', () => {
+  const headers = { 'x-github-event': 'pull_request' }
+
+  it('reads GitHub from the header, not the payload', () => {
+    expect(eventNameFor('github', headers, { type: 'ignored' })).toBe('pull_request')
+  })
+
+  it('reads stripe and standard-webhooks from body.type', () => {
+    expect(eventNameFor('stripe', {}, { type: 'invoice.payment_failed' })).toBe(
+      'invoice.payment_failed',
+    )
+    expect(eventNameFor('standard', {}, { type: 'user.created' })).toBe('user.created')
+  })
+
+  it('reads slack from body.event.type', () => {
+    expect(eventNameFor('slack', {}, { event: { type: 'app_mention' } })).toBe('app_mention')
+  })
+
+  it('leaves custom unbound — only the operator knows their service shape', () => {
+    expect(eventNameFor('custom', headers, { type: 'anything' })).toBeUndefined()
+  })
+
+  it('yields undefined rather than throwing on a missing or wrong-typed path', () => {
+    expect(eventNameFor('stripe', {}, undefined)).toBeUndefined()
+    expect(eventNameFor('stripe', {}, { type: 42 })).toBeUndefined()
+    expect(eventNameFor('slack', {}, { event: null })).toBeUndefined()
+    expect(eventNameFor('github', {}, {})).toBeUndefined()
   })
 })
