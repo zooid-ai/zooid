@@ -246,6 +246,7 @@ export class AcpAgentRegistry implements AcpRegistry {
         id: name,
         command: spawn.command,
         args: spawn.args,
+        mode: cfg.acp.mode,
         env: this.opts.env?.[name],
         cwd: this.resolveSpawnCwd(name),
         image: this.opts.image?.[name],

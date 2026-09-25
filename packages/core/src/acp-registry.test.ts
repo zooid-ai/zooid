@@ -47,7 +47,7 @@ describe('AcpAgentRegistry', () => {
           name: 'triage',
           workdir: '.',
           hooks: {},
-          acp: { preset: 'claude' },
+          acp: { preset: 'claude', mode: 'bypassPermissions' },
           approval_timeout_ms: 0,
         },
         builder: {
@@ -118,6 +118,16 @@ describe('AcpAgentRegistry', () => {
     const opts = AcpClient.mock.calls[0][0]
     expect(opts.agent.command).toBe('opencode')
     expect(opts.agent.args).toEqual(['acp'])
+  })
+
+  it('passes acp.mode into AcpClient.agent.mode, and leaves it unset otherwise', async () => {
+    const { AcpClient } = (await import('@zooid/acp-client')) as unknown as {
+      AcpClient: ReturnType<typeof vi.fn>
+    }
+    await registry.prompt('triage', { threadId: 't', content: [] })
+    await registry.prompt('builder', { threadId: 't', content: [] })
+    expect(AcpClient.mock.calls[0][0].agent.mode).toBe('bypassPermissions')
+    expect(AcpClient.mock.calls[1][0].agent.mode).toBeUndefined()
   })
 
   it('passes per-agent env into AcpClient.agent.env', async () => {

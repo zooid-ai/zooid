@@ -78,6 +78,13 @@ function parseAcpBlock(name: string, raw: unknown): AcpAgentSpec {
       `agents.${name}.acp: must specify either preset or command`,
     )
   }
+  let mode: string | undefined
+  if (a.mode !== undefined) {
+    if (typeof a.mode !== 'string' || a.mode.trim().length === 0) {
+      throw new Error(`agents.${name}.acp.mode: must be a non-empty string`)
+    }
+    mode = a.mode.trim()
+  }
   if (hasPreset) {
     if (typeof a.preset !== 'string' || a.preset.length === 0) {
       throw new Error(`agents.${name}.acp.preset: must be a non-empty string`)
@@ -87,13 +94,14 @@ function parseAcpBlock(name: string, raw: unknown): AcpAgentSpec {
         `agents.${name}.acp.preset: unknown preset "${a.preset}"`,
       )
     }
-    const out: { preset: string; model?: string } = { preset: a.preset }
+    const out: { preset: string; model?: string; mode?: string } = { preset: a.preset }
     if (a.model !== undefined) {
       if (typeof a.model !== 'string' || a.model.trim().length === 0) {
         throw new Error(`agents.${name}.acp.model: must be a non-empty string`)
       }
       out.model = a.model.trim()
     }
+    if (mode !== undefined) out.mode = mode
     return out as AcpAgentSpec
   }
   if (typeof a.command !== 'string' || a.command.length === 0) {
@@ -111,7 +119,7 @@ function parseAcpBlock(name: string, raw: unknown): AcpAgentSpec {
       args.push(v)
     }
   }
-  return { command: a.command, args } as AcpAgentSpec
+  return (mode === undefined ? { command: a.command, args } : { command: a.command, args, mode }) as AcpAgentSpec
 }
 
 function parseApprovalTimeout(name: string, raw: unknown): number {

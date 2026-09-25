@@ -6,6 +6,7 @@ import {
   PROTOCOL_VERSION,
   ndJsonStream,
   type Client,
+  type SessionModeState,
 } from '@agentclientprotocol/sdk'
 import { AgentProcess } from './agent-process.js'
 import { SessionMap } from './session-map.js'
@@ -196,14 +197,13 @@ export class AcpClient {
 
     const persisted = this.store?.get(threadId)
     if (persisted && this.agentCapabilities.loadSession) {
+      let loaded: { modes?: SessionModeState | null } | undefined
       try {
-        await this.connection.loadSession({
+        loaded = await this.connection.loadSession({
           sessionId: persisted,
           cwd: pathResolve(this.options.agent.cwd ?? process.cwd()),
           mcpServers,
         })
-        this.sessions.set(key, { sessionId: persisted, startedAt: Date.now() })
-        return persisted
       } catch (err) {
         console.warn(
           `[acp-client:${this.options.agent.id}] loadSession(${persisted}) failed; ` +
@@ -212,15 +212,47 @@ export class AcpClient {
         )
         await this.store?.delete(threadId)
       }
+      if (loaded) {
+        await this.applyMode(persisted, loaded.modes)
+        this.sessions.set(key, { sessionId: persisted, startedAt: Date.now() })
+        return persisted
+      }
     }
 
-    const { sessionId } = await this.connection.newSession({
+    const { sessionId, modes } = await this.connection.newSession({
       cwd: pathResolve(this.options.agent.cwd ?? process.cwd()),
       mcpServers,
     })
+    await this.applyMode(sessionId, modes)
     this.sessions.set(key, { sessionId, startedAt: Date.now() })
     await this.store?.set(threadId, sessionId)
     return sessionId
+  }
+
+  /**
+   * Put a freshly created or loaded session into the agent's configured mode.
+   * Mode ids are adapter-defined, so an id the adapter doesn't list is a
+   * config error: fail the session rather than run it in a mode nobody chose.
+   */
+  private async applyMode(
+    sessionId: string,
+    modes: SessionModeState | null | undefined,
+  ): Promise<void> {
+    const wanted = this.options.agent.mode
+    if (!wanted || !this.connection) return
+    if (!modes) {
+      throw new Error(
+        `agents.${this.options.agent.id}.acp.mode "${wanted}": this agent does not offer session modes`,
+      )
+    }
+    if (!modes.availableModes.some((m) => m.id === wanted)) {
+      const offered = modes.availableModes.map((m) => m.id).join(', ')
+      throw new Error(
+        `agents.${this.options.agent.id}.acp.mode "${wanted}": not offered by this agent (offers: ${offered})`,
+      )
+    }
+    if (modes.currentModeId === wanted) return
+    await this.connection.setSessionMode({ sessionId, modeId: wanted })
   }
 
   private async ensureStoreLoaded(): Promise<void> {

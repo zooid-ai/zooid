@@ -27,6 +27,12 @@ export interface AgentConfig {
   preset?: PresetName
   /** Optional model id, forwarded to the preset as `--model <id>` where supported. */
   model?: string
+  /**
+   * Optional ACP session mode id (adapter-defined, e.g. claude's
+   * `bypassPermissions`). Applied with `session/set_mode` to every new or
+   * loaded session; the session fails if the adapter doesn't offer it.
+   */
+  mode?: string
   /** Explicit command. Overrides whatever the preset would set. */
   command?: string
   /** Explicit args. Overrides whatever the preset would set. */

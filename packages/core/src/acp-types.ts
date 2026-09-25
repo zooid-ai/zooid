@@ -8,9 +8,17 @@ import type { ChildProcess } from 'node:child_process'
  * `gemini`.
  * See `@zooid/acp-client`'s preset registry for the current list.
  */
-export type AcpAgentSpec =
+export type AcpAgentSpec = (
   | { preset: string; model?: string; command?: never; args?: never }
   | { preset?: never; model?: never; command: string; args?: string[] }
+) & {
+  /**
+   * ACP session mode id, applied with `session/set_mode` to every session.
+   * Adapter-defined (e.g. claude's `bypassPermissions`); a session fails if
+   * the adapter doesn't offer it.
+   */
+  mode?: string
+}
 
 /**
  * A single bind mount the runtime should set up for the spawned agent
