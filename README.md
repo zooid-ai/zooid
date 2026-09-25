@@ -47,7 +47,7 @@ zooid dev
 
 > **Prerequisite:** `zooid dev` runs Tuwunel inside a container, so you need a container engine installed and running first — either **Docker** (with the daemon started) or **Podman** aliased as `docker`.
 
-`zooid dev` starts a Tuwunel Matrix homeserver in a container, generates the Application Service registration, registers an `admin:admin` user, runs the daemon, and serves the [Zooid web client](https://github.com/zooid-ai/clients).
+`zooid dev` starts a Tuwunel Matrix homeserver in a container, generates the Application Service registration, registers an `admin:admin` user, runs the daemon, and serves the [Zooid web client](https://github.com/zooid-ai/clients). The client's runtime settings come from a generated `/config.json`; its `workforce_space` field is the `matrix.space` alias localpart from `zooid.yaml` (default `dev`). A static deployment sets `workforce_space` in the `config.json` it serves beside the bundle — there is no build-time variable.
 
 Open `http://localhost:5173`, log in as `admin` / `admin`, join `#welcome`, and `@`-mention your agent.
 

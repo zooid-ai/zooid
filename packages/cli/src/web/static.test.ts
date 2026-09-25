@@ -64,6 +64,20 @@ describe('webStatic', () => {
     })
   })
 
+  it('serves workforce_space when configured, default or custom', async () => {
+    for (const space of ['dev', 'hq']) {
+      const app = webStatic({
+        webRoot: dir,
+        homeserverUrl: 'http://localhost:8448',
+        workforceSpace: space,
+      })
+      expect(await (await app.request('/config.json')).json()).toEqual({
+        homeserver_url: 'http://localhost:8448',
+        workforce_space: space,
+      })
+    }
+  })
+
   it('omits both when unconfigured, so the client falls back instead of half-subscribing', async () => {
     const app = webStatic({ webRoot: dir, homeserverUrl: 'http://localhost:8448' })
     expect(await (await app.request('/config.json')).json()).toEqual({
