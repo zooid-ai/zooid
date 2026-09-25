@@ -166,6 +166,15 @@ describe('directed task routing', () => {
     expect(
       route(human, agents, state, { assignee: 'worker', isRoot: false }).map((x) => x.name),
     ).toEqual(['worker'])
+    const humanMention = {
+      ...human,
+      content: { ...human.content, 'm.mentions': { user_ids: ['@supervisor:hs'] } },
+    }
+    expect(
+      route(humanMention, agents, state, { assignee: 'worker', isRoot: false }).map(
+        (x) => x.name,
+      ),
+    ).toEqual(['supervisor'])
     const mention = {
       ...human,
       sender: '@worker:hs',
@@ -315,6 +324,24 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
       threadMsg({ sender: '@alice:example.com' }),
       pair,
       states({ participants: ['parent', 'sub'], callers: { sub: 'parent' } }),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['sub'])
+  })
+
+  it('a human @mention of another agent switches addressee (no double routing)', () => {
+    const matches = route(
+      threadMsg({ sender: '@alice:example.com', mentions: ['@parent:example.com'] }),
+      pair,
+      states({ participants: ['parent', 'sub'], callers: { sub: 'parent' } }),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['parent'])
+  })
+
+  it('a human @mention of another agent overrides root-mention inheritance', () => {
+    const matches = route(
+      threadMsg({ sender: '@alice:example.com', mentions: ['@sub:example.com'] }),
+      pair,
+      states({ rootMentions: ['parent'] }),
     )
     expect(matches.map((m) => m.name)).toEqual(['sub'])
   })
