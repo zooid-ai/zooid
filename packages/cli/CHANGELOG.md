@@ -1,5 +1,26 @@
 # zooid
 
+## 0.15.0
+
+### Minor Changes
+
+- Per-agent ACP session mode: `acp.mode` in zooid.yaml (e.g. `bypassPermissions` for Claude Code) is applied to every new or loaded session via `session/set_mode`. A mode the agent doesn't offer fails the session with a config error instead of running in a mode nobody chose. Also pins `@zooid/web` 0.12.1, which reads the per-workstation workforce roster.
+
+### Patch Changes
+
+- 70a95b7: Agents on other workstations no longer read as humans. The `dev.zooid.workforce` roster is now keyed by workstation (one state event per daemon, so daemons sharing a space stop overwriting each other), each daemon merges every roster in the space, and the router treats a rostered agent — or any `m.notice` sender — as an agent: it continues a thread only by explicit @mention, never through the human follow-up rules. Fixes two daemons waking each other's agents in an endless loop.
+- Updated dependencies [70a95b7]
+- Updated dependencies [f4879d1]
+- Updated dependencies [b9762b0]
+  - @zooid/transport-matrix@0.15.0
+  - @zooid/core@0.15.0
+  - @zooid/acp-client@0.15.0
+  - @zooid/context-mcp@0.15.0
+  - @zooid/runtime-docker@0.15.0
+  - @zooid/runtime-local@0.15.0
+  - @zooid/transport-http@0.15.0
+  - @zooid/pi-extension@0.13.2
+
 ## 0.14.1
 
 ### Patch Changes

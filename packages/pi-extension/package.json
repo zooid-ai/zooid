@@ -1,6 +1,6 @@
 {
   "name": "@zooid/pi-extension",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "Native Pi extension exposing Zooid context and task tools.",
   "type": "module",
   "license": "MIT",

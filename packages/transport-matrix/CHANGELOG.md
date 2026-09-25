@@ -1,5 +1,15 @@
 # @zooid/transport-matrix
 
+## 0.15.0
+
+### Patch Changes
+
+- 70a95b7: Agents on other workstations no longer read as humans. The `dev.zooid.workforce` roster is now keyed by workstation (one state event per daemon, so daemons sharing a space stop overwriting each other), each daemon merges every roster in the space, and the router treats a rostered agent — or any `m.notice` sender — as an agent: it continues a thread only by explicit @mention, never through the human follow-up rules. Fixes two daemons waking each other's agents in an endless loop.
+- f4879d1: A human @mention of another workstation's agent no longer also wakes this daemon's last poster in the thread, and another workstation's agent posting now counts as the thread's last poster — so a bare reply goes to it, not to a local agent that spoke earlier.
+- b9762b0: A human @mention of an agent inside a thread now switches the addressee instead of also triggering the thread's last-posting agent (or a task thread's assignee).
+  - @zooid/core@0.15.0
+  - @zooid/acp-client@0.15.0
+
 ## 0.14.1
 
 ### Patch Changes
