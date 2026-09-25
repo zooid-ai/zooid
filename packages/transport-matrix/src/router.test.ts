@@ -503,6 +503,35 @@ describe('agents on other workstations', () => {
     expect(matches.map((m) => m.name)).toEqual(['coding'])
   })
 
+  it('a human @mention of a remote agent does not also wake the last local poster', () => {
+    expect(
+      route(
+        reply({ sender: '@beno:hs', msgtype: 'm.text', mentions: [remoteProduct] }),
+        [coding],
+        states(),
+        undefined,
+        new Set([remoteProduct]),
+      ),
+    ).toEqual([])
+  })
+
+  it('a human bare reply after a remote agent posted last wakes no local agent', () => {
+    const st = new Map<string, ThreadState>([
+      [
+        '$root',
+        {
+          participants: ['coding', remoteProduct],
+          rootMentions: ['coding'],
+          callers: {},
+          handoffs: {},
+        },
+      ],
+    ])
+    expect(
+      route(reply({ sender: '@beno:hs', msgtype: 'm.text' }), [coding], st, undefined, new Set([remoteProduct])),
+    ).toEqual([])
+  })
+
   it('a remote agent in a task thread does not steer the assignee', () => {
     expect(
       route(reply({ sender: remoteProduct }), [coding], states(), {
