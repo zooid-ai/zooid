@@ -2527,3 +2527,80 @@ describe('taskActions.describeRole', () => {
     expect(role).toEqual({ is_task_assignee: false, can_start_task_threads: true })
   })
 })
+
+describe('agents on other workstations ([[ZOD039]] directional continuation)', () => {
+  // Two daemons share a thread: architect is ours, @cloud.product lives on
+  // another workstation. Each daemon used to read the other's agent as a
+  // human, so every product post woke architect and vice versa — forever.
+  async function threadWithArchitect(t: ReturnType<typeof makeTransport>) {
+    t.agents.prompt.mockImplementation(async (_n: string, p: { threadId: string }) => {
+      t.agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: { type: 'text', text: 'hi' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(t.transport.app, {
+      events: [
+        {
+          type: 'm.room.message',
+          event_id: '$root',
+          room_id: '!r:example.com',
+          sender: '@alice:example.com',
+          content: {
+            msgtype: 'm.text',
+            body: 'hi',
+            'm.mentions': { user_ids: ['@architect:example.com'] },
+          },
+        },
+      ],
+    })
+    await settleTurn()
+    t.agents.ensureSession.mockClear()
+  }
+  function remoteReply(eventId: string, msgtype: string) {
+    return {
+      type: 'm.room.message',
+      event_id: eventId,
+      room_id: '!r:example.com',
+      sender: '@cloud.product:example.com',
+      content: {
+        msgtype,
+        body: 'status update',
+        'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+      },
+    }
+  }
+
+  it('a remote agent’s notice does not wake the last local poster', async () => {
+    const t = makeTransport()
+    await threadWithArchitect(t)
+    await postTxn(t.transport.app, { events: [remoteReply('$p1', 'm.notice')] })
+    await settleTurn()
+    expect(t.agents.ensureSession).not.toHaveBeenCalled()
+  })
+
+  it('learns remote agents from the space roster, keyed per workstation', async () => {
+    const t = makeTransport()
+    const client = t.client as ReturnType<typeof fakeClient> & Record<string, unknown>
+    Object.assign(client, {
+      setDisplayName: vi.fn(async () => {}),
+      invite: vi.fn(async () => {}),
+      sendStateEvent: vi.fn(async () => ({ event_id: '$s' })),
+      fetchRoomState: vi.fn(async () => [
+        {
+          type: 'dev.zooid.workforce',
+          state_key: 'cloud',
+          content: { version: 1, agents: [{ user_id: '@cloud.product:example.com' }] },
+        },
+      ]),
+    })
+    await t.transport.bootstrap({ spaceRoomId: '!space:example.com', asUserId: '@zooid:example.com' })
+    await threadWithArchitect(t)
+    // Even as m.text, a rostered agent is not a human follow-up.
+    await postTxn(t.transport.app, { events: [remoteReply('$p2', 'm.text')] })
+    await settleTurn()
+    expect(t.agents.ensureSession).not.toHaveBeenCalled()
+  })
+})

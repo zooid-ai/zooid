@@ -443,3 +443,72 @@ describe('fan-out: two subs called in one message ([[ZOD071]] acceptance)', () =
     expect(matches.map((m) => m.name)).toEqual(['parent'])
   })
 })
+
+describe('agents on other workstations', () => {
+  const coding: AgentBinding = {
+    name: 'coding',
+    userId: '@laptop.coding:hs',
+    rooms: [{ alias: '!r:hs' }],
+    trigger: 'mention',
+  }
+  const remoteProduct = '@cloud.product:hs'
+  const states = () =>
+    new Map<string, ThreadState>([
+      ['$root', { participants: ['coding'], rootMentions: ['coding'], callers: {}, handoffs: {} }],
+    ])
+  function reply(o: { sender: string; msgtype?: string; mentions?: string[] }) {
+    return {
+      type: 'm.room.message',
+      room_id: '!r:hs',
+      sender: o.sender,
+      content: {
+        msgtype: o.msgtype ?? 'm.notice',
+        body: 'reply',
+        'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+        ...(o.mentions ? { 'm.mentions': { user_ids: o.mentions } } : {}),
+      },
+    }
+  }
+
+  it('a rostered remote agent’s bare reply does not wake the last local poster', () => {
+    const known = new Set([remoteProduct])
+    expect(
+      route(reply({ sender: remoteProduct, msgtype: 'm.text' }), [coding], states(), undefined, known),
+    ).toEqual([])
+  })
+
+  it('an unrostered m.notice sender is still treated as an agent (bots post notices)', () => {
+    expect(route(reply({ sender: remoteProduct }), [coding], states())).toEqual([])
+  })
+
+  it('a remote agent can still hand off by explicit @mention', () => {
+    const matches = route(
+      reply({ sender: remoteProduct, mentions: [coding.userId] }),
+      [coding],
+      states(),
+      undefined,
+      new Set([remoteProduct]),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['coding'])
+  })
+
+  it('a human m.text bare reply still continues with the last local poster', () => {
+    const matches = route(
+      reply({ sender: '@beno:hs', msgtype: 'm.text' }),
+      [coding],
+      states(),
+      undefined,
+      new Set([remoteProduct]),
+    )
+    expect(matches.map((m) => m.name)).toEqual(['coding'])
+  })
+
+  it('a remote agent in a task thread does not steer the assignee', () => {
+    expect(
+      route(reply({ sender: remoteProduct }), [coding], states(), {
+        assignee: 'coding',
+        isRoot: false,
+      }),
+    ).toEqual([])
+  })
+})

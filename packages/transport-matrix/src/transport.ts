@@ -25,6 +25,7 @@ import {
 } from './router.js'
 import { sessionKeyFor, composeHandoffKey } from './session-keys.js'
 import { stripMention, extractMentions } from './mentions.js'
+import { WorkforceDirectory } from './workforce-publisher.js'
 import {
   toToolCallBody,
   toUpdateBody,
@@ -749,6 +750,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     return chained
   }
 
+  // Every workstation's agents, from the space's roster state events; the
+  // router uses it to tell another daemon's agent from a human.
+  const workforce = new WorkforceDirectory()
+  let workforceSpaceId: string | undefined
+
   async function handleInboundEvent(evt: MatrixEvent): Promise<void> {
     if (evt.event_id) {
       if (seenEventIds.has(evt.event_id)) {
@@ -769,6 +775,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         `[matrix] dropping stale message event ${evt.event_id} ` +
           `(ts=${evt.origin_server_ts}, daemon started at ${cutoffTs + STARTUP_GRACE_MS})`,
       )
+      return
+    }
+    if (evt.type === 'dev.zooid.workforce') {
+      if (evt.room_id === workforceSpaceId && evt.state_key !== undefined)
+        workforce.apply(evt.state_key, evt.content)
       return
     }
     if (evt.type === 'm.room.member' && evt.content?.membership === 'invite') {
@@ -992,7 +1003,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
             isRoot: !inboundRel && evt.event_id === taskRec.threadRoot,
           }
         : undefined
-    let matches = route(evt, bindings, threadStates, taskCtx)
+    let matches = route(evt, bindings, threadStates, taskCtx, workforce.agentIds)
     // In a delegated task, agent-to-agent messages dispatch only when the
     // outgoing flush registered a matching invocation. This prevents a
     // circular handoff that was visibly refused from still waking its target.
@@ -1574,6 +1585,15 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       } = {},
     ) => {
       await pool.bootstrap({ adminUserId, ...bootstrapOpts })
+      const { spaceRoomId, asUserId } = bootstrapOpts
+      if (spaceRoomId && asUserId) {
+        workforceSpaceId = spaceRoomId
+        try {
+          workforce.load(await client.fetchRoomState(spaceRoomId, asUserId))
+        } catch (err) {
+          console.warn('[matrix] workforce roster load failed:', err)
+        }
+      }
       await Promise.allSettled(
         bindings.map((b) =>
           client.setPresence({ asUserId: b.userId, presence: 'online' }).catch((err) => {

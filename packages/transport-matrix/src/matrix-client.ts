@@ -476,6 +476,21 @@ export class MatrixClient {
     }>
   }
 
+  async fetchRoomState(
+    roomId: string,
+    asUserId: string,
+  ): Promise<{ type?: string; state_key?: string; content?: unknown }[]> {
+    const url =
+      `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}` +
+      `/state?user_id=${encodeURIComponent(asUserId)}`
+    const r = await this.fetch(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${this.asToken}` },
+    })
+    if (!r.ok) throw new Error(`fetchRoomState(${roomId}) failed: ${r.status}`)
+    return (await r.json()) as { type?: string; state_key?: string; content?: unknown }[]
+  }
+
   async fetchRoomName(roomId: string, asUserId: string): Promise<string | null> {
     const url =
       `${this.homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}` +
