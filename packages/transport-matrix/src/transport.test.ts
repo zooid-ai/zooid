@@ -2581,6 +2581,76 @@ describe('agents on other workstations ([[ZOD039]] directional continuation)', (
     expect(t.agents.ensureSession).not.toHaveBeenCalled()
   })
 
+  function humanReply(eventId: string, mentions?: string[]) {
+    return {
+      type: 'm.room.message',
+      event_id: eventId,
+      room_id: '!r:example.com',
+      sender: '@alice:example.com',
+      content: {
+        msgtype: 'm.text',
+        body: 'hey',
+        'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+        ...(mentions ? { 'm.mentions': { user_ids: mentions } } : {}),
+      },
+    }
+  }
+
+  it('a human @mention of a remote agent does not also wake the last local poster', async () => {
+    const t = makeTransport()
+    Object.assign(t.client, {
+      setDisplayName: vi.fn(async () => {}),
+      invite: vi.fn(async () => {}),
+      sendStateEvent: vi.fn(async () => ({ event_id: '$s' })),
+      fetchRoomState: vi.fn(async () => [
+        {
+          type: 'dev.zooid.workforce',
+          state_key: 'cloud',
+          content: { version: 1, agents: [{ user_id: '@cloud.product:example.com' }] },
+        },
+      ]),
+    })
+    await t.transport.bootstrap({ spaceRoomId: '!space:example.com', asUserId: '@zooid:example.com' })
+    await threadWithArchitect(t)
+    // architect posted last; the human addresses product, which lives on
+    // another workstation and is known only from the space roster.
+    await postTxn(t.transport.app, {
+      events: [humanReply('$h1', ['@cloud.product:example.com'])],
+    })
+    await settleTurn()
+    expect(t.agents.ensureSession).not.toHaveBeenCalled()
+  })
+
+  it('a human bare reply after a remote agent posted goes to it, not our last poster', async () => {
+    const t = makeTransport()
+    await threadWithArchitect(t)
+    await postTxn(t.transport.app, { events: [remoteReply('$p3', 'm.notice')] })
+    await postTxn(t.transport.app, { events: [humanReply('$h2')] })
+    await settleTurn()
+    expect(t.agents.ensureSession).not.toHaveBeenCalled()
+  })
+
+  it('after a restart, a rebuilt thread whose last poster is remote wakes no local agent', async () => {
+    const t = makeTransport()
+    Object.assign(t.client, {
+      fetchEvent: vi.fn(async () => ({
+        event_id: '$root',
+        sender: '@alice:example.com',
+        type: 'm.room.message',
+        content: { msgtype: 'm.text', body: 'hi', 'm.mentions': { user_ids: ['@architect:example.com'] } },
+      })),
+      fetchThreadRelations: vi.fn(async () => ({
+        chunk: [
+          { event_id: '$a1', type: 'm.room.message', sender: '@architect:example.com', content: { msgtype: 'm.notice', body: 'hi' } },
+          { event_id: '$p4', type: 'm.room.message', sender: '@cloud.product:example.com', content: { msgtype: 'm.notice', body: 'update' } },
+        ],
+      })),
+    })
+    await postTxn(t.transport.app, { events: [humanReply('$h3')] })
+    await settleTurn()
+    expect(t.agents.ensureSession).not.toHaveBeenCalled()
+  })
+
   it('learns remote agents from the space roster, keyed per workstation', async () => {
     const t = makeTransport()
     const client = t.client as ReturnType<typeof fakeClient> & Record<string, unknown>

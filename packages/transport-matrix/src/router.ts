@@ -30,7 +30,11 @@ export function isMediaMsgtype(t: string | undefined): boolean {
 }
 
 export interface ThreadState {
-  /** Agent names that have posted in this thread, in order. */
+  /**
+   * Agents that have posted in this thread, in order: this daemon's agents by
+   * name, other workstations' agents by MXID. Only the last entry matters to
+   * routing — a remote agent posting last means no local agent is listening.
+   */
   participants: string[]
   /** Agent names @mentioned in the thread root event (or subsequently). */
   rootMentions: string[]
@@ -110,13 +114,14 @@ export function route(
     agents.some((x) => x.userId === event.sender) ||
     (event.sender !== undefined && knownAgentIds?.has(event.sender) === true) ||
     event.content.msgtype === 'm.notice'
-  // A human who @mentions an agent is addressing it; implicit continuation
-  // (rule 2/3, task-assignee steering) must not also fire for someone else.
-  const addressesAgent = agents.some(
-    (x) =>
-      x.userId !== event.sender &&
-      mentions.has(x.userId) &&
-      x.rooms.some((r) => r.alias === event.room_id),
+  // A human who @mentions an agent — ours or another workstation's — is
+  // addressing it; implicit continuation (rule 2/3, task-assignee steering)
+  // must not also fire for someone else.
+  const addressesAgent = [...mentions].some(
+    (id) =>
+      id !== event.sender &&
+      (knownAgentIds?.has(id) === true ||
+        agents.some((x) => x.userId === id && x.rooms.some((r) => r.alias === event.room_id))),
   )
 
   for (const a of agents) {

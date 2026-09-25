@@ -982,7 +982,13 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       evt.room_id
     ) {
       try {
-        const rebuilt = await rebuildThreadState(client, evt.room_id, inboundRel, bindings)
+        const rebuilt = await rebuildThreadState(
+          client,
+          evt.room_id,
+          inboundRel,
+          bindings,
+          workforce.agentIds,
+        )
         threadStates.set(inboundRel, rebuilt)
         console.log(
           `[matrix] rebuilt threadState for ${inboundRel}: participants=${rebuilt.participants.join(',')} rootMentions=${rebuilt.rootMentions.join(',')}`,
@@ -1003,6 +1009,18 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
             isRoot: !inboundRel && evt.event_id === taskRec.threadRoot,
           }
         : undefined
+    // Another workstation's agent posting makes it the thread's last poster,
+    // so a human's bare reply goes to it and not to our last local poster.
+    // Our own agents are recorded at their turn end (enqueueTurn).
+    const inboundState = inboundRel ? threadStates.get(inboundRel) : undefined
+    if (
+      inboundState &&
+      evt.type === 'm.room.message' &&
+      evt.sender &&
+      isRemoteAgent(evt.sender, evt.content?.msgtype, bindings, workforce.agentIds) &&
+      inboundState.participants.at(-1) !== evt.sender
+    )
+      inboundState.participants.push(evt.sender)
     let matches = route(evt, bindings, threadStates, taskCtx, workforce.agentIds)
     // In a delegated task, agent-to-agent messages dispatch only when the
     // outgoing flush registered a matching invocation. This prevents a
@@ -1617,6 +1635,7 @@ export async function rebuildThreadState(
   roomId: string,
   rootEventId: string,
   bindings: AgentBinding[],
+  knownAgentIds?: ReadonlySet<string>,
 ): Promise<ThreadState> {
   const state: ThreadState = {
     participants: [],
@@ -1680,10 +1699,31 @@ export async function rebuildThreadState(
     const type = (ev as { type?: string }).type
     if (type === 'm.room.message' && evSender) {
       const a = bindings.find((b) => b.userId === evSender)
-      if (a && state.participants.at(-1) !== a.name) state.participants.push(a.name)
+      const msgtype = (ev as { content?: { msgtype?: string } }).content?.msgtype
+      const participant = a
+        ? a.name
+        : isRemoteAgent(evSender, msgtype, bindings, knownAgentIds)
+          ? evSender
+          : undefined
+      if (participant && state.participants.at(-1) !== participant)
+        state.participants.push(participant)
     }
   }
   return state
+}
+
+/**
+ * Another workstation's agent: not ours, but in the space's merged roster —
+ * or posting an m.notice, which Matrix bots do and clients never do.
+ */
+function isRemoteAgent(
+  sender: string,
+  msgtype: string | undefined,
+  bindings: AgentBinding[],
+  knownAgentIds: ReadonlySet<string> | undefined,
+): boolean {
+  if (bindings.some((b) => b.userId === sender)) return false
+  return knownAgentIds?.has(sender) === true || msgtype === 'm.notice'
 }
 
 function logInbound(evt: MatrixEvent): void {
