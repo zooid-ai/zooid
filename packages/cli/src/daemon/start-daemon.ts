@@ -426,6 +426,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
           spaceRoomId,
           asUserId,
           getAgents: () => bindings,
+          stateKey: matrix.transport.workstation ?? '',
         })
         console.log(`[matrix] published dev.zooid.workforce (${bindings.length} agents)`)
         void publisher

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { MatrixClient } from './matrix-client.js'
-import { buildWorkforceRoster, publishWorkforce } from './workforce-publisher.js'
+import { buildWorkforceRoster, publishWorkforce, WorkforceDirectory } from './workforce-publisher.js'
 import type { AgentBinding } from './router.js'
 
 const agents: AgentBinding[] = [
@@ -67,6 +67,23 @@ describe('publishWorkforce', () => {
     })
   })
 
+  it('keys the roster by workstation so daemons sharing a space never overwrite each other', async () => {
+    const fetch = vi.fn(async () => new Response('{}', { status: 200 }))
+    const client = new MatrixClient({
+      homeserver: 'https://hs.zoon.local',
+      asToken: 'as-tok',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    await publishWorkforce({
+      client,
+      spaceRoomId: '!space:zoon.local',
+      asUserId: '@laptop:zoon.local',
+      agents,
+      stateKey: 'laptop',
+    })
+    expect(fetch.mock.calls[0]![0]).toContain('/state/dev.zooid.workforce/laptop?')
+  })
+
   it('throws on non-2xx', async () => {
     const fetch = vi.fn(async () => new Response('forbidden', { status: 403 }))
     const client = new MatrixClient({
@@ -82,5 +99,32 @@ describe('publishWorkforce', () => {
         agents,
       }),
     ).rejects.toThrow(/403/)
+  })
+})
+
+describe('WorkforceDirectory', () => {
+  const roster = (...ids: string[]) => ({
+    version: 1,
+    agents: ids.map((user_id) => ({ user_id, name: user_id, rooms: [] })),
+  })
+
+  it('merges every workstation roster in the space', () => {
+    const dir = new WorkforceDirectory()
+    dir.load([
+      { type: 'dev.zooid.workforce', state_key: 'cloud', content: roster('@cloud.product:hs') },
+      { type: 'dev.zooid.workforce', state_key: 'laptop', content: roster('@laptop.coding:hs') },
+      { type: 'm.room.name', state_key: '', content: { name: 'hq' } },
+    ])
+    expect([...dir.agentIds].sort()).toEqual(['@cloud.product:hs', '@laptop.coding:hs'])
+  })
+
+  it('replaces only the updated workstation, and an emptied roster drops out', () => {
+    const dir = new WorkforceDirectory()
+    dir.apply('cloud', roster('@cloud.product:hs'))
+    dir.apply('laptop', roster('@laptop.coding:hs'))
+    dir.apply('cloud', roster('@cloud.scout:hs'))
+    expect([...dir.agentIds].sort()).toEqual(['@cloud.scout:hs', '@laptop.coding:hs'])
+    dir.apply('laptop', {})
+    expect([...dir.agentIds]).toEqual(['@cloud.scout:hs'])
   })
 })

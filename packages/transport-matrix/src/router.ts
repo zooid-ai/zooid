@@ -79,6 +79,12 @@ export function route(
   agents: AgentBinding[],
   threadStates?: Map<string, ThreadState>,
   task?: TaskThreadContext,
+  /**
+   * MXIDs of every agent in the workforce, including other workstations'
+   * (from their `dev.zooid.workforce` rosters). `agents` holds only this
+   * daemon's bindings.
+   */
+  knownAgentIds?: ReadonlySet<string>,
 ): RouteMatch[] {
   if (event.type !== 'm.room.message') return []
   if (!event.content?.msgtype) return []
@@ -96,6 +102,14 @@ export function route(
   const matches: RouteMatch[] = []
   const threadRoot = inboundThreadRoot(event)
   const threadState = threadRoot ? threadStates?.get(threadRoot) : undefined
+  // Another workstation's agent is not a human: it continues a thread only by
+  // explicit @mention, never through the human follow-up rules, or two daemons
+  // wake each other's agents forever. An m.notice from an unrostered sender
+  // counts too — Matrix bots post notices, and the web client never does.
+  const senderIsAgent =
+    agents.some((x) => x.userId === event.sender) ||
+    (event.sender !== undefined && knownAgentIds?.has(event.sender) === true) ||
+    event.content.msgtype === 'm.notice'
   // A human who @mentions an agent is addressing it; implicit continuation
   // (rule 2/3, task-assignee steering) must not also fire for someone else.
   const addressesAgent = agents.some(
@@ -117,8 +131,7 @@ export function route(
         matches.push(a)
         continue
       }
-      const senderAgent = agents.find((x) => x.userId === event.sender)
-      if (senderAgent) {
+      if (senderIsAgent) {
         // A delegated task returns at an invocation terminal boundary, never
         // because a callee happened to post progress prose.
         continue
@@ -138,8 +151,7 @@ export function route(
     }
     // Implicit trigger in a thread.
     if (threadState) {
-      const senderAgent = agents.find((x) => x.userId === event.sender)
-      if (senderAgent) {
+      if (senderIsAgent) {
         // Agent reply = a "return": route only to the agent that called the
         // sender (its caller), never to a callee. Directional continuation
         // keeps agent↔agent handoffs from looping — the call graph is a tree
