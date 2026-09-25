@@ -251,6 +251,8 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
           const app = webStatic({
             webRoot,
             homeserverUrl: homeserver,
+            // Same default as the daemon's space provisioning (start-daemon.ts).
+            workforceSpace: matrix.transport.space ?? 'dev',
             ...(ctx.daemon?.vapidPublicKey
               ? {
                   // Tuwunel runs in a container; `localhost` here would

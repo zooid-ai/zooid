@@ -93,6 +93,7 @@ describe.skipIf(!dockerAvailable())(
       expect(cfg.status).toBe(200)
       const body = (await cfg.json()) as Record<string, unknown>
       expect(body.homeserver_url).toBe(HS)
+      expect(typeof body.workforce_space).toBe('string')
       // The daemon's push gateway rides the AS listener; `zooid dev` wires
       // its VAPID key + a host.docker.internal URL into config.json so the
       // web client (in the host browser, not the container) can subscribe.

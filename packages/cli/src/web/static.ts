@@ -5,6 +5,8 @@ import { Hono } from 'hono'
 export interface WebStaticOpts {
   webRoot: string
   homeserverUrl: string
+  /** Workforce space alias localpart, copied from `matrix.space`. */
+  workforceSpace?: string
   pushGatewayUrl?: string
   vapidPublicKey?: string
 }
@@ -33,6 +35,7 @@ export function webStatic(opts: WebStaticOpts): Hono {
   app.get('/config.json', (c) =>
     c.json({
       homeserver_url: opts.homeserverUrl,
+      ...(opts.workforceSpace ? { workforce_space: opts.workforceSpace } : {}),
       ...(opts.pushGatewayUrl ? { push_gateway_url: opts.pushGatewayUrl } : {}),
       ...(opts.vapidPublicKey ? { vapid_public_key: opts.vapidPublicKey } : {}),
     }),
