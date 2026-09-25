@@ -96,6 +96,14 @@ export function route(
   const matches: RouteMatch[] = []
   const threadRoot = inboundThreadRoot(event)
   const threadState = threadRoot ? threadStates?.get(threadRoot) : undefined
+  // A human who @mentions an agent is addressing it; implicit continuation
+  // (rule 2/3, task-assignee steering) must not also fire for someone else.
+  const addressesAgent = agents.some(
+    (x) =>
+      x.userId !== event.sender &&
+      mentions.has(x.userId) &&
+      x.rooms.some((r) => r.alias === event.room_id),
+  )
 
   for (const a of agents) {
     if (!a.rooms.some((r) => r.alias === event.room_id)) continue
@@ -114,7 +122,7 @@ export function route(
         // A delegated task returns at an invocation terminal boundary, never
         // because a callee happened to post progress prose.
         continue
-      } else if (a.name === task.assignee) {
+      } else if (a.name === task.assignee && !addressesAgent) {
         matches.push(a)
       }
       continue
@@ -137,9 +145,10 @@ export function route(
         // keeps agent↔agent handoffs from looping — the call graph is a tree
         // rooted at the human, so returns only ever walk up.
         if (isReturnRoute(event, a, agents, threadState)) matches.push(a)
-      } else {
-        // Human (or non-agent) follow-up: continue with the most-recent-posting
-        // agent, or inherit the root mention if no agent has posted yet.
+      } else if (!addressesAgent) {
+        // Human (or non-agent) bare follow-up: continue with the most-recent-
+        // posting agent, or inherit the root mention if no agent has posted
+        // yet. An explicit @mention transfers attention instead ([[ZOD039]]).
         const lastPoster = threadState.participants.at(-1)
         if (lastPoster) {
           if (lastPoster === a.name) matches.push(a)
