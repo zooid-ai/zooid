@@ -62,4 +62,4 @@ export type { TaskRecord, TaskPhase, PersistedTask, TaskJournal } from './task-r
 export { InvocationRegistry } from './invocation-registry.js'
 export { evaluateCompletion } from './task-completion.js'
 export type { CompletionInputs, CompletionDecision, StopReason } from './task-completion.js'
-export { checkDelegable, buildAssignmentContent, renderCompletionPrompt, renderInvocationReturn } from './task-dispatch.js'
+export { checkDelegable, buildAssignmentContent, renderCompletionPrompt, renderInvocationReturn, renderHandoffReturn } from './task-dispatch.js'

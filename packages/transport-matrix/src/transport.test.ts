@@ -2086,7 +2086,9 @@ describe('directional agent-to-agent handoffs', () => {
     expect(agents.prompt).toHaveBeenCalledWith(
       'parent',
       expect.objectContaining({
-        content: [expect.objectContaining({ type: 'text', text: 'x\n\nx' })],
+        content: [
+          expect.objectContaining({ type: 'text', text: '[handoff return] from sub\n\nx' }),
+        ],
       }),
     )
   })

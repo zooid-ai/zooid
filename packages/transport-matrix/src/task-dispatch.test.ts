@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildAssignmentContent, checkDelegable, renderCompletionPrompt } from './task-dispatch.js'
+import {
+  buildAssignmentContent,
+  checkDelegable,
+  renderCompletionPrompt,
+  renderHandoffReturn,
+} from './task-dispatch.js'
 import type { AgentBinding } from './router.js'
 const agents: AgentBinding[] = [
   {
@@ -49,5 +54,19 @@ describe('task dispatch', () => {
         output: { type: 'message', text: 'done' },
       }),
     ).toContain('done')
+  })
+})
+
+describe('renderHandoffReturn', () => {
+  it('heads the resolving turn prose with the callee', () => {
+    expect(renderHandoffReturn({ callee: 'ux', text: 'login works in both themes' })).toBe(
+      '[handoff return] from ux\n\nlogin works in both themes',
+    )
+  })
+
+  it('says so when the resolving turn produced no prose', () => {
+    expect(renderHandoffReturn({ callee: 'ux', text: '  ' })).toBe(
+      '[handoff return] from ux — ended its turn without a reply',
+    )
   })
 })

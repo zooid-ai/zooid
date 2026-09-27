@@ -51,6 +51,17 @@ export function renderInvocationReturn(c: ThreadCompletion) {
     ...(c.output?.text ? ['', c.output.text] : []),
   ].join('\n')
 }
+/**
+ * The caller's wake for an ordinary-thread handoff return ([[ZOD088]]): the
+ * callee's resolving turn, headed so the caller can tell a result from
+ * progress ([[ZOD084]]'s wake contract).
+ */
+export function renderHandoffReturn(r: { callee: string; text: string }): string {
+  const text = r.text.trim()
+  return text
+    ? `[handoff return] from ${r.callee}\n\n${text}`
+    : `[handoff return] from ${r.callee} — ended its turn without a reply`
+}
 export function renderDelivery(notify: 'caller' | 'none'): string {
   return notify === 'caller'
     ? 'Each result returns to you as a new turn when that task completes. End your turn now — do not read the task thread to wait for it.'
