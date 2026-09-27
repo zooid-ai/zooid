@@ -8,6 +8,7 @@ import type {
   TaskActions,
   TaskRole,
   TransportContextProvider,
+  HandoffOutput,
 } from '@zooid/core'
 
 const spawnIdIdx = process.argv.indexOf('--spawn-id')
@@ -85,6 +86,12 @@ const remoteTasks: TaskActions = {
       method: 'describeRole',
       params: {},
     }) as Promise<TaskRole>,
+  handoff: (_caller, input) =>
+    callDaemon(sockPath, {
+      spawnId,
+      method: 'handoff',
+      params: input as unknown as Record<string, unknown>,
+    }) as Promise<HandoffOutput>,
 }
 
 // A failed role query yields undefined, which registers neither task tool —

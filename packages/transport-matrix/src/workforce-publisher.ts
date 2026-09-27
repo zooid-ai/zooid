@@ -63,12 +63,19 @@ export async function startWorkforcePublisher(opts: StartOpts): Promise<Publishe
   }
 }
 
+export interface WorkforceEntry {
+  userId: string
+  name: string
+  workstation?: string
+  rooms: string[]
+}
+
 /**
  * Every agent in the workforce across workstations: the union of the space's
  * `dev.zooid.workforce` state events, one per state key.
  */
 export class WorkforceDirectory {
-  private readonly rosters = new Map<string, string[]>()
+  private readonly rosters = new Map<string, WorkforceEntry[]>()
   readonly agentIds = new Set<string>()
 
   /** Seed from a space's full state (`GET /rooms/{id}/state`). */
@@ -82,12 +89,27 @@ export class WorkforceDirectory {
   /** Replace one workstation's roster; empty content removes it. */
   apply(stateKey: string, content: unknown): void {
     const agents = (content as Partial<WorkforceRoster> | undefined)?.agents
-    const ids = Array.isArray(agents)
-      ? agents.map((a) => a?.user_id).filter((id): id is string => typeof id === 'string')
+    const entries: WorkforceEntry[] = Array.isArray(agents)
+      ? agents
+          .filter((a) => typeof a?.user_id === 'string')
+          .map((a) => ({
+            userId: a.user_id,
+            name: typeof a.name === 'string' ? a.name : a.user_id,
+            workstation: stateKey || undefined,
+            rooms: Array.isArray(a.rooms) ? a.rooms.filter((r): r is string => typeof r === 'string') : [],
+          }))
       : []
-    if (ids.length > 0) this.rosters.set(stateKey, ids)
+    if (entries.length > 0) this.rosters.set(stateKey, entries)
     else this.rosters.delete(stateKey)
     this.agentIds.clear()
-    for (const list of this.rosters.values()) for (const id of list) this.agentIds.add(id)
+    for (const list of this.rosters.values()) for (const e of list) this.agentIds.add(e.userId)
+  }
+
+  entries(): WorkforceEntry[] {
+    return [...this.rosters.values()].flat()
+  }
+
+  nameOf(userId: string): string | undefined {
+    return this.entries().find((e) => e.userId === userId)?.name
   }
 }

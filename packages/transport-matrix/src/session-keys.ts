@@ -14,16 +14,16 @@ export function composeHandoffKey(threadRoot: string, callEventId: string): stri
 
 /**
  * The session key for an agent's next turn in a thread: its latest handoff
- * arc when it has been called (agent→agent @mention, [[ZOD071]]), else the
- * thread-level key. Relies on the transaction handler recording the arc
- * BEFORE the turn is dispatched, so a just-called sub resolves to the arc
- * minted by its own triggering event.
+ * arc when it has been called ([[ZOD071]]), else the thread-level key. Relies
+ * on the transaction handler recording the arc BEFORE the turn is dispatched,
+ * so a just-called sub resolves to the arc minted by its own triggering
+ * event. Keyed by MXID ([[ZOD092]]).
  */
 export function sessionKeyFor(
-  agentName: string,
+  agentUserId: string,
   threadRoot: string,
   state: ThreadState | undefined,
 ): string {
-  const arc = state?.handoffs[agentName]?.at(-1)
+  const arc = state?.handoffs[agentUserId]?.at(-1)
   return arc ? composeHandoffKey(threadRoot, arc) : threadRoot
 }

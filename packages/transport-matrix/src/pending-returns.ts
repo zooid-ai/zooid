@@ -12,6 +12,8 @@ export interface ReleasedReturn {
 
 export interface PendingReturnsOptions {
   graceMs: number
+  /** Fallback for a remote callee's hold ([[ZOD092]] §5). Defaults to `graceMs`. */
+  remoteGraceMs?: number
   onRelease: (released: ReleasedReturn) => void
 }
 
@@ -27,6 +29,8 @@ interface PendingReturn {
   waiting: boolean
   /** Interrupted while running: its next turn end releases regardless. */
   interrupted: boolean
+  /** The callee lives on another workstation: its running turn is invisible here ([[ZOD092]] §5). */
+  remote: boolean
   timer?: ReturnType<typeof setTimeout>
 }
 
@@ -39,7 +43,10 @@ interface PendingReturn {
  * The grace timer is a fallback for a turn end this process cannot see: it
  * never arms while the callee has a turn running here, nor while the callee is
  * waiting on its own callee. Every ambiguity resolves toward releasing.
- * Keyed `<callee>::<threadRoot>`.
+ * Keyed `<calleeMxid>::<threadRoot>`. A remote callee's hold uses the longer
+ * remote window, because its running turn can't be seen here — a single
+ * `tool_call` may be followed by a long silence while it actually runs
+ * ([[ZOD092]] §5).
  */
 export class PendingReturns {
   private readonly pending = new Map<string, PendingReturn>()
@@ -52,10 +59,16 @@ export class PendingReturns {
   }
 
   /** An agent→agent call: a fresh pending return, replacing any earlier one. */
-  open(callee: string, threadRoot: string, roomId: string, caller: AgentBinding): void {
+  open(
+    callee: string,
+    threadRoot: string,
+    roomId: string,
+    caller: AgentBinding,
+    o: { remote?: boolean } = {},
+  ): void {
     const k = key(callee, threadRoot)
     this.drop(k)
-    this.pending.set(k, fresh(callee, threadRoot, roomId, [caller]))
+    this.pending.set(k, fresh(callee, threadRoot, roomId, [caller], o.remote === true))
   }
 
   /** A callee message routed as a return: held, never delivered on its own. */
@@ -65,12 +78,15 @@ export class PendingReturns {
     roomId: string,
     targets: AgentBinding[],
     body: string | undefined,
+    o: { remote?: boolean } = {},
   ): void {
     const k = key(callee, threadRoot)
     let p = this.pending.get(k)
     if (!p) {
-      p = fresh(callee, threadRoot, roomId, targets)
+      p = fresh(callee, threadRoot, roomId, targets, o.remote === true)
       this.pending.set(k, p)
+    } else if (o.remote === true) {
+      p.remote = true
     }
     for (const t of targets) p.targets.set(t.name, t)
     const text = body?.trim()
@@ -151,7 +167,8 @@ export class PendingReturns {
     if (!p) return
     disarm(p)
     if (p.waiting || this.running.has(k)) return
-    p.timer = setTimeout(() => this.release(k), this.opts.graceMs)
+    const ms = p.remote ? (this.opts.remoteGraceMs ?? this.opts.graceMs) : this.opts.graceMs
+    p.timer = setTimeout(() => this.release(k), ms)
     p.timer.unref?.()
   }
 
@@ -184,6 +201,7 @@ function fresh(
   threadRoot: string,
   roomId: string,
   targets: AgentBinding[],
+  remote: boolean,
 ): PendingReturn {
   return {
     callee,
@@ -194,6 +212,7 @@ function fresh(
     delegated: false,
     waiting: false,
     interrupted: false,
+    remote,
   }
 }
 

@@ -10,7 +10,7 @@ describe('renderAssigneeEnvelope', () => {
     expect(out).toMatch(/^\[task\] from zooid-assistant/)
     expect(out).toMatch(/zooid_complete_task/)
     expect(out).toMatch(/ending your turn without one/i)
-    expect(out).toMatch(/@mention/)
+    expect(out).toMatch(/zooid_handoff/)
     expect(out.endsWith('Write a one-sentence bug report.')).toBe(true)
   })
 })

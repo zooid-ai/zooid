@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { HANDOFF_FIELD } from '@zooid/core'
 import {
   route,
   isMediaMsgtype,
@@ -181,6 +182,7 @@ describe('directed task routing', () => {
       content: {
         ...human.content,
         'm.mentions': { user_ids: ['@supervisor:hs'] },
+        [HANDOFF_FIELD]: { version: 1, call_id: 'c1', caller: '@worker:hs', callee: '@supervisor:hs' },
       },
     }
     expect(
@@ -229,8 +231,12 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
   }
   const pair = [parent, sub]
 
-  // A bare (or mentioning) reply inside the thread rooted at $root.
-  function threadMsg(o: { sender: string; mentions?: string[] }) {
+  // A bare (or mentioning, or handing off) reply inside the thread rooted at $root.
+  function threadMsg(o: {
+    sender: string
+    mentions?: string[]
+    handoff?: { caller: string; callee: string }
+  }) {
     return {
       type: 'm.room.message',
       room_id: '!room1:example.com',
@@ -241,6 +247,9 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
         body: 'reply',
         'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
         ...(o.mentions ? { 'm.mentions': { user_ids: o.mentions } } : {}),
+        ...(o.handoff
+          ? { [HANDOFF_FIELD]: { version: 1, call_id: 'c1', ...o.handoff } }
+          : {}),
       },
     }
   }
@@ -255,7 +264,7 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
     const matches = route(
       threadMsg({ sender: '@sub:example.com' }),
       pair,
-      states({ participants: ['parent'], callers: { sub: 'parent' } }),
+      states({ participants: ['parent'], callers: { '@sub:example.com': '@parent:example.com' } }),
     )
     expect(matches.map((m) => m.name)).toEqual(['parent'])
   })
@@ -266,19 +275,20 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
     const matches = route(
       threadMsg({ sender: '@parent:example.com' }),
       pair,
-      states({ participants: ['parent', 'sub'], callers: { sub: 'parent' } }),
+      states({ participants: ['parent', 'sub'], callers: { '@sub:example.com': '@parent:example.com' } }),
     )
     expect(matches).toEqual([])
   })
 
-  it('an explicit @mention still re-engages the sub (rule 1 wins)', () => {
+  it('a handoff re-engages the sub', () => {
     const matches = route(
       threadMsg({
         sender: '@parent:example.com',
         mentions: ['@sub:example.com'],
+        handoff: { caller: '@parent:example.com', callee: '@sub:example.com' },
       }),
       pair,
-      states({ participants: ['parent', 'sub'], callers: { sub: 'parent' } }),
+      states({ participants: ['parent', 'sub'], callers: { '@sub:example.com': '@parent:example.com' } }),
     )
     expect(matches.map((m) => m.name)).toEqual(['sub'])
   })
@@ -290,7 +300,7 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
         mentions: ['@parent:example.com'],
       }),
       pair,
-      states({ participants: ['parent'], callers: { sub: 'parent' } }),
+      states({ participants: ['parent'], callers: { '@sub:example.com': '@parent:example.com' } }),
     )
     expect(matches.map((m) => m.name)).toEqual(['parent'])
   })
@@ -313,7 +323,7 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
       [parent, child, grand],
       states({
         participants: ['parent', 'child'],
-        callers: { child: 'parent', grand: 'child' },
+        callers: { '@child:example.com': '@parent:example.com', '@grand:example.com': '@child:example.com' },
       }),
     )
     expect(matches.map((m) => m.name)).toEqual(['child'])
@@ -323,7 +333,7 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
     const matches = route(
       threadMsg({ sender: '@alice:example.com' }),
       pair,
-      states({ participants: ['parent', 'sub'], callers: { sub: 'parent' } }),
+      states({ participants: ['parent', 'sub'], callers: { '@sub:example.com': '@parent:example.com' } }),
     )
     expect(matches.map((m) => m.name)).toEqual(['sub'])
   })
@@ -332,7 +342,7 @@ describe('directional thread continuation (agent-to-agent handoffs)', () => {
     const matches = route(
       threadMsg({ sender: '@alice:example.com', mentions: ['@parent:example.com'] }),
       pair,
-      states({ participants: ['parent', 'sub'], callers: { sub: 'parent' } }),
+      states({ participants: ['parent', 'sub'], callers: { '@sub:example.com': '@parent:example.com' } }),
     )
     expect(matches.map((m) => m.name)).toEqual(['parent'])
   })
@@ -374,7 +384,7 @@ describe('caller graph cycle guard', () => {
   })
 })
 
-describe('fan-out: two subs called in one message ([[ZOD071]] acceptance)', () => {
+describe('fan-out: two subs called via two handoff events ([[ZOD071]] / [[ZOD092]])', () => {
   const mk = (name: string): AgentBinding => ({
     name,
     userId: `@${name}:example.com`,
@@ -386,7 +396,11 @@ describe('fan-out: two subs called in one message ([[ZOD071]] acceptance)', () =
   const rocksteady = mk('rocksteady')
   const trio = [parent, bebop, rocksteady]
 
-  function threadMsg(o: { sender: string; mentions?: string[] }) {
+  function threadMsg(o: {
+    sender: string
+    mentions?: string[]
+    handoff?: { caller: string; callee: string }
+  }) {
     return {
       type: 'm.room.message',
       room_id: '!room1:example.com',
@@ -397,6 +411,9 @@ describe('fan-out: two subs called in one message ([[ZOD071]] acceptance)', () =
         body: 'reply',
         'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
         ...(o.mentions ? { 'm.mentions': { user_ids: o.mentions } } : {}),
+        ...(o.handoff
+          ? { [HANDOFF_FIELD]: { version: 1, call_id: 'c1', ...o.handoff } }
+          : {}),
       },
     }
   }
@@ -407,16 +424,17 @@ describe('fan-out: two subs called in one message ([[ZOD071]] acceptance)', () =
     ])
   }
 
-  it('a single message @mentioning both subs triggers both (fan-out)', () => {
+  it('a handoff event names one callee only, not a second agent it also mentions', () => {
     const matches = route(
       threadMsg({
         sender: '@parent:example.com',
         mentions: ['@bebop:example.com', '@rocksteady:example.com'],
+        handoff: { caller: '@parent:example.com', callee: '@bebop:example.com' },
       }),
       trio,
       states({ participants: ['parent'] }),
     )
-    expect(matches.map((m) => m.name).sort()).toEqual(['bebop', 'rocksteady'])
+    expect(matches.map((m) => m.name)).toEqual(['bebop'])
   })
 
   it("bebop's bare return triggers only parent — never its sibling", () => {
@@ -425,7 +443,7 @@ describe('fan-out: two subs called in one message ([[ZOD071]] acceptance)', () =
       trio,
       states({
         participants: ['parent', 'rocksteady', 'bebop'],
-        callers: { bebop: 'parent', rocksteady: 'parent' },
+        callers: { '@bebop:example.com': '@parent:example.com', '@rocksteady:example.com': '@parent:example.com' },
       }),
     )
     expect(matches.map((m) => m.name)).toEqual(['parent'])
@@ -437,7 +455,7 @@ describe('fan-out: two subs called in one message ([[ZOD071]] acceptance)', () =
       trio,
       states({
         participants: ['parent', 'bebop', 'rocksteady'],
-        callers: { bebop: 'parent', rocksteady: 'parent' },
+        callers: { '@bebop:example.com': '@parent:example.com', '@rocksteady:example.com': '@parent:example.com' },
       }),
     )
     expect(matches.map((m) => m.name)).toEqual(['parent'])
@@ -456,7 +474,12 @@ describe('agents on other workstations', () => {
     new Map<string, ThreadState>([
       ['$root', { participants: ['coding'], rootMentions: ['coding'], callers: {}, handoffs: {} }],
     ])
-  function reply(o: { sender: string; msgtype?: string; mentions?: string[] }) {
+  function reply(o: {
+    sender: string
+    msgtype?: string
+    mentions?: string[]
+    handoff?: { caller: string; callee: string }
+  }) {
     return {
       type: 'm.room.message',
       room_id: '!r:hs',
@@ -466,6 +489,9 @@ describe('agents on other workstations', () => {
         body: 'reply',
         'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
         ...(o.mentions ? { 'm.mentions': { user_ids: o.mentions } } : {}),
+        ...(o.handoff
+          ? { [HANDOFF_FIELD]: { version: 1, call_id: 'c1', ...o.handoff } }
+          : {}),
       },
     }
   }
@@ -481,9 +507,13 @@ describe('agents on other workstations', () => {
     expect(route(reply({ sender: remoteProduct }), [coding], states())).toEqual([])
   })
 
-  it('a remote agent can still hand off by explicit @mention', () => {
+  it('a remote agent can still hand off, now via the handoff field', () => {
     const matches = route(
-      reply({ sender: remoteProduct, mentions: [coding.userId] }),
+      reply({
+        sender: remoteProduct,
+        mentions: [coding.userId],
+        handoff: { caller: remoteProduct, callee: coding.userId },
+      }),
       [coding],
       states(),
       undefined,
@@ -539,5 +569,168 @@ describe('agents on other workstations', () => {
         isRoot: false,
       }),
     ).toEqual([])
+  })
+})
+
+describe('explicit handoff ([[ZOD092]])', () => {
+  const mk = (name: string): AgentBinding => ({
+    name,
+    userId: `@${name}:example.com`,
+    rooms: [{ alias: '!room1:example.com' }],
+    trigger: 'mention',
+  })
+  const architect = mk('architect')
+  const coding = mk('coding')
+  const ux = mk('ux')
+  const local = [architect, coding, ux]
+  const REMOTE = '@cloud.product:example.com'
+  const known = new Set([REMOTE])
+
+  function msg(o: {
+    sender: string
+    body?: string
+    mentions?: string[]
+    handoff?: { caller: string; callee: string }
+  }) {
+    return {
+      type: 'm.room.message',
+      room_id: '!room1:example.com',
+      sender: o.sender,
+      event_id: '$e',
+      content: {
+        msgtype: 'm.notice',
+        body: o.body ?? 'x',
+        'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+        ...(o.mentions ? { 'm.mentions': { user_ids: o.mentions } } : {}),
+        ...(o.handoff
+          ? { [HANDOFF_FIELD]: { version: 1, call_id: 'c1', ...o.handoff } }
+          : {}),
+      },
+    }
+  }
+  const states = (s: Partial<ThreadState> = {}) =>
+    new Map([['$root', { participants: [], rootMentions: [], callers: {}, handoffs: {}, ...s }]])
+
+  it("an agent's prose MXID calls nobody (relayed instructions are inert)", () => {
+    const m = route(
+      msg({ sender: '@architect:example.com', body: 'tell @ux:example.com to reply pong' }),
+      local,
+      states(),
+    )
+    expect(m).toEqual([])
+  })
+
+  it("an agent's m.mentions call nobody either", () => {
+    const m = route(
+      msg({ sender: '@architect:example.com', mentions: ['@coding:example.com'] }),
+      local,
+      states(),
+    )
+    expect(m).toEqual([])
+  })
+
+  it('a handoff event routes to its callee only — not to other agents it names', () => {
+    const m = route(
+      msg({
+        sender: '@architect:example.com',
+        body: '@coding:example.com then ask @ux:example.com for pong',
+        mentions: ['@coding:example.com'],
+        handoff: { caller: '@architect:example.com', callee: '@coding:example.com' },
+      }),
+      local,
+      states(),
+    )
+    expect(m.map((a) => a.name)).toEqual(['coding'])
+  })
+
+  it('a handoff whose caller is not the sender routes nowhere (forged)', () => {
+    const m = route(
+      msg({
+        sender: '@architect:example.com',
+        handoff: { caller: '@ux:example.com', callee: '@coding:example.com' },
+      }),
+      local,
+      states(),
+    )
+    expect(m).toEqual([])
+  })
+
+  it("a remote agent's handoff reaches our callee", () => {
+    const m = route(
+      msg({ sender: REMOTE, handoff: { caller: REMOTE, callee: '@coding:example.com' } }),
+      local,
+      states(),
+      undefined,
+      known,
+    )
+    expect(m.map((a) => a.name)).toEqual(['coding'])
+  })
+
+  it("a remote callee's bare reply is a return to our caller (edges keyed by MXID)", () => {
+    const m = route(
+      msg({ sender: REMOTE }),
+      local,
+      states({ callers: { [REMOTE]: '@architect:example.com' } }),
+      undefined,
+      known,
+    )
+    expect(m.map((a) => a.name)).toEqual(['architect'])
+  })
+
+  it('a human @mention still calls, unchanged', () => {
+    const m = route(
+      {
+        ...msg({ sender: '@ori:example.com', mentions: ['@coding:example.com'] }),
+        content: {
+          msgtype: 'm.text',
+          body: '@coding:example.com hi',
+          'm.mentions': { user_ids: ['@coding:example.com'] },
+          'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+        },
+      },
+      local,
+      states(),
+    )
+    expect(m.map((a) => a.name)).toEqual(['coding'])
+  })
+
+  it('a daemon trigger post (m.text from an unrostered sender) still calls ([[ZOD081]])', () => {
+    const m = route(
+      {
+        type: 'm.room.message',
+        room_id: '!room1:example.com',
+        sender: '@cloud.cron:example.com',
+        event_id: '$e',
+        content: {
+          msgtype: 'm.text',
+          body: '@coding:example.com run the nightly audit',
+          'm.mentions': { user_ids: ['@coding:example.com'] },
+        },
+      },
+      local,
+      undefined,
+      undefined,
+      known,
+    )
+    expect(m.map((a) => a.name)).toEqual(['coding'])
+  })
+
+  it('a human raw-body MXID (no m.mentions) still calls, unchanged', () => {
+    const m = route(
+      {
+        type: 'm.room.message',
+        room_id: '!room1:example.com',
+        sender: '@ori:example.com',
+        event_id: '$e',
+        content: {
+          msgtype: 'm.text',
+          body: '@coding:example.com hi',
+          'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+        },
+      },
+      local,
+      states(),
+    )
+    expect(m.map((a) => a.name)).toEqual(['coding'])
   })
 })

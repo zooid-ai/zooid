@@ -38,12 +38,33 @@ export interface CompleteTaskOutput {
 export interface TaskRole {
   is_task_assignee: boolean
   can_start_task_threads: boolean
+  /** [[ZOD092]] zooid_handoff is registered only when true. */
+  can_handoff?: boolean
 }
 export interface TaskActions {
   startTasks(caller: TaskCallerRef, input: StartTasksInput): Promise<StartTasksOutput>
   completeTask(caller: TaskCallerRef, input: CompleteTaskInput): Promise<CompleteTaskOutput>
   describeRole(caller: TaskCallerRef): Promise<TaskRole>
+  handoff(caller: TaskCallerRef, input: HandoffInput): Promise<HandoffOutput>
 }
+/** [[ZOD092]] Structured agent→agent call, carried on the handoff message. */
+export const HANDOFF_FIELD = 'dev.zooid.handoff'
+export interface HandoffContent {
+  version: 1
+  call_id: string
+  /** Caller MXID — must equal the event sender, or the call routes nowhere. */
+  caller: string
+  /** Callee MXID. */
+  callee: string
+}
+export interface HandoffInput {
+  /** Agent name, `workstation.agent`, or full MXID; resolved against the merged roster. */
+  agent: string
+  prompt: string
+}
+export type HandoffOutput =
+  | { status: 'started'; call_id: string; callee: string; delivery: string }
+  | { status: 'refused'; reason: string }
 /** One in-thread handoff inside a delegated task. */
 export type InvocationState = 'outstanding' | 'returned' | 'cancelled'
 export interface InvocationRecord {

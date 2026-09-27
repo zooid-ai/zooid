@@ -67,12 +67,16 @@ export function renderDelivery(notify: 'caller' | 'none'): string {
     ? 'Each result returns to you as a new turn when that task completes. End your turn now — do not read the task thread to wait for it.'
     : 'No result returns to you. The task thread is the result surface; thread_id is for later reference, not something to wait on.'
 }
+/** Stated where the model reads it, like renderDelivery ([[ZOD092]] §1). */
+export function renderHandoffDelivery(callee: string): string {
+  return `Handed off to ${callee}. End your turn now — do not wait, poll, or post follow-ups. You will be woken with \`[handoff return] from ${callee}\` when it finishes.`
+}
 export function renderAssigneeEnvelope(input: { parentAgent: string; prompt: string }): string {
   return [
     `[task] from ${input.parentAgent} — you are the assignee of this thread.`,
     'Call zooid_complete_task with a self-contained summary when you are done;',
     'ending your turn without one publishes your last message as the result.',
-    'Sibling task threads are refused here — @mention an agent in this thread to hand off.',
+    'Sibling task threads are refused here — call zooid_handoff to hand off in this thread.',
     '',
     input.prompt,
   ].join('\n')

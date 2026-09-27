@@ -22,6 +22,7 @@ function makeTasks(over: Partial<TaskActions> = {}): TaskActions {
     startTasks: async () => ({ results: [], notify: 'caller', delivery: 'd' }),
     completeTask: async () => ({ status: 'recorded' }),
     describeRole: async () => ({ is_task_assignee: false, can_start_task_threads: true }),
+    handoff: async () => ({ status: 'refused', reason: 'stub' }),
     ...over,
   }
 }
@@ -386,5 +387,64 @@ describe('buildContextMcpServer', () => {
     expect(JSON.parse((result.content as Array<{ text: string }>)[0].text)).toMatchObject({
       results: [{ thread_id: '$task' }],
     })
+  })
+})
+
+describe('zooid_handoff ([[ZOD092]])', () => {
+  it('is registered only when the role allows it', async () => {
+    const without = await connect(
+      buildContextMcpServer({
+        resolve: async () => makeProvider(),
+        resolveTasks: async () => makeTasks(),
+        role: { is_task_assignee: false, can_start_task_threads: true },
+      }),
+    )
+    expect((await without.listTools()).tools.map((t) => t.name)).not.toContain('zooid_handoff')
+
+    const withIt = await connect(
+      buildContextMcpServer({
+        resolve: async () => makeProvider(),
+        resolveTasks: async () => makeTasks(),
+        role: { is_task_assignee: false, can_start_task_threads: true, can_handoff: true },
+      }),
+    )
+    const tool = (await withIt.listTools()).tools.find((t) => t.name === 'zooid_handoff')
+    expect(tool?.description).toMatch(/only way to involve another agent/i)
+  })
+
+  it('forwards agent and prompt and returns the result verbatim', async () => {
+    const seen: unknown[] = []
+    const client = await connect(
+      buildContextMcpServer({
+        resolve: async () => makeProvider(),
+        resolveTasks: async () =>
+          makeTasks({
+            handoff: async (_caller, input) => {
+              seen.push(input)
+              return { status: 'started', call_id: 'c1', callee: '@cloud.product:hs', delivery: 'End your turn now.' }
+            },
+          }),
+        role: { is_task_assignee: false, can_start_task_threads: true, can_handoff: true },
+      }),
+    )
+    const res = await client.callTool({
+      name: 'zooid_handoff',
+      arguments: { agent: 'product', prompt: 'write the spec' },
+    })
+    expect(seen).toEqual([{ agent: 'product', prompt: 'write the spec' }])
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0].text)
+    expect(payload).toMatchObject({ status: 'started', callee: '@cloud.product:hs' })
+  })
+
+  it('send_message tells the model that mentions do not notify agents', async () => {
+    const client = await connect(buildContextMcpServer({ resolve: async () => makeProvider() }))
+    const tool = (await client.listTools()).tools.find((t) => t.name === 'zooid_send_message')
+    expect(tool?.description).toMatch(/zooid_handoff/)
+    expect(tool?.description).toMatch(/do not notify agents|don't notify agents/i)
+  })
+
+  it('carries server instructions naming zooid_handoff', async () => {
+    const client = await connect(buildContextMcpServer({ resolve: async () => makeProvider() }))
+    expect(client.getInstructions()).toMatch(/zooid_handoff/)
   })
 })

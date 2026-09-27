@@ -1974,7 +1974,9 @@ describe('directional agent-to-agent handoffs', () => {
   }
 
   // Post one m.room.message. Top-level unless `root` is given (then it's a
-  // thread reply on that root). `mentions` sets m.mentions.user_ids.
+  // thread reply on that root). `mentions` sets m.mentions.user_ids. When the
+  // sender is one of this describe's agent bindings and mentions a single
+  // agent, that mention is also a handoff call ([[ZOD092]]).
   function post(
     transport: ReturnType<typeof makePairTransport>['transport'],
     o: { id: string; sender: string; root?: string; mentions?: string[] },
@@ -1982,6 +1984,9 @@ describe('directional agent-to-agent handoffs', () => {
     const content: Record<string, unknown> = { msgtype: 'm.text', body: 'x' }
     if (o.mentions) content['m.mentions'] = { user_ids: o.mentions }
     if (o.root) content['m.relates_to'] = { rel_type: 'm.thread', event_id: o.root }
+    const isAgent = parentSub.some((b) => b.userId === o.sender)
+    if (isAgent && o.mentions?.length === 1)
+      content['dev.zooid.handoff'] = { version: 1, call_id: o.id, caller: o.sender, callee: o.mentions[0] }
     return postTxn(transport.app, {
       events: [
         {
@@ -2101,13 +2106,16 @@ describe('directional agent-to-agent handoffs', () => {
         sender: '@alice:example.com',
         content: { 'm.mentions': { user_ids: ['@parent:example.com'] } },
       })),
-      // thread: parent @mentions sub (caller[sub]=parent), then sub replies bare.
+      // thread: parent hands off to sub (caller[sub]=parent), then sub replies bare.
       fetchThreadRelations: vi.fn(async () => ({
         chunk: [
           {
             type: 'm.room.message',
             sender: '@parent:example.com',
-            content: { 'm.mentions': { user_ids: ['@sub:example.com'] } },
+            content: {
+              'm.mentions': { user_ids: ['@sub:example.com'] },
+              'dev.zooid.handoff': { version: 1, call_id: 'c1', caller: '@parent:example.com', callee: '@sub:example.com' },
+            },
           },
           {
             type: 'm.room.message',
@@ -2118,8 +2126,8 @@ describe('directional agent-to-agent handoffs', () => {
       })),
     }
     const state = await rebuildThreadState(client as never, '!r:example.com', '$root', parentSub)
-    expect(state.callers).toEqual({ sub: 'parent' })
-    expect(state.rootMentions).toEqual(['parent', 'sub'])
+    expect(state.callers).toEqual({ '@sub:example.com': '@parent:example.com' })
+    expect(state.rootMentions).toEqual(['parent'])
     expect(state.participants).toEqual(['parent', 'sub'])
   })
 })
@@ -2171,6 +2179,9 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
     const content: Record<string, unknown> = { msgtype: 'm.text', body: 'x' }
     if (o.mentions) content['m.mentions'] = { user_ids: o.mentions }
     if (o.root) content['m.relates_to'] = { rel_type: 'm.thread', event_id: o.root }
+    const isAgent = trio.some((b) => b.userId === o.sender)
+    if (isAgent && o.mentions?.length === 1)
+      content['dev.zooid.handoff'] = { version: 1, call_id: o.id, caller: o.sender, callee: o.mentions[0] }
     return postTxn(transport.app, {
       events: [
         {
@@ -2186,7 +2197,7 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
   const agentsCalled = (reg: ReturnType<typeof fakeRegistry>['reg']) =>
     reg.ensureSession.mock.calls.map((c) => c[0] as string)
 
-  it('fans out to two subs on one call event, runs their arcs concurrently with interleaved completion, and returns control to the parent once per sub', async () => {
+  it('fans out to two subs via two handoff events, runs their arcs concurrently with interleaved completion, and returns control to the parent once per sub', async () => {
     const { transport, agents, gates } = makeTrioTransport()
 
     // 1. Human @parent (top-level, $root) → parent gets the THREAD-LEVEL
@@ -2199,26 +2210,31 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
     await settleTurn()
     expect(agents.ensureSession).toHaveBeenCalledWith('parent', '$root', '!r:example.com', '$root')
 
-    // 2. Parent calls BOTH subs in ONE message ($p1). Each sub gets a fresh
-    //    arc session keyed by the same call event id — the composed key
-    //    string is identical; the sessions are distinct via the agent
-    //    dimension (per-agent client/store).
+    // 2. Parent calls BOTH subs, one handoff event per callee ([[ZOD092]]).
+    //    Each sub gets its own fresh arc session, keyed by its own call event.
     await post(transport, {
-      id: '$p1',
+      id: '$call-b',
       sender: '@parent:example.com',
       root: '$root',
-      mentions: ['@bebop:example.com', '@rocksteady:example.com'],
+      mentions: ['@bebop:example.com'],
+    })
+    await settleTurn()
+    await post(transport, {
+      id: '$call-r',
+      sender: '@parent:example.com',
+      root: '$root',
+      mentions: ['@rocksteady:example.com'],
     })
     await settleTurn()
     expect(agents.ensureSession).toHaveBeenCalledWith(
       'bebop',
-      '$root|$p1',
+      '$root|$call-b',
       '!r:example.com',
       '$root',
     )
     expect(agents.ensureSession).toHaveBeenCalledWith(
       'rocksteady',
-      '$root|$p1',
+      '$root|$call-r',
       '!r:example.com',
       '$root',
     )
@@ -2356,7 +2372,14 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
       id: '$p1',
       sender: '@parent:example.com',
       root: '$root',
-      mentions: ['@bebop:example.com', '@rocksteady:example.com'],
+      mentions: ['@bebop:example.com'],
+    })
+    await settleTurn()
+    await post(transport, {
+      id: '$p1r',
+      sender: '@parent:example.com',
+      root: '$root',
+      mentions: ['@rocksteady:example.com'],
     })
     await settleTurn()
     gates.get('bebop')!()
@@ -2383,7 +2406,7 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
     expect(ended).toContain('bebop:$root')
     expect(ended).toContain('rocksteady:$root')
     expect(ended).toContain('bebop:$root|$p1')
-    expect(ended).toContain('rocksteady:$root|$p1')
+    expect(ended).toContain('rocksteady:$root|$p1r')
   })
 
   it('/clear right after a restart rebuilds thread state so arc sessions are still ended', async () => {
@@ -2401,7 +2424,10 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
           type: 'm.room.message',
           event_id: '$p1',
           sender: '@parent:example.com',
-          content: { 'm.mentions': { user_ids: ['@bebop:example.com'] } },
+          content: {
+            'm.mentions': { user_ids: ['@bebop:example.com'] },
+            'dev.zooid.handoff': { version: 1, call_id: 'p1', caller: '@parent:example.com', callee: '@bebop:example.com' },
+          },
         },
       ],
     }))
@@ -2437,12 +2463,20 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
         chunk: [
           {
             type: 'm.room.message',
-            event_id: '$p1',
+            event_id: '$call-b',
             sender: '@parent:example.com',
             content: {
-              'm.mentions': {
-                user_ids: ['@bebop:example.com', '@rocksteady:example.com'],
-              },
+              'm.mentions': { user_ids: ['@bebop:example.com'] },
+              'dev.zooid.handoff': { version: 1, call_id: 'call-b', caller: '@parent:example.com', callee: '@bebop:example.com' },
+            },
+          },
+          {
+            type: 'm.room.message',
+            event_id: '$call-r',
+            sender: '@parent:example.com',
+            content: {
+              'm.mentions': { user_ids: ['@rocksteady:example.com'] },
+              'dev.zooid.handoff': { version: 1, call_id: 'call-r', caller: '@parent:example.com', callee: '@rocksteady:example.com' },
             },
           },
           {
@@ -2453,19 +2487,25 @@ describe('per-handoff session isolation ([[ZOD071]])', () => {
           },
           {
             type: 'm.room.message',
-            event_id: '$p2',
+            event_id: '$call-b2',
             sender: '@parent:example.com',
-            content: { 'm.mentions': { user_ids: ['@bebop:example.com'] } },
+            content: {
+              'm.mentions': { user_ids: ['@bebop:example.com'] },
+              'dev.zooid.handoff': { version: 1, call_id: 'call-b2', caller: '@parent:example.com', callee: '@bebop:example.com' },
+            },
           },
         ],
       })),
     }
     const state = await rebuildThreadState(client as never, '!r:example.com', '$root', trio)
     expect(state.handoffs).toEqual({
-      bebop: ['$p1', '$p2'],
-      rocksteady: ['$p1'],
+      '@bebop:example.com': ['$call-b', '$call-b2'],
+      '@rocksteady:example.com': ['$call-r'],
     })
-    expect(state.callers).toEqual({ bebop: 'parent', rocksteady: 'parent' })
+    expect(state.callers).toEqual({
+      '@bebop:example.com': '@parent:example.com',
+      '@rocksteady:example.com': '@parent:example.com',
+    })
   })
 })
 
@@ -2515,7 +2555,7 @@ describe('taskActions.describeRole', () => {
       threadRoot: threadId,
       sessionKey: threadId,
     })
-    expect(role).toEqual({ is_task_assignee: true, can_start_task_threads: false })
+    expect(role).toEqual({ is_task_assignee: true, can_start_task_threads: false, can_handoff: true })
   })
 
   it('describeRole reports a plain mention as neither assignee nor capped', async () => {
@@ -2526,7 +2566,7 @@ describe('taskActions.describeRole', () => {
       threadRoot: '$other',
       sessionKey: '$other',
     })
-    expect(role).toEqual({ is_task_assignee: false, can_start_task_threads: true })
+    expect(role).toEqual({ is_task_assignee: false, can_start_task_threads: true, can_handoff: true })
   })
 })
 

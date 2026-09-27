@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { timingSafeEqual } from 'node:crypto'
+import { timingSafeEqual, randomUUID } from 'node:crypto'
 import type {
   AcpRegistry,
   ApprovalCorrelator,
@@ -10,6 +10,8 @@ import type {
   StartTaskSpec,
   ThreadCompletion,
   ThreadStartContent,
+  HandoffInput,
+  HandoffOutput,
 } from '@zooid/core'
 import { THREAD_RESULT_FIELD, THREAD_START_FIELD } from '@zooid/core'
 import type { AgentEvent, ContentBlock } from '@zooid/acp-client'
@@ -27,6 +29,7 @@ import { sessionKeyFor, composeHandoffKey } from './session-keys.js'
 import { PendingReturns, type ReleasedReturn } from './pending-returns.js'
 import { stripMention, extractMentions } from './mentions.js'
 import { WorkforceDirectory } from './workforce-publisher.js'
+import { buildHandoffContent, readHandoff, resolveHandoffTarget, type HandoffCandidate } from './handoff.js'
 import {
   toToolCallBody,
   toUpdateBody,
@@ -53,6 +56,7 @@ import {
   renderAssigneeEnvelope,
   renderDelivery,
   renderHandoffReturn,
+  renderHandoffDelivery,
 } from './task-dispatch.js'
 
 export interface MediaClientLike {
@@ -107,6 +111,8 @@ export interface CreateMatrixTransportOptions {
   pendingInput?: PendingInputRegistry
   /** Deferred-return fallback window. Defaults to `RETURN_GRACE_MS`. */
   returnGraceMs?: number
+  /** Fallback for a hold on a callee on another workstation ([[ZOD092]] §5). Defaults to `REMOTE_RETURN_GRACE_MS`. */
+  remoteReturnGraceMs?: number
 }
 
 interface SessionContext {
@@ -114,6 +120,8 @@ interface SessionContext {
   roomId: string
   /** Always set — every session is thread-scoped via agent-promotion. */
   threadRoot: string
+  /** This turn's session key ([[ZOD071]] arc, or the thread-level key). */
+  sessionKey: string
 }
 
 interface TurnInput {
@@ -154,6 +162,13 @@ const STARTUP_GRACE_MS = 5_000
  * the agent's user. Never a deadline on a running turn ([[ZOD088]]).
  */
 const RETURN_GRACE_MS = 90_000
+
+/**
+ * A remote callee's running turn is invisible here; one long tool call emits a
+ * single tool_call. The window exists only for a remote daemon that died
+ * mid-turn ([[ZOD092]] §5). A human interrupt releases immediately.
+ */
+const REMOTE_RETURN_GRACE_MS = 30 * 60_000
 
 /** Sender-attributable liveness that re-arms a timed return ([[ZOD088]]). */
 const ACTIVITY_EVENTS = new Set(['dev.zooid.tool_call', 'dev.zooid.tool_call_update', 'dev.zooid.plan'])
@@ -311,6 +326,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const drainQuietMs = opts.drainQuietMs ?? DRAIN_QUIET_MS
   const drainMaxMs = opts.drainMaxMs ?? DRAIN_MAX_MS
   const returnGraceMs = opts.returnGraceMs ?? RETURN_GRACE_MS
+  const remoteReturnGraceMs = opts.remoteReturnGraceMs ?? REMOTE_RETURN_GRACE_MS
   const mediaClient = opts.media
   const writeAttachmentFn = opts.writeAttachmentFn ?? writeAttachment
   const pendingMedia = new PendingMediaStore()
@@ -339,23 +355,46 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const pendingInput = opts.pendingInput ?? NO_PENDING_INPUT
   const bindingFor = (name: string) => bindings.find((b) => b.name === name)
   const turnQueues = new Map<string, Promise<void>>()
+  // Every workstation's agents, from the space's roster state events; the
+  // router uses it to tell another daemon's agent from a human.
+  const workforce = new WorkforceDirectory()
   /**
    * Ordinary-thread handoff returns, held until the callee's turn ends
    * leaving no open call ([[ZOD088]]). Delegated task threads never reach
    * this: [[ZOD072]] / [[ZOD079]] own their returns.
    */
-  const returns = new PendingReturns({ graceMs: returnGraceMs, onRelease: deliverReturn })
+  const returns = new PendingReturns({ graceMs: returnGraceMs, remoteGraceMs: remoteReturnGraceMs, onRelease: deliverReturn })
+
+  const isLocal = (userId: string) => bindings.some((b) => b.userId === userId)
+  const agentName = (userId: string) =>
+    bindings.find((b) => b.userId === userId)?.name ?? workforce.nameOf(userId) ?? userId
+  /** [[ZOD092]] One open handoff per caller per thread: `<callerMxid>::<threadRoot>` → callee MXID. */
+  const openHandoffs = new Map<string, string>()
+  const openKey = (caller: string, threadRoot: string) => `${caller}::${threadRoot}`
+  function handoffCandidates(): HandoffCandidate[] {
+    const byId = new Map<string, HandoffCandidate>()
+    for (const e of workforce.entries()) byId.set(e.userId, e)
+    for (const b of bindings)
+      byId.set(b.userId, {
+        userId: b.userId,
+        name: b.name,
+        workstation: byId.get(b.userId)?.workstation,
+        rooms: b.rooms.map((r) => r.alias),
+      })
+    return [...byId.values()]
+  }
 
   // Release and queue are one transition: the caller's turn is enqueued on its
   // session FIFO in the same tick the hold clears.
   function deliverReturn(r: ReleasedReturn): void {
     for (const target of r.targets) {
-      console.log(`[matrix] → ${target.name} (${target.userId}) [return from ${r.callee}]`)
+      openHandoffs.delete(openKey(target.userId, r.threadRoot))
+      console.log(`[matrix] → ${target.name} (${target.userId}) [return from ${agentName(r.callee)}]`)
       void enqueueTurn(target, {
         roomId: r.roomId,
         threadRoot: r.threadRoot,
-        sessionKey: sessionKeyFor(target.name, r.threadRoot, threadStates.get(r.threadRoot)),
-        promptText: renderHandoffReturn({ callee: r.callee, text: r.text }),
+        sessionKey: sessionKeyFor(target.userId, r.threadRoot, threadStates.get(r.threadRoot)),
+        promptText: renderHandoffReturn({ callee: agentName(r.callee), text: r.text }),
       })
     }
   }
@@ -426,50 +465,20 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     lastFlushed.set(sessionId, text)
     flushedCounts.set(sessionId, (flushedCounts.get(sessionId) ?? 0) + 1)
     const content = buildTextContent(text)
-    const pendingInvocations = registerOutgoingHandoffs(sessionId, text)
     const tail = (sendQueue.get(sessionId) ?? Promise.resolve()).then(async () => {
       try {
-        const { event_id } = await client.sendMessage({
+        await client.sendMessage({
           roomId: ctx.roomId,
           asUserId: ctx.agent.userId,
           content,
           threadRoot: ctx.threadRoot,
         })
-        for (const invocation of pendingInvocations)
-          invocations.attachCallEvent(
-            invocation.invocationId,
-            event_id,
-            composeHandoffKey(ctx.threadRoot, event_id),
-          )
       } catch (err) {
         console.warn(`[matrix:${ctx.agent.name}] sendMessage flush failed:`, err)
       }
     })
     sendQueue.set(sessionId, tail)
     return true
-  }
-
-  function registerOutgoingHandoffs(sessionId: string, text: string) {
-    const ctx = sessions.get(sessionId)
-    if (!ctx) return []
-    const task = taskRegistry.taskForRoot(ctx.threadRoot)
-    if (!task || task.phase !== 'open') return []
-    const sessionKey = sessionKeyFor(ctx.agent.name, ctx.threadRoot, threadStates.get(ctx.threadRoot))
-    const opened = []
-    for (const userId of extractMentions({ content: { body: text } })) {
-      const callee = bindings.find((binding) => binding.userId === userId)
-      if (!callee || callee.name === ctx.agent.name) continue
-      if (invocations.isOutstandingAncestor(sessionKey, callee.name)) {
-        void client.sendCustomEvent({
-          roomId: ctx.roomId, asUserId: ctx.agent.userId, eventType: 'dev.zooid.error',
-          content: { body: `⚠ [handoff_circular] Cannot hand off to ${callee.name}: it is waiting on ${ctx.agent.name}`, code: 'handoff_circular', message: `Cannot hand off to ${callee.name}: it is waiting on ${ctx.agent.name}`, transient: false, 'm.relates_to': { rel_type: 'm.thread', event_id: ctx.threadRoot } },
-        })
-        continue
-      }
-      opened.push(invocations.open({ taskId: task.taskId, callerAgent: ctx.agent.name, callerSessionKey: sessionKey, calleeAgent: callee.name }))
-      taskRegistry.clearSummary(task.taskId)
-    }
-    return opened
   }
 
   agents.onEvent = async (name, event: AgentEvent) => {
@@ -682,9 +691,6 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     return chained
   }
 
-  // Every workstation's agents, from the space's roster state events; the
-  // router uses it to tell another daemon's agent from a human.
-  const workforce = new WorkforceDirectory()
   let workforceSpaceId: string | undefined
 
   async function handleInboundEvent(evt: MatrixEvent): Promise<void> {
@@ -751,6 +757,8 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       // /clear must not allow a pre-reset deferred return to wake an agent up
       // later via either its old turn.end or the fallback timer.
       returns.dropThread(threadRoot)
+      // [[ZOD092]] No open handoff in this thread survives a reset.
+      for (const k of [...openHandoffs.keys()]) if (k.endsWith(`::${threadRoot}`)) openHandoffs.delete(k)
       // [[ZOD071]]: a thread's sessions are the thread-level one plus one per
       // handoff arc — end them all. Reset events aren't m.room.message, so
       // the self-heal rebuild above doesn't cover them; rebuild here if the
@@ -759,7 +767,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         try {
           threadStates.set(
             threadRoot,
-            await rebuildThreadState(client, evt.room_id, threadRoot, bindings),
+            await rebuildThreadState(client, evt.room_id, threadRoot, bindings, workforce.agentIds),
           )
         } catch (err) {
           console.warn(`[matrix] failed to rebuild threadState for reset ${threadRoot}:`, err)
@@ -769,7 +777,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       for (const a of bindings) {
         agents.endSession(a.name, threadRoot)
         taskRegistry.bumpGeneration(a.name, threadRoot)
-        for (const arc of st?.handoffs[a.name] ?? []) {
+        for (const arc of st?.handoffs[a.userId] ?? []) {
           const key = composeHandoffKey(threadRoot, arc)
           agents.endSession(a.name, key)
           taskRegistry.bumpGeneration(a.name, key)
@@ -868,24 +876,19 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     // whole send queue has drained, so every message it produced has already
     // arrived above. Release the return it was holding.
     if (evt.type === 'dev.zooid.turn.end') {
-      const agentId = evt.content?.agent_id as string | undefined
       const endedRoot = inboundThreadRoot(evt)
-      const senderAgent = bindings.find((binding) => binding.userId === evt.sender)
-      // Bind the claimed agent_id to the Matrix sender. Besides rejecting a
-      // malformed boundary, this prevents another room member from releasing
-      // a held agent return early by forging custom-event content.
-      if (agentId && endedRoot && senderAgent?.name === agentId) {
-        returns.turnEnded(agentId, endedRoot)
-      }
+      // [[ZOD092]] Keyed by the Matrix sender, which the homeserver
+      // authenticates: a forged turn.end from anyone else names a different
+      // MXID and releases nothing. Local and remote callees alike.
+      if (endedRoot && evt.sender) returns.turnEnded(evt.sender, endedRoot)
       return
     }
 
     // [[ZOD088]] Tool activity is liveness: it re-arms a timed hold's fallback.
     // These events never route, so nothing below applies to them.
     if (ACTIVITY_EVENTS.has(evt.type ?? '')) {
-      const sender = bindings.find((b) => b.userId === evt.sender)
       const root = inboundThreadRoot(evt)
-      if (sender && root) returns.activity(sender.name, root)
+      if (evt.sender && root) returns.activity(evt.sender, root)
       return
     }
 
@@ -977,16 +980,18 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     // `m.room.message`s; routing each as a return woke the caller once per
     // chunk and the pair read as re-triggering each other. Hold them and let
     // the sender's `dev.zooid.turn.end` release the lot as a single wake.
-    if (evt.type === 'm.room.message' && promotedRoot && evt.room_id) {
-      const senderBinding = bindings.find((b) => b.userId === evt.sender)
-      if (senderBinding) {
+    if (evt.type === 'm.room.message' && promotedRoot && evt.room_id && evt.sender) {
+      const senderIsAgentId = isLocal(evt.sender) || workforce.agentIds.has(evt.sender)
+      if (senderIsAgentId) {
         const st = threadStates.get(promotedRoot)
-        const held = matches.filter((m) => isReturnRoute(evt, m, bindings, st))
+        const held = matches.filter((m) => isReturnRoute(evt, m, st))
         if (held.length > 0) {
           matches = matches.filter((m) => !held.includes(m))
-          returns.hold(senderBinding.name, promotedRoot, evt.room_id, held, evt.content?.body)
+          returns.hold(evt.sender, promotedRoot, evt.room_id, held, evt.content?.body, {
+            remote: !isLocal(evt.sender),
+          })
           console.log(
-            `[matrix] holding return ${senderBinding.name} → ${held.map((m) => m.name).join(',')} ` +
+            `[matrix] holding return ${agentName(evt.sender)} → ${held.map((m) => m.name).join(',')} ` +
               `until turn end (thread=${promotedRoot})`,
           )
         }
@@ -1001,8 +1006,16 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           ` (bindings: ${bindings.map((b) => `${b.name}@${b.userId}[${b.trigger}]`).join(', ')})`,
       )
     }
-    // Seed thread state for any agent mentions in this event.
-    if (matches.length > 0 && promotedRoot) {
+    // [[ZOD092]] Call edges come only from structured handoffs, keyed by MXID,
+    // whichever workstations the two ends live on — so every daemon holds the
+    // whole call graph and acts on the edges where it hosts an end. Recorded
+    // BEFORE dispatch: the callee's session key is the arc minted here.
+    const handoff = readHandoff(evt.content)
+    const callEdge =
+      handoff && evt.type === 'm.room.message' && handoff.caller === evt.sender && promotedRoot
+        ? handoff
+        : undefined
+    if (promotedRoot && (matches.length > 0 || callEdge)) {
       let st = threadStates.get(promotedRoot)
       if (!st) {
         st = { participants: [], rootMentions: [], callers: {}, handoffs: {} }
@@ -1011,33 +1024,34 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       if (taskCtx?.isRoot) {
         if (!st.rootMentions.includes(taskRec!.assignee)) st.rootMentions.push(taskRec!.assignee)
       } else {
-        const msgMentions = new Set(extractMentions(evt as never))
-        const senderAgent = bindings.find((b) => b.userId === evt.sender)
-        for (const a of bindings) {
-          if (!msgMentions.has(a.userId)) continue
-          if (!st.rootMentions.includes(a.name)) st.rootMentions.push(a.name)
-          // A mention that would close a cycle is a return addressed by name,
-          // not a call: record no edge and mint no arc, or the pair bounces
-          // forever and the callee loses its session to a fresh arc.
-          if (
-            senderAgent &&
-            a.name !== senderAgent.name &&
-            !wouldCycleCallers(st.callers, a.name, senderAgent.name)
-          ) {
-            st.callers[a.name] = senderAgent.name
-            if (evt.event_id) {
-              const arcs = (st.handoffs[a.name] ??= [])
-              if (!arcs.includes(evt.event_id)) arcs.push(evt.event_id)
-            }
-            // [[ZOD088]] An agent→agent call in an ordinary thread opens the callee's
-            // pending return and, if the caller is itself serving a call, keeps the
-            // caller's own return pending on this one. A mention that would close a
-            // cycle never reaches here: it is a return, not a call.
-            if (!taskCtx && evt.room_id && matches.some((m) => m.name === a.name)) {
-              if (senderAgent.trigger === 'mention')
-                returns.open(a.name, promotedRoot, evt.room_id, senderAgent)
-              returns.markDelegated(senderAgent.name, promotedRoot)
-            }
+        const senderIsAgentId =
+          !!evt.sender && (isLocal(evt.sender) || workforce.agentIds.has(evt.sender))
+        if (!senderIsAgentId) {
+          const msgMentions = new Set(extractMentions(evt as never))
+          for (const a of bindings)
+            if (msgMentions.has(a.userId) && !st.rootMentions.includes(a.name))
+              st.rootMentions.push(a.name)
+        }
+        if (
+          callEdge &&
+          callEdge.callee !== callEdge.caller &&
+          !wouldCycleCallers(st.callers, callEdge.callee, callEdge.caller)
+        ) {
+          st.callers[callEdge.callee] = callEdge.caller
+          if (evt.event_id) {
+            const arcs = (st.handoffs[callEdge.callee] ??= [])
+            if (!arcs.includes(evt.event_id)) arcs.push(evt.event_id)
+          }
+          // [[ZOD088]] The caller's daemon owns the return: open the callee's
+          // pending return here, and keep the caller's own return (if it is
+          // itself serving a call) pending on this one.
+          if (!taskCtx && evt.room_id) {
+            const callerBinding = bindings.find((b) => b.userId === callEdge.caller)
+            if (callerBinding?.trigger === 'mention')
+              returns.open(callEdge.callee, promotedRoot, evt.room_id, callerBinding, {
+                remote: !isLocal(callEdge.callee),
+              })
+            returns.markDelegated(callEdge.caller, promotedRoot)
           }
         }
       }
@@ -1045,7 +1059,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     for (const a of matches) {
       console.log(`[matrix] → ${a.name} (${a.userId})`)
       if (!promotedRoot || !evt.room_id) continue
-      const sessionKey = sessionKeyFor(a.name, promotedRoot, threadStates.get(promotedRoot))
+      const sessionKey = sessionKeyFor(a.userId, promotedRoot, threadStates.get(promotedRoot))
       const taskEnvelope =
         taskCtx?.isRoot && a.name === taskRec!.assignee
           ? { parentAgent: taskRec!.parent.agent }
@@ -1112,7 +1126,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     // separately: outbound events relate to it, and it is the context ref so
     // zooid_get_history reads the real thread.
     const sessionId = await agents.ensureSession(agent.name, sessionKey, roomId, threadRoot)
-    sessions.set(sessionId, { agent, roomId, threadRoot })
+    sessions.set(sessionId, { agent, roomId, threadRoot, sessionKey })
     buffers.set(sessionId, '')
     bufferMessageIds.delete(sessionId)
     flushedCounts.set(sessionId, 0)
@@ -1285,11 +1299,11 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   // fallback never races it. A turn blocked on an approval or a human answer
   // is still inside agents.prompt, so it counts as running too.
   async function runTurn(agent: AgentBinding, input: TurnInput): Promise<void> {
-    returns.turnStarted(agent.name, input.threadRoot)
+    returns.turnStarted(agent.userId, input.threadRoot)
     try {
       await runTurnBody(agent, input)
     } finally {
-      returns.turnFinished(agent.name, input.threadRoot)
+      returns.turnFinished(agent.userId, input.threadRoot)
     }
   }
 
@@ -1300,6 +1314,8 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     const threadId = task.threadRoot!
     const completion = ctx.completion
     if (!taskRegistry.close(task.taskId)) return
+    // [[ZOD092]] Any pre-task caller's open handoff into this task thread.
+    for (const k of [...openHandoffs.keys()]) if (k.endsWith(`::${threadId}`)) openHandoffs.delete(k)
     const cancelled = invocations.cancelForTask(task.taskId)
     pendingInput.cancelFor([threadId, ...cancelled.map((i) => i.calleeSessionKey).filter((x): x is string => Boolean(x))])
     await client.sendCustomEvent({
@@ -1382,7 +1398,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
             agent: spec.agent,
             status: 'refused',
             reason:
-              'depth_limit: this thread is itself a delegated task. Do the work here, or @mention another agent in this thread to hand off.',
+              'depth_limit: this thread is itself a delegated task. Do the work here, or call zooid_handoff to hand off in this thread.',
           }
           continue
         }
@@ -1501,6 +1517,92 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       return {
         is_task_assignee: openTask !== undefined && openTask.threadRoot === caller.sessionKey,
         can_start_task_threads: enclosing === undefined,
+        can_handoff: bindingFor(caller.agentName) !== undefined,
+      }
+    },
+    async handoff(caller, input: HandoffInput): Promise<HandoffOutput> {
+      const callerBinding = bindingFor(caller.agentName)
+      if (!callerBinding) return { status: 'refused', reason: 'unknown_caller' }
+      const prompt = input.prompt.trim()
+      if (!prompt) return { status: 'refused', reason: 'prompt must be non-empty' }
+      const resolved = resolveHandoffTarget(input.agent, caller.channelId, handoffCandidates())
+      if (!resolved.ok) return { status: 'refused', reason: resolved.reason }
+      const target = resolved.target
+      if (target.userId === callerBinding.userId)
+        return { status: 'refused', reason: 'self: you cannot hand off to yourself' }
+      const st = threadStates.get(caller.threadRoot)
+      if (st && wouldCycleCallers(st.callers, target.userId, callerBinding.userId))
+        return {
+          status: 'refused',
+          reason: `already_waiting_on_you: ${target.name} is waiting on your result. End your turn — your result returns to ${target.name} automatically.`,
+        }
+      const task = taskRegistry.taskForRoot(caller.threadRoot)
+      const inTask = task?.phase === 'open'
+      if (inTask && !isLocal(target.userId))
+        return {
+          status: 'refused',
+          reason: 'remote_in_task: a task thread hands off only to agents on this workstation',
+        }
+      const key = openKey(callerBinding.userId, caller.threadRoot)
+      const busy = inTask
+        ? invocations.outstandingFor(caller.sessionKey).length > 0
+        : openHandoffs.has(key)
+      if (busy)
+        return {
+          status: 'refused',
+          reason:
+            'already_open: you already have a handoff open in this thread. End your turn and wait for it, or use zooid_start_task_threads for parallel work.',
+        }
+      const invocation = inTask
+        ? invocations.open({
+            taskId: task!.taskId,
+            callerAgent: callerBinding.name,
+            callerSessionKey: caller.sessionKey,
+            calleeAgent: target.name,
+          })
+        : undefined
+      if (invocation) taskRegistry.clearSummary(task!.taskId)
+      else openHandoffs.set(key, target.userId)
+
+      const callId = randomUUID()
+      const content = buildHandoffContent({
+        callId,
+        caller: callerBinding.userId,
+        callee: target.userId,
+        prompt,
+      })
+      // Post through the caller's own send queue, after any prose it flushed
+      // before the tool call, so the thread reads in order.
+      const liveSession = [...sessions].find(
+        ([, c]) => c.agent.name === callerBinding.name && c.sessionKey === caller.sessionKey,
+      )?.[0]
+      if (liveSession) flushBuffer(liveSession)
+      let eventId: string | undefined
+      const send = async () => {
+        const { event_id } = await client.sendMessage({
+          roomId: caller.channelId,
+          asUserId: callerBinding.userId,
+          content,
+          threadRoot: caller.threadRoot,
+        })
+        eventId = event_id
+      }
+      const tail = (liveSession ? (sendQueue.get(liveSession) ?? Promise.resolve()) : Promise.resolve()).then(send)
+      if (liveSession) sendQueue.set(liveSession, tail.catch(() => {}))
+      try {
+        await tail
+      } catch (err) {
+        openHandoffs.delete(key)
+        if (invocation) invocations.resolve(invocation.invocationId)
+        return { status: 'refused', reason: `post_failed: ${String((err as Error).message)}` }
+      }
+      if (invocation && eventId)
+        invocations.attachCallEvent(invocation.invocationId, eventId, composeHandoffKey(caller.threadRoot, eventId))
+      return {
+        status: 'started',
+        call_id: callId,
+        callee: target.userId,
+        delivery: renderHandoffDelivery(target.name),
       }
     },
   }
@@ -1615,53 +1717,40 @@ export async function rebuildThreadState(
     ?.userId
   if (!asUser) return state
 
-  const root = await client.fetchEvent(roomId, rootEventId, asUser)
-  if (root) {
-    const rootMentions = new Set(extractMentions(root as never))
-    const rootSender = (root as { sender?: string }).sender
-    const rootSenderAgent = rootSender ? bindings.find((b) => b.userId === rootSender) : undefined
-    for (const a of bindings) {
-      if (!rootMentions.has(a.userId)) continue
-      if (!state.rootMentions.includes(a.name)) state.rootMentions.push(a.name)
-      if (
-        rootSenderAgent &&
-        a.name !== rootSenderAgent.name &&
-        !wouldCycleCallers(state.callers, a.name, rootSenderAgent.name)
-      ) {
-        state.callers[a.name] = rootSenderAgent.name
-        const arcs = (state.handoffs[a.name] ??= [])
-        if (!arcs.includes(rootEventId)) arcs.push(rootEventId)
-      }
-    }
-  }
-
   const { chunk: thread } = await client.fetchThreadRelations({
     roomId,
     rootEventId,
     asUserId: asUser,
   })
-  // Also seed root-mentions from any subsequent agent @mentions in the thread.
-  for (const ev of thread) {
-    const mentions = new Set(extractMentions(ev as never))
+  const root = await client.fetchEvent(roomId, rootEventId, asUser)
+  const events = [...(root ? [root] : []), ...thread]
+  for (const ev of events) {
     const evSender = (ev as { sender?: string }).sender
-    const evSenderAgent = evSender ? bindings.find((b) => b.userId === evSender) : undefined
     const evId = (ev as { event_id?: string }).event_id
-    for (const a of bindings) {
-      if (!mentions.has(a.userId)) continue
-      if (!state.rootMentions.includes(a.name)) state.rootMentions.push(a.name)
-      if (
-        evSenderAgent &&
-        a.name !== evSenderAgent.name &&
-        !wouldCycleCallers(state.callers, a.name, evSenderAgent.name)
-      ) {
-        state.callers[a.name] = evSenderAgent.name
-        if (evId) {
-          const arcs = (state.handoffs[a.name] ??= [])
-          if (!arcs.includes(evId)) arcs.push(evId)
-        }
+    const content = (ev as { content?: unknown }).content
+    const senderIsAgentId =
+      !!evSender && (bindings.some((b) => b.userId === evSender) || knownAgentIds?.has(evSender) === true)
+    // Human mentions seed rootMentions (names, local agents only).
+    if (!senderIsAgentId) {
+      const mentions = new Set(extractMentions(ev as never))
+      for (const a of bindings)
+        if (mentions.has(a.userId) && !state.rootMentions.includes(a.name)) state.rootMentions.push(a.name)
+    }
+    // [[ZOD092]] Call edges only from structured handoffs whose caller is the sender.
+    const h = readHandoff(content)
+    if (h && h.caller === evSender && h.callee !== h.caller && !wouldCycleCallers(state.callers, h.callee, h.caller)) {
+      state.callers[h.callee] = h.caller
+      if (evId) {
+        const arcs = (state.handoffs[h.callee] ??= [])
+        if (!arcs.includes(evId)) arcs.push(evId)
       }
     }
+    // participants: unchanged logic (local name or remote MXID), for m.room.message only,
+    // and never for the root event (keep the existing behaviour: only thread events add participants).
+  }
+  for (const ev of thread) {
     const type = (ev as { type?: string }).type
+    const evSender = (ev as { sender?: string }).sender
     if (type === 'm.room.message' && evSender) {
       const a = bindings.find((b) => b.userId === evSender)
       const msgtype = (ev as { content?: { msgtype?: string } }).content?.msgtype

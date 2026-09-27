@@ -228,3 +228,45 @@ describe('PendingReturns: interrupts and resets', () => {
     expect(returns.has('b', ROOT)).toBe(false)
   })
 })
+
+describe('remote holds ([[ZOD092]])', () => {
+  const caller = { name: 'architect', userId: '@architect:hs', rooms: [], trigger: 'mention' as const }
+  const make = () => {
+    const released: string[] = []
+    const r = new PendingReturns({
+      graceMs: 90_000,
+      remoteGraceMs: 30 * 60_000,
+      onRelease: (x) => released.push(`${x.callee}:${x.text}`),
+    })
+    return { r, released }
+  }
+  beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }))
+  afterEach(() => vi.useRealTimers())
+
+  it('a remote callee past the local window is still held (its turn is invisible here)', () => {
+    const { r, released } = make()
+    r.open('@cloud.product:hs', '$root', '!r:hs', caller, { remote: true })
+    r.hold('@cloud.product:hs', '$root', '!r:hs', [caller], 'running sleep 100', { remote: true })
+    vi.advanceTimersByTime(5 * 90_000)
+    expect(released).toEqual([])
+    r.turnEnded('@cloud.product:hs', '$root')
+    expect(released).toEqual(['@cloud.product:hs:running sleep 100'])
+  })
+
+  it('a remote callee whose daemon died releases after the remote window', () => {
+    const { r, released } = make()
+    r.open('@cloud.product:hs', '$root', '!r:hs', caller, { remote: true })
+    r.hold('@cloud.product:hs', '$root', '!r:hs', [caller], 'partial', { remote: true })
+    vi.advanceTimersByTime(30 * 60_000 - 1)
+    expect(released).toEqual([])
+    vi.advanceTimersByTime(1)
+    expect(released).toEqual(['@cloud.product:hs:partial'])
+  })
+
+  it('local holds keep the local window', () => {
+    const { r, released } = make()
+    r.hold('@coding:hs', '$root', '!r:hs', [caller], 'late', {})
+    vi.advanceTimersByTime(90_000)
+    expect(released).toEqual(['@coding:hs:late'])
+  })
+})

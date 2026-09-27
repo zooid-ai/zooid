@@ -1,7 +1,7 @@
 import { createServer, createConnection, type Server, type Socket } from 'node:net'
 import { unlink } from 'node:fs/promises'
 import type { SpawnRegistry } from './spawn-registry.js'
-import type { CompleteTaskInput, StartTasksInput } from '@zooid/core'
+import type { CompleteTaskInput, StartTasksInput, HandoffInput } from '@zooid/core'
 import { agentSocketPath } from './socket-paths.js'
 
 export interface DaemonRequest {
@@ -18,6 +18,7 @@ export interface DaemonRequest {
     | 'startTasks'
     | 'completeTask'
     | 'describeRole'
+    | 'handoff'
   params: Record<string, unknown>
 }
 
@@ -166,7 +167,8 @@ async function handleLine(
     } else if (
       req.method === 'startTasks' ||
       req.method === 'completeTask' ||
-      req.method === 'describeRole'
+      req.method === 'describeRole' ||
+      req.method === 'handoff'
     ) {
       const actions = registry.taskActions
       if (!actions) {
@@ -189,7 +191,9 @@ async function handleLine(
           ? await actions.startTasks(caller, req.params as unknown as StartTasksInput)
           : req.method === 'completeTask'
             ? await actions.completeTask(caller, req.params as unknown as CompleteTaskInput)
-            : await actions.describeRole(caller)
+            : req.method === 'describeRole'
+              ? await actions.describeRole(caller)
+              : await actions.handoff(caller, req.params as unknown as HandoffInput)
     } else {
       socket.write(
         JSON.stringify({

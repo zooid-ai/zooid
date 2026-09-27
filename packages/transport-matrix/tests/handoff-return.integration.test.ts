@@ -19,6 +19,8 @@ interface Emit {
   tool(title: string): void
   /** Blocks the turn until `release(name)` or an interrupt cancels it. */
   hold(): Promise<'released' | 'cancelled'>
+  /** [[ZOD092]] The only way to call another agent. Resolves after the handoff is posted. */
+  handoff(agent: string, prompt: string): Promise<unknown>
 }
 type Turn = (emit: Emit) => Promise<void> | void
 
@@ -39,6 +41,7 @@ function setup(
   const gates = new Map<string, (r: 'released' | 'cancelled') => void>()
   let n = 0
   let seq = 0
+  let transport!: ReturnType<typeof createMatrixTransport>
   const registry = {
     ensureSession: vi.fn(async (name: string, threadId: string) => `sess:${name}:${threadId}`),
     endSession: vi.fn(),
@@ -52,7 +55,10 @@ function setup(
     onApprovalRequest: vi.fn(),
     onEvent: vi.fn() as unknown as (name: string, event: unknown) => void,
     prompt: vi.fn(
-      async (name: string, input: { threadId: string; content: Array<{ text?: string }> }) => {
+      async (
+        name: string,
+        input: { threadId: string; contextThreadId: string; content: Array<{ text?: string }> },
+      ) => {
         prompts.push({
           name,
           threadId: input.threadId,
@@ -87,6 +93,11 @@ function setup(
                 resolve(r)
               }),
             ),
+          handoff: (agent, prompt) =>
+            transport.taskActions.handoff(
+              { agentName: name, channelId: roomId, threadRoot: input.contextThreadId, sessionKey: input.threadId },
+              { agent, prompt },
+            ),
         }
         await scripts[name]?.[i]?.(emit)
         return { stopReason: cancelled ? ('cancelled' as const) : ('end_turn' as const) }
@@ -120,7 +131,7 @@ function setup(
     fetchEvent: vi.fn(async () => timeline?.root),
     fetchThreadRelations: vi.fn(async () => ({ chunk: timeline?.thread ?? [] })),
   }
-  const transport = createMatrixTransport({
+  transport = createMatrixTransport({
     agents: registry as never,
     approvals: Object.assign(new EventEmitter(), {
       register: vi.fn(),
@@ -207,9 +218,9 @@ const kickoff = (h: ReturnType<typeof setup>) =>
 describe('handoff return timing ([[ZOD088]])', () => {
   it('A → B → C: a turn that delegates does not wake its caller; the result climbs one arc per turn', async () => {
     const h = setup({
-      architect: [(e) => e.say('@coding:hs build the login page'), (e) => e.say('merged, thanks')],
+      architect: [async (e) => void (await e.handoff('coding', 'build the login page')), (e) => e.say('merged, thanks')],
       coding: [
-        (e) => e.say('@ux:hs please test the login page'),
+        async (e) => void (await e.handoff('ux', 'please test the login page')),
         (e) => e.say('done — PR #1 is ready'),
       ],
       ux: [
@@ -240,7 +251,7 @@ describe('handoff return timing ([[ZOD088]])', () => {
 
   it('a callee running tools past the grace window does not wake its caller before its turn ends', async () => {
     const h = setup({
-      architect: [(e) => e.say('@coding:hs fix the flaky test'), () => {}],
+      architect: [async (e) => void (await e.handoff('coding', 'fix the flaky test')), () => {}],
       coding: [
         async (e) => {
           e.say('looking into it')
@@ -265,7 +276,7 @@ describe('handoff return timing ([[ZOD088]])', () => {
 
   it("a human @mention of the caller does not cancel the callee's pending return", async () => {
     const h = setup({
-      architect: [(e) => e.say('@coding:hs migrate the db'), (e) => e.say('still on it'), () => {}],
+      architect: [async (e) => void (await e.handoff('coding', 'migrate the db')), (e) => e.say('still on it'), () => {}],
       coding: [
         async (e) => {
           e.say('migration done')
@@ -288,7 +299,7 @@ describe('handoff return timing ([[ZOD088]])', () => {
 
   it('grace fallback: a callee message with no turn behind it releases after the window, re-armed by tool activity', async () => {
     const h = setup({
-      architect: [(e) => e.say('@coding:hs look at this'), () => {}, () => {}],
+      architect: [async (e) => void (await e.handoff('coding', 'look at this')), () => {}, () => {}],
       coding: [(e) => e.say('ack')],
     })
     await kickoff(h)
@@ -307,9 +318,9 @@ describe('handoff return timing ([[ZOD088]])', () => {
 
   it('an interrupt on the running callee releases its return, and the chain unwinds one arc per turn', async () => {
     const h = setup({
-      architect: [(e) => e.say('@coding:hs build it'), () => {}],
+      architect: [async (e) => void (await e.handoff('coding', 'build it')), () => {}],
       coding: [
-        (e) => e.say('@ux:hs test it'),
+        async (e) => void (await e.handoff('ux', 'test it')),
         (e) => e.say('ux was interrupted; shipping what we have'),
       ],
       ux: [
@@ -355,8 +366,8 @@ describe('handoff return timing ([[ZOD088]])', () => {
           },
         },
         thread: [
-          { type: 'm.room.message', event_id: '$a1', sender: '@architect:hs', content: { msgtype: 'm.notice', body: '@coding:hs build it' } },
-          { type: 'm.room.message', event_id: '$c1', sender: '@coding:hs', content: { msgtype: 'm.notice', body: '@ux:hs test it' } },
+          { type: 'm.room.message', event_id: '$a1', sender: '@architect:hs', content: { msgtype: 'm.notice', body: '@coding:hs build it', 'dev.zooid.handoff': { version: 1, call_id: 'a1', caller: '@architect:hs', callee: '@coding:hs' } } },
+          { type: 'm.room.message', event_id: '$c1', sender: '@coding:hs', content: { msgtype: 'm.notice', body: '@ux:hs test it', 'dev.zooid.handoff': { version: 1, call_id: 'c1', caller: '@coding:hs', callee: '@ux:hs' } } },
         ],
       },
     )

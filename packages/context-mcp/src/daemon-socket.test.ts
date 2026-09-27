@@ -25,6 +25,7 @@ function fakeTasks(over: Partial<TaskActions> = {}): TaskActions {
     startTasks: async () => ({ results: [], notify: 'caller', delivery: 'd' }),
     completeTask: async () => ({ status: 'recorded' }),
     describeRole: async () => ({ is_task_assignee: false, can_start_task_threads: true }),
+    handoff: async () => ({ status: 'refused', reason: 'stub' }),
     ...over,
   }
 }
@@ -254,6 +255,38 @@ describe('daemon-socket', () => {
     const res = await callDaemon(sockPath, { spawnId, method: 'describeRole', params: {} })
     expect(res).toEqual({ is_task_assignee: false, can_start_task_threads: true })
     expect(seen[0]).toMatchObject({ agentName: 'agent-a', threadRoot: '$root' })
+  })
+
+  it('routes handoff to task actions with the bound caller ([[ZOD092]])', async () => {
+    const seen: unknown[] = []
+    const registry = new SpawnRegistry()
+    registry.setTaskActions(
+      fakeTasks({
+        handoff: async (caller, input) => {
+          seen.push({ caller, input })
+          return { status: 'started', call_id: 'c1', callee: '@b:hs', delivery: 'd' }
+        },
+      }),
+    )
+    const spawnId = registry.register({
+      agentName: 'agent-a',
+      threadRef: { channelId: 'c', threadId: '$root' },
+      provider: defaultProvider,
+    })
+    const sockPath = join(tmpdir(), `zooid-test-${randomUUID()}.sock`)
+    const server = await startDaemonSocketServer({ sockPath, registry, agentName: 'agent-a' })
+    cleanup.push(() => server.close())
+
+    const res = await callDaemon(sockPath, {
+      spawnId,
+      method: 'handoff',
+      params: { agent: 'b', prompt: 'go' },
+    })
+    expect(res).toMatchObject({ status: 'started', callee: '@b:hs' })
+    expect(seen[0]).toMatchObject({
+      caller: { agentName: 'agent-a', threadRoot: '$root' },
+      input: { agent: 'b', prompt: 'go' },
+    })
   })
 
   it('routes sendMessage and getRooms to the provider', async () => {

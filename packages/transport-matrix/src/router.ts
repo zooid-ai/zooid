@@ -1,6 +1,7 @@
 import type { RoomBinding } from '@zooid/core'
 import { extractMentions } from './mentions.js'
 import { isExpiredTrigger } from './trigger-freshness.js'
+import { readHandoff } from './handoff.js'
 
 export type { RoomBinding }
 
@@ -39,15 +40,16 @@ export interface ThreadState {
   /** Agent names @mentioned in the thread root event (or subsequently). */
   rootMentions: string[]
   /**
-   * Agent-to-agent call edges: sub-agent name → the agent that @mentioned
-   * (called) it in this thread. A sub's bare reply bubbles up to its caller;
-   * a caller never implicitly re-triggers its callee. Makes agent↔agent
-   * acknowledgement loops structurally impossible. See [[ZOD039]] §
-   * Implicit triggers → Directional continuation.
+   * Agent-to-agent call edges: callee MXID → caller MXID. Recorded only from
+   * structured `dev.zooid.handoff` events, never from prose or mentions. A
+   * sub's bare reply bubbles up to its caller; a caller never implicitly
+   * re-triggers its callee. Makes agent↔agent acknowledgement loops
+   * structurally impossible. See [[ZOD039]] § Implicit triggers → Directional
+   * continuation, and [[ZOD092]] § Call graph keyed by MXID.
    */
   callers: Record<string, string>
   /**
-   * Handoff arcs per sub-agent: the event ids of the agent→agent @mention
+   * Handoff arcs per callee MXID: the event ids of the `dev.zooid.handoff`
    * messages that called it, in timeline order (last = current arc). Each
    * call opens a fresh ACP session keyed `threadRoot|callEventId`
    * ([[ZOD071]]). Append-only; rebuilt from the timeline after a restart.
@@ -124,6 +126,7 @@ export function route(
         agents.some((x) => x.userId === id && x.rooms.some((r) => r.alias === event.room_id))),
   )
 
+  const handoff = readHandoff(event.content)
   for (const a of agents) {
     if (!a.rooms.some((r) => r.alias === event.room_id)) continue
     if (task?.isRoot) {
@@ -131,18 +134,21 @@ export function route(
       continue
     }
     if (event.sender === a.userId) continue
+    // [[ZOD092]] An agent calls another agent only through a structured
+    // handoff whose caller is the sender. Agent prose — relayed instructions,
+    // status reports, zooid_send_message posts — never calls, whatever IDs it
+    // contains. Humans are unaffected.
+    const called = senderIsAgent && handoff?.caller === event.sender && handoff?.callee === a.userId
     if (task) {
-      if (mentions.has(a.userId)) {
-        matches.push(a)
-        continue
-      }
       if (senderIsAgent) {
         // A delegated task returns at an invocation terminal boundary, never
-        // because a callee happened to post progress prose.
+        // because a callee happened to post progress prose — except an
+        // in-thread handoff, which is how a task-thread delegation opens.
+        if (called) matches.push(a)
         continue
-      } else if (a.name === task.assignee && !addressesAgent) {
-        matches.push(a)
       }
+      if (mentions.has(a.userId)) matches.push(a)
+      else if (a.name === task.assignee && !addressesAgent) matches.push(a)
       continue
     }
     if (a.trigger === 'any') {
@@ -150,28 +156,28 @@ export function route(
       continue
     }
     // trigger === 'mention'
+    if (senderIsAgent) {
+      // Agent reply: only a structured call, or a "return" — the agent that
+      // called the sender (its caller), never a callee. Directional
+      // continuation keeps agent↔agent handoffs from looping — the call graph
+      // is a tree rooted at the human, so returns only ever walk up.
+      if (called || isReturnRoute(event, a, threadState)) matches.push(a)
+      continue
+    }
     if (mentions.has(a.userId)) {
       matches.push(a)
       continue
     }
     // Implicit trigger in a thread.
-    if (threadState) {
-      if (senderIsAgent) {
-        // Agent reply = a "return": route only to the agent that called the
-        // sender (its caller), never to a callee. Directional continuation
-        // keeps agent↔agent handoffs from looping — the call graph is a tree
-        // rooted at the human, so returns only ever walk up.
-        if (isReturnRoute(event, a, agents, threadState)) matches.push(a)
-      } else if (!addressesAgent) {
-        // Human (or non-agent) bare follow-up: continue with the most-recent-
-        // posting agent, or inherit the root mention if no agent has posted
-        // yet. An explicit @mention transfers attention instead ([[ZOD039]]).
-        const lastPoster = threadState.participants.at(-1)
-        if (lastPoster) {
-          if (lastPoster === a.name) matches.push(a)
-        } else if (threadState.rootMentions.includes(a.name)) {
-          matches.push(a)
-        }
+    if (threadState && !addressesAgent) {
+      // Human (or non-agent) bare follow-up: continue with the most-recent-
+      // posting agent, or inherit the root mention if no agent has posted
+      // yet. An explicit @mention transfers attention instead ([[ZOD039]]).
+      const lastPoster = threadState.participants.at(-1)
+      if (lastPoster) {
+        if (lastPoster === a.name) matches.push(a)
+      } else if (threadState.rootMentions.includes(a.name)) {
+        matches.push(a)
       }
     }
   }
@@ -181,29 +187,26 @@ export function route(
 /**
  * True when routing `event` to `agent` is a *return* — a callee's reply
  * bubbling up to the agent that called it — rather than a fresh call or a
- * human follow-up. A callee may address its existing caller explicitly and it
- * is still a return.
+ * human follow-up.
  *
  * The transport defers returns to the sender's turn boundary. An agent turn
  * posts one `m.room.message` per buffered chunk (every tool call forces a
  * flush), so treating each chunk as a return woke the caller once per chunk
  * and the two agents read as re-triggering each other. See [[ZOD039]]
  * § Implicit triggers → Directional continuation.
+ *
+ * [[ZOD092]] Keyed by MXID, so a callee on another workstation returns to its
+ * caller here exactly as a local one does.
  */
 export function isReturnRoute(
   event: MaybeEvent,
   agent: AgentBinding,
-  agents: AgentBinding[],
   threadState: ThreadState | undefined,
 ): boolean {
   if (!threadState || agent.trigger !== 'mention') return false
-  const sender = agents.find((x) => x.userId === event.sender)
-  if (!sender || sender.name === agent.name) return false
-  // Addressing the existing caller explicitly does not reverse the call edge:
-  // it is still the callee returning control. This matters for agents that
-  // naturally prefix their final answer with `@caller`; treating that as a new
-  // call creates the exact A ↔ B cycle directional continuation prevents.
-  return threadState.callers[sender.name] === agent.name
+  const sender = event.sender
+  if (!sender || sender === agent.userId) return false
+  return threadState.callers[sender] === agent.userId
 }
 
 /**

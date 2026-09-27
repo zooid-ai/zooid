@@ -128,3 +128,34 @@ describe('WorkforceDirectory', () => {
     expect([...dir.agentIds]).toEqual(['@cloud.scout:hs'])
   })
 })
+
+describe('WorkforceDirectory entries ([[ZOD092]])', () => {
+  it('keeps name, rooms and workstation per agent, across rosters', () => {
+    const d = new WorkforceDirectory()
+    d.apply('cloud', {
+      version: 1,
+      agents: [{ user_id: '@cloud.product:hs', name: 'product', rooms: ['!r:hs'] }],
+    })
+    d.apply('laptop', {
+      version: 1,
+      agents: [{ user_id: '@laptop.cpo:hs', name: 'cpo', rooms: ['!r:hs'] }],
+    })
+    expect(d.entries()).toEqual(
+      expect.arrayContaining([
+        { userId: '@cloud.product:hs', name: 'product', workstation: 'cloud', rooms: ['!r:hs'] },
+        { userId: '@laptop.cpo:hs', name: 'cpo', workstation: 'laptop', rooms: ['!r:hs'] },
+      ]),
+    )
+    expect(d.nameOf('@cloud.product:hs')).toBe('product')
+    expect(d.nameOf('@nobody:hs')).toBeUndefined()
+    expect([...d.agentIds].sort()).toEqual(['@cloud.product:hs', '@laptop.cpo:hs'])
+  })
+
+  it('an empty workstation key has no workstation, and removal drops its entries', () => {
+    const d = new WorkforceDirectory()
+    d.apply('', { version: 1, agents: [{ user_id: '@a:hs', name: 'a', rooms: [] }] })
+    expect(d.entries()).toEqual([{ userId: '@a:hs', name: 'a', workstation: undefined, rooms: [] }])
+    d.apply('', {})
+    expect(d.entries()).toEqual([])
+  })
+})

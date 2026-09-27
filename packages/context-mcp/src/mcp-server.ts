@@ -30,7 +30,13 @@ const CALLER_FROM_BINDING: TaskCallerRef = {
 }
 
 export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServer {
-  const server = new McpServer({ name: 'zooid-context', version: '0.0.1' })
+  const server = new McpServer(
+    { name: 'zooid-context', version: '0.0.1' },
+    {
+      instructions:
+        'To involve another agent in this thread, call zooid_handoff. @mentions in your messages notify humans; they do not notify agents.',
+    },
+  )
 
   server.tool(
     'zooid_get_history',
@@ -77,6 +83,19 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
       async ({ summary }) => {
         const out = await opts.resolveTasks!().then((actions) =>
           actions.completeTask(CALLER_FROM_BINDING, { summary }),
+        )
+        return { content: [{ type: 'text', text: JSON.stringify(out) }] }
+      },
+    )
+  }
+  if (opts.resolveTasks && opts.role?.can_handoff) {
+    server.tool(
+      'zooid_handoff',
+      'Hand work to one other agent in THIS thread — the only way to involve another agent here. @mentions in messages do not notify agents. Name the agent by name (or workstation.agent); the daemon resolves it. After a successful handoff, end your turn: the result comes back to you as `[handoff return] from <agent>`. For several agents in parallel, use zooid_start_task_threads instead.',
+      { agent: z.string(), prompt: z.string() },
+      async ({ agent, prompt }) => {
+        const out = await opts.resolveTasks!().then((actions) =>
+          actions.handoff(CALLER_FROM_BINDING, { agent, prompt }),
         )
         return { content: [{ type: 'text', text: JSON.stringify(out) }] }
       },
@@ -155,7 +174,7 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
 
   server.tool(
     'zooid_send_message',
-    'Post a message into a room or thread this agent is bound to. Fire-and-forget: no assignee, no completion tracking, no notify. Use zooid_start_task_threads instead when the intent is delegation.',
+    'Post a message into a room or thread this agent is bound to. Fire-and-forget: no assignee, no completion tracking, no notify. @mentions in it notify humans; they do not notify agents. To involve another agent use zooid_handoff (this thread) or zooid_start_task_threads (parallel, new threads).',
     {
       room: z.string(),
       thread_id: z.string().optional(),
