@@ -774,15 +774,30 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         }
       }
       const st = threadStates.get(threadRoot)
+      const cleanup: Array<{ name: string; key: string; result: Promise<void> }> = []
       for (const a of bindings) {
-        agents.endSession(a.name, threadRoot)
+        cleanup.push({
+          name: a.name,
+          key: threadRoot,
+          result: Promise.resolve().then(() => agents.endSession(a.name, threadRoot)),
+        })
         taskRegistry.bumpGeneration(a.name, threadRoot)
         for (const arc of st?.handoffs[a.userId] ?? []) {
           const key = composeHandoffKey(threadRoot, arc)
-          agents.endSession(a.name, key)
+          cleanup.push({
+            name: a.name,
+            key,
+            result: Promise.resolve().then(() => agents.endSession(a.name, key)),
+          })
           taskRegistry.bumpGeneration(a.name, key)
         }
       }
+      const results = await Promise.allSettled(cleanup.map((item) => item.result))
+      results.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          console.warn(`[matrix] session reset cleanup failed for ${cleanup[index]!.name}/${cleanup[index]!.key}:`, result.reason)
+        }
+      })
       // NB: keep threadStates intact. Per ZOD039 § /clear, only the agent's
       // session memory is wiped — thread-routing state (participants /
       // root-mentions) must survive so the next bare reply still routes to

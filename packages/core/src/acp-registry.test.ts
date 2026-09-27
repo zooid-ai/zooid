@@ -49,6 +49,7 @@ describe('AcpAgentRegistry', () => {
           hooks: {},
           acp: { preset: 'claude', mode: 'bypassPermissions' },
           approval_timeout_ms: 0,
+        session_idle_timeout_ms: 600_000,
         },
         builder: {
           name: 'builder',
@@ -56,6 +57,7 @@ describe('AcpAgentRegistry', () => {
           hooks: {},
           acp: { command: 'opencode', args: ['acp'] },
           approval_timeout_ms: 0,
+        session_idle_timeout_ms: 600_000,
         },
       },
       env: { triage: { ANTHROPIC_API_KEY: 'sk-test' } },

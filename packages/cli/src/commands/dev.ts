@@ -208,6 +208,7 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
             // the web client without needing an invite.
             publicWorkforceSpace: true,
             onTap: (agentName, event) => captures[agentName]?.onTap(event),
+            onLifecycle: (agentName, event) => captures[agentName]?.onLifecycle(event),
             prepullLog: (line) => {
               t.output = line.replace(/^\[zooid\]\s+/, '').trim()
             },

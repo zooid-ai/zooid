@@ -167,7 +167,7 @@ describe('AcpClient.ensureSession resume', () => {
     })
     await (client as unknown as { ensureStoreLoaded: () => Promise<void> }).ensureStoreLoaded()
     await client.ensureSession('$root1')
-    client.endSession('$root1')
+    await client.endSession('$root1')
     await (client as unknown as { flushStore: () => Promise<void> }).flushStore()
 
     const fresh = makeStubbedClient({

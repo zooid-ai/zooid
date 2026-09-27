@@ -9,6 +9,7 @@ import {
   type PromptInput,
   type PromptResult,
   type TapEvent,
+  type SessionLifecycleEvent,
 } from '@zooid/acp-client'
 import type { AcpAgentSpec, AcpMount, AcpRuntime } from './acp-types.js'
 import type { AgentConfig } from './types.js'
@@ -37,8 +38,8 @@ export interface AcpRegistry {
     channelId?: string,
     contextThreadId?: string,
   ): Promise<string>
-  /** Drop the in-memory session for (agent, threadId). Next prompt re-creates one. */
-  endSession(name: string, threadId: string): void
+  /** Close and forget the session for (agent, threadId); the next prompt starts fresh. */
+  endSession(name: string, threadId: string): Promise<void>
   prompt(name: string, input: PromptInput): Promise<PromptResult>
   /**
    * Cancel an in-flight prompt for (agent, sessionId). Sends `session/cancel`
@@ -80,6 +81,7 @@ export interface AcpAgentRegistryOptions {
    * the host (e.g. the dev CLI capturing them to disk).
    */
   onTap?: (agentName: string, event: TapEvent) => void
+  onLifecycle?: (agentName: string, event: SessionLifecycleEvent) => void
   /**
    * Root directory under which each agent gets a per-agent state dir
    * (`<agentsDir>/<agentName>/`). Used by the AcpClient session store to
@@ -199,10 +201,10 @@ export class AcpAgentRegistry implements AcpRegistry {
     return sessionId
   }
 
-  endSession(name: string, threadId: string): void {
+  async endSession(name: string, threadId: string): Promise<void> {
     if (!this.hasAgent(name)) return
     const client = this.clients.get(name)
-    client?.endSession(threadId)
+    await client?.endSession(threadId)
   }
 
   async cancelSession(name: string, sessionId: string): Promise<void> {
@@ -257,6 +259,8 @@ export class AcpAgentRegistry implements AcpRegistry {
       onEvent: (e) => this.onEvent(name, e),
       onApprovalRequest: (req) => this.onApprovalRequest(name, req),
       onTap: this.opts.onTap ? (e) => this.opts.onTap!(name, e) : undefined,
+      onLifecycle: this.opts.onLifecycle ? (e) => this.opts.onLifecycle!(name, e) : undefined,
+      sessionIdleTimeoutMs: cfg.session_idle_timeout_ms,
       contextSpawn: this.opts.contextSpawns?.[name],
     })
     await client.start()

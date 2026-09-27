@@ -172,6 +172,8 @@ export interface AgentConfig {
    * @default 0
    */
   approval_timeout_ms: number
+  /** Milliseconds before an idle ACP session is closed; 0 disables idle close. */
+  session_idle_timeout_ms: number
   /** Container config. Rejected at parse time when runtime: local. */
   container?: ContainerConfig
   /** Exactly one of matrix / http is set per agent. */

@@ -24,6 +24,7 @@ export type {
   ContextSpawnFactory,
 } from './acp-registry.js'
 export type { TapEvent } from '@zooid/acp-client'
+export type { SessionLifecycleEvent } from '@zooid/acp-client'
 export type { AcpAgentSpec, AcpMount, AcpRuntime, AcpSpawnSpec } from './acp-types.js'
 export type {
   AgentConfig,

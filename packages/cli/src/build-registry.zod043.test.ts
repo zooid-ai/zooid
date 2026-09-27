@@ -25,6 +25,7 @@ function makeCfg(over: Partial<ZooidConfig> = {}): ZooidConfig {
         hooks: {},
         acp: { preset: 'claude' },
         approval_timeout_ms: 0,
+        session_idle_timeout_ms: 600_000,
         matrix: {
           transport: 'm1',
           user_id: '@alice:localhost',

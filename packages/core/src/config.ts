@@ -148,6 +148,18 @@ function parseApprovalTimeout(name: string, raw: unknown): number {
   throw new Error('unreachable')
 }
 
+function parseSessionIdleTimeout(name: string, raw: unknown): number {
+  if (raw === undefined) return 600_000
+  if (raw === 0 || raw === '0') return 0
+  const match = typeof raw === 'string' ? /^(\d+)(s|m|h)$/.exec(raw) : null
+  const multiplier = match?.[2] === 's' ? 1000 : match?.[2] === 'm' ? 60_000 : 3_600_000
+  const milliseconds = match ? Number(match[1]) * multiplier : NaN
+  if (!Number.isSafeInteger(milliseconds)) {
+    throw new Error(`agents.${name}.session_idle_timeout: expected a duration like "30s", "15m", "2h", or 0`)
+  }
+  return milliseconds
+}
+
 function parseAgentContainer(
   name: string,
   raw: unknown,
@@ -725,6 +737,7 @@ function parseAgents(
     }
     const acp = parseAcpBlock(name, entry.acp)
     const approval_timeout_ms = parseApprovalTimeout(name, entry.approval_timeout)
+    const session_idle_timeout_ms = parseSessionIdleTimeout(name, entry.session_idle_timeout)
 
     // Reject legacy fields up front with pointers to [ZOD043].
     if (entry.docker !== undefined) {
@@ -802,6 +815,7 @@ function parseAgents(
       hooks: agentHooks,
       acp,
       approval_timeout_ms,
+      session_idle_timeout_ms,
     }
     if (containerBlock) agentCfg.container = containerBlock
     if (binding.matrix) agentCfg.matrix = binding.matrix

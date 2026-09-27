@@ -35,6 +35,10 @@ export class SessionMap {
     this.inner.delete(keyOf(k))
   }
 
+  clear(): void {
+    this.inner.clear()
+  }
+
   listForAgent(agentId: string): SessionRecord[] {
     const out: SessionRecord[] = []
     for (const v of this.inner.values()) {

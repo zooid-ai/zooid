@@ -28,6 +28,7 @@ const matrixCfg: ZooidConfig = {
       hooks: {},
       acp: { command: 'fake', args: [] },
       approval_timeout_ms: 0,
+        session_idle_timeout_ms: 600_000,
       matrix: {
         transport: 'mx',
         user_id: '@architect:hs',

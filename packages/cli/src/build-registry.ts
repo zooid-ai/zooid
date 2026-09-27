@@ -10,6 +10,7 @@ import {
   type ContextSpawnFactory,
   type MountConfig,
   type TapEvent,
+  type SessionLifecycleEvent,
   type ZooidConfig,
   type TransportContextProvider,
 } from '@zooid/core'
@@ -29,6 +30,7 @@ export interface BuildAcpRegistryOptions {
   approvals?: ApprovalCorrelator
   /** Observability tap forwarded to each AcpClient. */
   onTap?: (agentName: string, event: TapEvent) => void
+  onLifecycle?: (agentName: string, event: SessionLifecycleEvent) => void
   /**
    * Per-agent state root (`<dataRoot>/agents/`). When set, each AcpClient
    * persists its `(threadId → sessionId)` map under
@@ -314,6 +316,7 @@ export function buildAcpRegistry(
     cwd: cwdByAgent,
     approvals: opts.approvals,
     onTap: opts.onTap,
+    onLifecycle: opts.onLifecycle,
     agentsDir: opts.agentsDir,
     contextSpawns,
     onSessionEstablished: (agentName, sessionKey, sessionId) =>

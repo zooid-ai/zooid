@@ -15,6 +15,7 @@ function cfg(overrides: Partial<ZooidConfig> & Pick<ZooidConfig, 'runtime'>): Zo
         hooks: {},
         acp: { preset: 'claude' },
         approval_timeout_ms: 0,
+        session_idle_timeout_ms: 600_000,
         http: { transport: 'http-local' },
       },
     },

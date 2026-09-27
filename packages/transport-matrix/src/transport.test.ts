@@ -12,7 +12,7 @@ function fakeRegistry() {
     ensureSession: vi.fn(
       async (_name: string, threadId: string, _roomId: string) => `sess-${threadId}`,
     ),
-    endSession: vi.fn(),
+    endSession: vi.fn(async () => {}),
     cancelSession: vi.fn(async () => {}),
     prompt: vi.fn(async () => {
       await promptPending
@@ -719,6 +719,26 @@ describe('thread implicit triggers', () => {
 })
 
 describe('dev.zooid.session_reset', () => {
+  it('waits for async session cleanup before completing /clear', async () => {
+    const { transport, agents } = makeTransport()
+    let finish!: () => void
+    agents.endSession.mockImplementation(() => new Promise<void>((resolve) => { finish = resolve }))
+    let settled = false
+    const response = postTxn(transport.app, {
+      events: [{
+        type: 'dev.zooid.session_reset',
+        event_id: '$reset-async',
+        room_id: '!r:example.com',
+        sender: '@human:example.com',
+        content: { 'm.relates_to': { rel_type: 'm.thread', event_id: '$root' } },
+      }],
+    }).then(() => { settled = true })
+    await vi.waitFor(() => expect(agents.endSession).toHaveBeenCalled())
+    expect(settled).toBe(false)
+    finish()
+    await response
+    expect(settled).toBe(true)
+  })
   it('ends the thread-keyed session when sent inside a thread', async () => {
     const { transport, agents } = makeTransport()
     await postTxn(transport.app, {

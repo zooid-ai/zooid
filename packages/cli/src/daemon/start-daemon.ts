@@ -13,6 +13,7 @@ import {
   mergeCliFlags,
   type CliFlags,
   type TapEvent,
+  type SessionLifecycleEvent,
 } from '@zooid/core'
 import { createApp } from '@zooid/transport-http'
 import {
@@ -49,6 +50,7 @@ export interface StartDaemonOpts {
   adminUserId?: string
   /** Observability tap forwarded to each AcpClient. */
   onTap?: (agentName: string, event: TapEvent) => void
+  onLifecycle?: (agentName: string, event: SessionLifecycleEvent) => void
   /**
    * Per-agent state root (`<dataRoot>/agents/`). Threaded into
    * `buildAcpRegistry` so each AcpClient persists `sessionId`s across
@@ -137,6 +139,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   const registry = buildAcpRegistry(config, {
     approvals,
     onTap: opts.onTap,
+    onLifecycle: opts.onLifecycle,
     agentsDir: opts.agentsDir,
     contextSpawnRegistry,
     daemonSockPaths: contextSockets.paths,

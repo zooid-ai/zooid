@@ -1,4 +1,4 @@
-import type { TapEvent } from '@zooid/core'
+import type { TapEvent, SessionLifecycleEvent } from '@zooid/core'
 import type { LogPaths } from './paths.js'
 import { JsonlSink, shouldCaptureUpdate, type Verbosity } from './file-sink.js'
 
@@ -19,13 +19,28 @@ export interface WireAgentCaptureOpts {
 
 export interface AgentCapture {
   onTap: (event: TapEvent) => void
+  onLifecycle: (event: SessionLifecycleEvent) => void
+  readLifecycleCounters: () => LifecycleCounters
   close: () => Promise<void>
+}
+
+export interface LifecycleCounters {
+  closeAttempts: number
+  closeSuccesses: number
+  sessionsReclaimed: number
+  recoveries: Record<'cached' | 'resume' | 'load' | 'new', number>
 }
 
 export function wireAgentCapture(opts: WireAgentCaptureOpts): AgentCapture {
   const sink = new JsonlSink(opts.paths.agentTap(opts.agent))
   const now = opts.now ?? (() => new Date())
   const pending: Promise<unknown>[] = []
+  const counters: LifecycleCounters = {
+    closeAttempts: 0,
+    closeSuccesses: 0,
+    sessionsReclaimed: 0,
+    recoveries: { cached: 0, resume: 0, load: 0, new: 0 },
+  }
 
   const onTap = (event: TapEvent): void => {
     if (event.kind === 'session_update') {
@@ -50,6 +65,25 @@ export function wireAgentCapture(opts: WireAgentCaptureOpts): AgentCapture {
 
   return {
     onTap,
+    onLifecycle: (event) => {
+      if (event.reason && event.outcome !== 'unsupported') counters.closeAttempts++
+      if (event.reason && event.outcome === 'closed') {
+        counters.closeSuccesses++
+        counters.sessionsReclaimed++
+      }
+      if (event.outcome === 'recovered' && event.recoveryMethod) counters.recoveries[event.recoveryMethod]++
+      pending.push(sink.write({
+        ts: now().toISOString(),
+        agent: opts.agent,
+        kind: 'session_lifecycle',
+        session_key: event.sessionKey,
+        session_id: event.sessionId,
+        reason: event.reason,
+        outcome: event.outcome,
+        recovery_method: event.recoveryMethod,
+      }))
+    },
+    readLifecycleCounters: () => ({ ...counters, recoveries: { ...counters.recoveries } }),
     close: async () => {
       await Promise.all(pending)
       await sink.close()

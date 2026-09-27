@@ -16,6 +16,28 @@ describe('agent capture end-to-end', () => {
     rmSync(dataDir, { recursive: true, force: true })
   })
 
+  it('captures lifecycle identity and counts only successful reclamation', async () => {
+    const now = new Date('2026-05-06T10:00:00Z')
+    const paths = resolveLogPaths({ dataDir, now })
+    await ensureDayFolder(paths)
+    const cap = wireAgentCapture({ agent: 'docs', paths, verbosity: 'default', matrixContext: () => null, now: () => now })
+    cap.onLifecycle({ agentId: 'docs', sessionKey: 'root', sessionId: 's1', outcome: 'recovered', recoveryMethod: 'new' })
+    cap.onLifecycle({ agentId: 'docs', sessionKey: 'root', sessionId: 's1', reason: 'idle', outcome: 'closed' })
+    cap.onLifecycle({ agentId: 'docs', sessionKey: 'root', sessionId: 's1', outcome: 'recovered', recoveryMethod: 'resume' })
+    cap.onLifecycle({ agentId: 'docs', sessionKey: 'root', sessionId: 's1', reason: 'clear', outcome: 'failed' })
+    expect(cap.readLifecycleCounters()).toEqual({
+      closeAttempts: 2,
+      closeSuccesses: 1,
+      sessionsReclaimed: 1,
+      recoveries: { cached: 0, resume: 1, load: 0, new: 1 },
+    })
+    await cap.close()
+    const rows = (await readFile(paths.agentTap('docs'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line))
+    expect(rows).toHaveLength(4)
+    expect(rows[1]).toMatchObject({ kind: 'session_lifecycle', session_key: 'root', session_id: 's1', reason: 'idle', outcome: 'closed' })
+    expect(rows[1]).not.toHaveProperty('prompt_text')
+  })
+
   it('writes one JSONL line per tap event with envelope + turn correlation', async () => {
     const now = new Date('2026-05-06T10:00:00Z')
     const paths = resolveLogPaths({ dataDir, now })
