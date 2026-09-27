@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import type { CliFlags } from '@zooid/core'
 import { resolveDataLayout } from '../bootstrap/data-layout.js'
 import { startDaemon } from '../daemon/start-daemon.js'
+import { logLifecycle } from '../observability/lifecycle-log.js'
 
 export interface StartFlags extends CliFlags {
   printToken?: boolean
@@ -21,6 +22,7 @@ export async function runStart(flags: StartFlags): Promise<void> {
     cliFlags: flags,
     installSignalHandlers: true,
     agentsDir: layout.agentsDir,
+    onLifecycle: (agentName, event) => logLifecycle(agentName, event),
   })
   console.log(`zooid listening on http://localhost:${handle.port}`)
   for (const name of handle.agentNames) console.log(`  agent: ${name}`)
