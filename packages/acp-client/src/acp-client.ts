@@ -346,8 +346,15 @@ export class AcpClient {
       !this.initialized
     ) return
     if (!this.sessions.get({ threadId, agentId: this.options.agent.id })) return
-    if (!this.agentCapabilities.sessionCapabilities?.close) {
-      this.warnNoClose()
+    const caps = this.agentCapabilities
+    if (!caps.sessionCapabilities?.close) {
+      this.warnNoIdleClose('session/close unsupported; adapter resources remain until process exit')
+      return
+    }
+    // Closing is only safe when the session can come back: without resume or
+    // load, the next message would silently start a fresh session.
+    if (!caps.sessionCapabilities.resume && !caps.loadSession) {
+      this.warnNoIdleClose('adapter cannot resume or load sessions; idle close disabled to keep context')
       return
     }
     const generation = this.generation
@@ -357,11 +364,9 @@ export class AcpClient {
     state.timer.unref?.()
   }
 
-  private warnNoClose(): void {
+  private warnNoIdleClose(reason: string): void {
     if (this.warnedNoClose) return
-    console.warn(
-      `[acp-client:${this.options.agent.id}] session/close unsupported; adapter resources remain until process exit`,
-    )
+    console.warn(`[acp-client:${this.options.agent.id}] ${reason}`)
     this.warnedNoClose = true
   }
 
@@ -402,7 +407,7 @@ export class AcpClient {
         const live = this.sessions.get(key)
         if (!live || !this.connection || !this.initialized) return
         if (!this.agentCapabilities.sessionCapabilities?.close) {
-          this.warnNoClose()
+          this.warnNoIdleClose('session/close unsupported; adapter resources remain until process exit')
           this.emitLifecycle(threadId, live.sessionId, 'unsupported', 'idle')
           return
         }
@@ -531,7 +536,7 @@ export class AcpClient {
             this.emitLifecycle(threadId, current.sessionId, 'failed', 'clear')
           }
         } else if (current) {
-          this.warnNoClose()
+          this.warnNoIdleClose('session/close unsupported; adapter resources remain until process exit')
           this.emitLifecycle(threadId, current.sessionId, 'unsupported', 'clear')
         }
         this.sessions.delete(key)

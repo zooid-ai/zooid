@@ -156,6 +156,30 @@ describe('ACP session lifecycle', () => {
     await client.stop()
   })
 
+  it('keeps sessions resident when the adapter can close but not resume or load', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { client, connection } = fixture({ resume: false, load: false })
+    await client.prompt(input('root'))
+    await vi.advanceTimersByTimeAsync(1000)
+    await client.prompt(input('root'))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(connection.closeSession).not.toHaveBeenCalled()
+    expect(connection.newSession).toHaveBeenCalledTimes(1)
+    expect(warning).toHaveBeenCalledTimes(1)
+    expect(warning.mock.calls[0]![0]).toMatch(/cannot resume or load/)
+    await client.stop()
+  })
+
+  it('still closes idle sessions when the adapter can only load', async () => {
+    const { client, connection } = fixture({ resume: false })
+    await client.prompt(input('root'))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(connection.closeSession).toHaveBeenCalledTimes(1)
+    await client.prompt(input('root'))
+    expect(connection.loadSession).toHaveBeenCalledTimes(1)
+    await client.stop()
+  })
+
   it('forgets a cleared session even when close fails', async () => {
     const { client, connection } = fixture()
     await client.prompt(input('root'))
