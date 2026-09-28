@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { TaskActions, TaskCallerRef, TaskRole, TransportContextProvider } from '@zooid/core'
+import {
+  AGENT_NOTIFY_INSTRUCTIONS,
+  HANDOFF_DESCRIPTION,
+  SEND_MESSAGE_DESCRIPTION,
+} from './tool-text.js'
 
 const MAX_LIMIT = 200
 const DEFAULT_LIMIT = 50
@@ -33,8 +38,7 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
   const server = new McpServer(
     { name: 'zooid-context', version: '0.0.1' },
     {
-      instructions:
-        'To involve another agent in this thread, call zooid_handoff. @mentions in your messages notify humans; they do not notify agents.',
+      instructions: AGENT_NOTIFY_INSTRUCTIONS,
     },
   )
 
@@ -91,7 +95,7 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
   if (opts.resolveTasks && opts.role?.can_handoff) {
     server.tool(
       'zooid_handoff',
-      'Hand work to one other agent in THIS thread — the only way to involve another agent here. @mentions in messages do not notify agents. Name the agent by name (or workstation.agent); the daemon resolves it. After a successful handoff, end your turn: the result comes back to you as `[handoff return] from <agent>`. For several agents in parallel, use zooid_start_task_threads instead.',
+      HANDOFF_DESCRIPTION,
       { agent: z.string(), prompt: z.string() },
       async ({ agent, prompt }) => {
         const out = await opts.resolveTasks!().then((actions) =>
@@ -174,7 +178,7 @@ export function buildContextMcpServer(opts: BuildContextMcpServerOpts): McpServe
 
   server.tool(
     'zooid_send_message',
-    'Post a message into a room or thread this agent is bound to. Fire-and-forget: no assignee, no completion tracking, no notify. @mentions in it notify humans; they do not notify agents. To involve another agent use zooid_handoff (this thread) or zooid_start_task_threads (parallel, new threads).',
+    SEND_MESSAGE_DESCRIPTION,
     {
       room: z.string(),
       thread_id: z.string().optional(),

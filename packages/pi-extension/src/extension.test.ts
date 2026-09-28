@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import {
+  AGENT_NOTIFY_INSTRUCTIONS,
+  HANDOFF_DESCRIPTION,
+  SEND_MESSAGE_DESCRIPTION,
+} from '@zooid/context-mcp'
 import createExtension from './extension.js'
 
 function harness(reply: unknown = { ok: true, result: { messages: [] } }) {
@@ -31,12 +36,13 @@ function harness(reply: unknown = { ok: true, result: { messages: [] } }) {
 const ctx = (sessionId = 'session-a') => ({ sessionManager: { getSessionId: () => sessionId } })
 
 describe('Pi Zooid extension', () => {
-  it('registers the renamed surface plus the two new tools', () => {
+  it('registers the renamed surface plus the task and handoff tools', () => {
     const { tools } = harness()
     expect(tools.map((t) => t.name).sort()).toEqual([
       'zooid_complete_task', 'zooid_get_history', 'zooid_get_members',
       'zooid_get_recent_threads', 'zooid_get_room_info', 'zooid_get_rooms',
-      'zooid_get_thread_history', 'zooid_send_message', 'zooid_start_task_threads',
+      'zooid_get_thread_history', 'zooid_handoff', 'zooid_send_message',
+      'zooid_start_task_threads',
     ])
   })
 
@@ -119,5 +125,116 @@ describe('Pi Zooid extension', () => {
     await handlers.session_start?.({ reason: 'startup' }, ctx('gamma'))
     // Fail open: a daemon hiccup must not strip an assignee's ability to finish.
     expect(activeTools().length === 0 || activeTools().length === tools.length).toBe(true)
+  })
+})
+
+describe('zooid_handoff on pi ([[ZOD094]])', () => {
+  const handoff = (tools: any[]) => tools.find((t) => t.name === 'zooid_handoff')
+
+  it('uses the MCP description verbatim and takes agent + prompt', () => {
+    const { tools } = harness()
+    const tool = handoff(tools)
+    expect(tool.description).toBe(HANDOFF_DESCRIPTION)
+    expect(tool.parameters).toEqual({
+      type: 'object',
+      properties: { agent: { type: 'string' }, prompt: { type: 'string' } },
+      required: ['agent', 'prompt'],
+    })
+  })
+
+  it('carries the MCP server instructions and the end-your-turn rule in promptGuidelines', () => {
+    const { tools } = harness()
+    const guidelines: string[] = handoff(tools).promptGuidelines
+    // Pi has no server-level instructions slot; this is where it goes.
+    expect(guidelines).toContain(AGENT_NOTIFY_INSTRUCTIONS)
+    const rest = guidelines.filter((g) => g !== AGENT_NOTIFY_INSTRUCTIONS).join(' ')
+    expect(rest).toMatch(/zooid_handoff/)
+    expect(rest).toMatch(/end your turn/i)
+    expect(rest).toMatch(/\[handoff return\]/)
+  })
+
+  it('zooid_send_message uses the shared 0.16 description', () => {
+    const { tools } = harness()
+    const send = tools.find((t) => t.name === 'zooid_send_message')
+    expect(send.description).toBe(SEND_MESSAGE_DESCRIPTION)
+  })
+
+  it('forwards agent and prompt as a handoff request addressed by the pi session', async () => {
+    const started = {
+      status: 'started', call_id: 'c1', callee: '@cloud.product:hs',
+      delivery: 'Handed off to product. End your turn now.',
+    }
+    const { tools, calls } = harness({ ok: true, result: started })
+    const res = await handoff(tools).execute(
+      'call', { agent: 'product', prompt: 'write the spec' }, undefined, undefined, ctx('alpha'),
+    )
+    expect(calls).toEqual([
+      { acpSessionId: 'alpha', method: 'handoff', params: { agent: 'product', prompt: 'write the spec' } },
+    ])
+    expect(res.isError).toBeUndefined()
+    expect(JSON.parse(res.content[0].text)).toEqual(started)
+  })
+
+  it('returns a refusal as a readable result, not an error', async () => {
+    const refused = { status: 'refused', reason: 'self: you cannot hand off to yourself' }
+    const { tools } = harness({ ok: true, result: refused })
+    const res = await handoff(tools).execute(
+      'call', { agent: 'me', prompt: 'x' }, undefined, undefined, ctx(),
+    )
+    // The model is meant to read `reason` and act on it (ZOD092 §1).
+    expect(res.isError).toBeUndefined()
+    expect(JSON.parse(res.content[0].text)).toEqual(refused)
+  })
+
+  it('reports an unbound session as an error', async () => {
+    const { tools } = harness({ ok: false, error: 'binding not owned by caller' })
+    const res = await handoff(tools).execute(
+      'call', { agent: 'product', prompt: 'x' }, undefined, undefined, ctx('orphan'),
+    )
+    expect(res.isError).toBe(true)
+    expect(res.content[0].text).toMatch(/not bound/i)
+  })
+
+  it('reports a missing pi session id as an error without calling the daemon', async () => {
+    const { tools, calls } = harness()
+    const res = await handoff(tools).execute(
+      'call', { agent: 'product', prompt: 'x' }, undefined, undefined, { sessionManager: {} },
+    )
+    expect(res.isError).toBe(true)
+    expect(calls).toEqual([])
+  })
+})
+
+describe('zooid_handoff role gating ([[ZOD094]])', () => {
+  it('keeps zooid_handoff active when the role allows it', async () => {
+    const { handlers, activeTools } = harness({
+      ok: true, result: { is_task_assignee: false, can_start_task_threads: true, can_handoff: true },
+    })
+    await handlers.session_start?.({ reason: 'startup' }, ctx('alpha'))
+    expect(activeTools()).toContain('zooid_handoff')
+  })
+
+  it('removes zooid_handoff when the role forbids it', async () => {
+    const { handlers, activeTools } = harness({
+      ok: true, result: { is_task_assignee: false, can_start_task_threads: true, can_handoff: false },
+    })
+    await handlers.session_start?.({ reason: 'startup' }, ctx('alpha'))
+    expect(activeTools()).not.toContain('zooid_handoff')
+    // The other gates are unaffected.
+    expect(activeTools()).toContain('zooid_start_task_threads')
+  })
+
+  it('removes zooid_handoff when an older daemon omits can_handoff', async () => {
+    const { handlers, activeTools } = harness({
+      ok: true, result: { is_task_assignee: false, can_start_task_threads: true },
+    })
+    await handlers.session_start?.({ reason: 'startup' }, ctx('alpha'))
+    expect(activeTools()).not.toContain('zooid_handoff')
+  })
+
+  it('leaves zooid_handoff in place when the role query fails (fail open)', async () => {
+    const { handlers, activeTools } = harness({ ok: false, error: 'binding not owned by caller' })
+    await handlers.session_start?.({ reason: 'startup' }, ctx('gamma'))
+    expect(activeTools()).toContain('zooid_handoff')
   })
 })

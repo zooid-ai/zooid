@@ -10,4 +10,9 @@ export {
   CONTEXT_CONTAINER_BIN_DIR,
   CONTEXT_CONTAINER_SOCK,
 } from './factory.js'
+export {
+  AGENT_NOTIFY_INSTRUCTIONS,
+  HANDOFF_DESCRIPTION,
+  SEND_MESSAGE_DESCRIPTION,
+} from './tool-text.js'
 export type { SpawnBinding, ZooidContextServerSpec } from './types.js'

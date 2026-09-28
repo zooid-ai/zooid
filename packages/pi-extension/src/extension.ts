@@ -1,4 +1,10 @@
-import { callDaemon, type DaemonRequest } from '@zooid/context-mcp'
+import {
+  AGENT_NOTIFY_INSTRUCTIONS,
+  callDaemon,
+  HANDOFF_DESCRIPTION,
+  SEND_MESSAGE_DESCRIPTION,
+  type DaemonRequest,
+} from '@zooid/context-mcp'
 
 interface ToolResult {
   content: Array<{ type: 'text'; text: string }>
@@ -117,7 +123,7 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
   pi.registerTool({
     name: 'zooid_send_message',
     label: 'Send Zooid message',
-    description: 'Post a message into a room or thread this agent is bound to. Fire-and-forget: no assignee, no completion tracking, no notify. Use zooid_start_task_threads instead when the intent is delegation.',
+    description: SEND_MESSAGE_DESCRIPTION,
     parameters: {
       type: 'object',
       properties: {
@@ -162,11 +168,33 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
     },
   })
 
+  // [[ZOD092]] / [[ZOD094]]: the only way a pi agent involves another agent in
+  // its thread. Text is shared with the MCP surface so both runtimes teach the
+  // same contract. A refusal is a normal result — the model reads `reason`.
+  pi.registerTool({
+    name: 'zooid_handoff',
+    label: 'Hand off to a Zooid agent',
+    description: HANDOFF_DESCRIPTION,
+    promptGuidelines: [
+      AGENT_NOTIFY_INSTRUCTIONS,
+      'After zooid_handoff returns `status: "started"`, end your turn now — do not wait, poll, or post follow-ups. The result comes back to you as `[handoff return] from <agent>`.',
+    ],
+    parameters: {
+      type: 'object',
+      properties: { agent: { type: 'string' }, prompt: { type: 'string' } },
+      required: ['agent', 'prompt'],
+    },
+    async execute(_id, params, _signal, _update, ctx) {
+      return call('handoff', { agent: params.agent, prompt: params.prompt }, ctx)
+    },
+  })
+
   // Role-conditional gating ([[ZOD084]]). Fail open on any error — the read
-  // tools and zooid_start_task_threads/zooid_complete_task are already
-  // registered above, so the failure mode of gating is removing a
+  // tools and zooid_start_task_threads/zooid_complete_task/zooid_handoff are
+  // already registered above, so the failure mode of gating is removing a
   // capability rather than declining to add one. A daemon hiccup must not
-  // strip an assignee's ability to finish its task.
+  // strip an assignee's ability to finish its task. Failing open is safe for
+  // zooid_handoff too: the daemon refuses a handoff from an unbound caller.
   pi.on('session_start', async (_evt, ctx) => {
     const acpSessionId = ctx.sessionManager?.getSessionId?.()
     if (!acpSessionId) return
@@ -177,12 +205,19 @@ export default function createExtension(pi: ExtensionAPI, deps: Deps = {}): void
       return
     }
     if (!reply.ok) return
-    const role = reply.result as { is_task_assignee: boolean; can_start_task_threads: boolean }
+    const role = reply.result as {
+      is_task_assignee: boolean
+      can_start_task_threads: boolean
+      can_handoff?: boolean
+    }
     const next = new Set(pi.getAllTools().map((t) => t.name))
     if (role.is_task_assignee) next.add('zooid_complete_task')
     else next.delete('zooid_complete_task')
     if (role.can_start_task_threads) next.add('zooid_start_task_threads')
     else next.delete('zooid_start_task_threads')
+    // Absent = a daemon older than 0.16, which cannot serve `handoff`.
+    if (role.can_handoff === true) next.add('zooid_handoff')
+    else next.delete('zooid_handoff')
     pi.setActiveTools([...next])
   })
 }
