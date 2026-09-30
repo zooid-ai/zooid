@@ -986,7 +986,15 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     // In a delegated task, agent-to-agent messages dispatch only when the
     // outgoing flush registered a matching invocation. This prevents a
     // circular handoff that was visibly refused from still waking its target.
-    if (taskCtx && !taskCtx.isRoot && evt.event_id && bindings.some((b) => b.userId === evt.sender)) {
+    // Only while the task is open: handoff() registers invocations only then,
+    // so a closed task's thread routes like an ordinary thread.
+    if (
+      taskCtx &&
+      taskRec!.phase === 'open' &&
+      !taskCtx.isRoot &&
+      evt.event_id &&
+      bindings.some((b) => b.userId === evt.sender)
+    ) {
       const invocation = invocations.byCallEvent(evt.event_id)
       matches = invocation ? matches.filter((match) => match.name === invocation.calleeAgent) : []
     }

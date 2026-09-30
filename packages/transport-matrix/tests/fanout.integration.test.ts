@@ -17,6 +17,12 @@ const bindings = [
     trigger: 'mention' as const,
   },
   {
+    name: 'coder',
+    userId: '@coder:hs',
+    rooms: [{ alias: roomId }],
+    trigger: 'mention' as const,
+  },
+  {
     name: 'eager',
     userId: '@eager:hs',
     rooms: [{ alias: roomId }],
@@ -203,5 +209,42 @@ describe('thread fan-out', () => {
     )
     expect(out.notify).toBe('caller')
     expect(out.delivery).toMatch(/End your turn now/)
+  })
+
+  it('a handoff from a thread whose task already closed still wakes the callee', async () => {
+    const { transport, sent, prompts, deliver } = setup()
+    await transport.taskActions.startTasks(
+      { agentName: 'supervisor', channelId: roomId, threadRoot: '$parent', sessionKey: '$parent' },
+      { tasks: [{ agent: 'worker', prompt: 'audit' }] },
+    )
+    const root = sent[0]!
+    await deliver({
+      type: root.type,
+      event_id: root.event_id,
+      sender: '@supervisor:hs',
+      content: root.input.content as Record<string, unknown>,
+    })
+    await settle()
+    // The worker's turn ended, so its task is closed.
+    expect(sent.some((e) => e.type === 'dev.zooid.thread_result')).toBe(true)
+
+    // Woken later in the same thread, the worker hands off to coder.
+    const out = await transport.taskActions.handoff(
+      { agentName: 'worker', channelId: roomId, threadRoot: root.event_id, sessionKey: root.event_id },
+      { agent: 'coder', prompt: 'open the PR' },
+    )
+    expect(out).toMatchObject({ status: 'started' })
+    const call = sent.at(-1)!
+    await deliver({
+      type: call.type,
+      event_id: call.event_id,
+      sender: '@worker:hs',
+      content: {
+        ...(call.input.content as Record<string, unknown>),
+        'm.relates_to': { rel_type: 'm.thread', event_id: root.event_id },
+      },
+    })
+    await settle()
+    expect(prompts.filter((p) => p.name === 'coder')).toHaveLength(1)
   })
 })
