@@ -45,4 +45,4 @@ jobs:
       # build output above, which their skipIf(!existsSync(...)) guards check.
       # Add further Docker-free integration suites here as they appear.
       - name: Socket integration tests
-        run: pnpm --filter ./packages/context-mcp --filter ./packages/pi-extension exec vitest run integration
+        run: pnpm --filter ./packages/context-mcp --filter ./packages/pi-extension exec vitest run --passWithNoTests integration
