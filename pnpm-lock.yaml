@@ -27,8 +27,8 @@ importers:
   packages/acp-client:
     dependencies:
       '@agentclientprotocol/sdk':
-        specifier: ^0.21.0
-        version: 0.21.0(zod@4.4.3)
+        specifier: ^1.5.0
+        version: 1.5.1(zod@4.4.3)
     devDependencies:
       '@types/node':
         specifier: ^22.0.0
@@ -107,8 +107,8 @@ importers:
         version: 2.8.4
     devDependencies:
       '@agentclientprotocol/sdk':
-        specifier: ^0.21.0
-        version: 0.21.0(zod@4.4.3)
+        specifier: ^1.5.0
+        version: 1.5.1(zod@4.4.3)
       '@playwright/test':
         specifier: ^1.49.0
         version: 1.59.1
@@ -338,8 +338,8 @@ importers:
 
 packages:
 
-  '@agentclientprotocol/sdk@0.21.0':
-    resolution: {integrity: sha512-ONj+Q8qOdNQp5XbH5jnMwzT9IKZJsSN0p0lkceS4GtUtNOPVLpNzSS8gqQdGMKfBvA0ESbkL8BTaSN1Rc9miEw==}
+  '@agentclientprotocol/sdk@1.5.1':
+    resolution: {integrity: sha512-nSUIrC1fOR9+ppKfx9KdwjBBND2sAPzFHo4yVQrGbXZHnayUYpwL8CDVR5LSxbapY/oKMOzNP0wvwfyx3PS2KA==}
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
@@ -2775,7 +2775,7 @@ packages:
 
 snapshots:
 
-  '@agentclientprotocol/sdk@0.21.0(zod@4.4.3)':
+  '@agentclientprotocol/sdk@1.5.1(zod@4.4.3)':
     dependencies:
       zod: 4.4.3
 

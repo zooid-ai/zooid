@@ -1,3 +1,4 @@
+import type { ElicitationCorrelator } from '@zooid/core'
 import { isAbsolute, resolve as pathResolve } from 'node:path'
 import { LocalAcpRuntime } from '@zooid/runtime-local'
 import { DockerAcpRuntime } from '@zooid/runtime-docker'
@@ -28,6 +29,7 @@ export interface BuildAcpRegistryOptions {
   runtime?: AcpRuntime
   /** When set, the registry's approval handler routes through this correlator. */
   approvals?: ApprovalCorrelator
+  elicitations?: ElicitationCorrelator
   /** Observability tap forwarded to each AcpClient. */
   onTap?: (agentName: string, event: TapEvent) => void
   onLifecycle?: (agentName: string, event: SessionLifecycleEvent) => void
@@ -315,6 +317,7 @@ export function buildAcpRegistry(
     mkdirOnSpawn: mkdirByAgent,
     cwd: cwdByAgent,
     approvals: opts.approvals,
+    elicitations: opts.elicitations,
     onTap: opts.onTap,
     onLifecycle: opts.onLifecycle,
     agentsDir: opts.agentsDir,

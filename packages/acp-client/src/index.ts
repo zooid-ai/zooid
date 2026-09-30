@@ -32,3 +32,6 @@ export { TurnTracker } from './turn-tracker.js'
 export type { TapEvent, SessionUpdate, TurnTrackerOpts } from './turn-tracker.js'
 export { classify } from './errors.js'
 export type { ErrorCode, Classified } from './errors.js'
+
+export { ElicitationUnsupportedError, toElicitationRequest } from './elicitation.js'
+export type { ElicitationRequest, ElicitationResponse, ElicitationSchema, ElicitationPropertySchema, ElicitationContentValue } from './types.js'

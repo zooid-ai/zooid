@@ -29,7 +29,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.21.0"
+    "@agentclientprotocol/sdk": "^1.5.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

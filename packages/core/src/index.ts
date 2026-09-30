@@ -59,3 +59,9 @@ export type {
   TransportContextProvider,
 } from './transport-context.js'
 export * from './task-actions.js'
+
+export { ElicitationCorrelator } from './elicitation-correlator.js'
+export type { ElicitationResolution, ElicitationStatus, PendingElicitation, RegisterElicitationInput } from './elicitation-correlator.js'
+export { unsupportedSchemaReasons, validateElicitationContent } from './elicitation-schema.js'
+export type { ElicitationContent, ElicitationValidation } from './elicitation-schema.js'
+export type { AcpRegistryElicitationHandler } from './acp-registry.js'

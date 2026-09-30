@@ -172,6 +172,36 @@ describe('AcpAgentRegistry', () => {
     const inst = AcpClient.mock.results[0].value as { stop: ReturnType<typeof vi.fn> }
     expect(inst.stop).toHaveBeenCalled()
   })
+describe('AcpAgentRegistry — elicitation', () => {
+  it('passes onElicitationRequest to the AcpClient only when a handler is set', async () => {
+    const { AcpClient } = (await import('@zooid/acp-client')) as unknown as {
+      AcpClient: ReturnType<typeof vi.fn>
+    }
+    AcpClient.mockClear()
+    const handler = vi.fn(async () => ({ action: 'decline' as const }))
+    registry.onElicitationRequest = handler
+    await registry.prompt('triage', { threadId: 't', content: [{ type: 'text', text: 'hi' }] })
+    const opts = AcpClient.mock.calls[0]![0] as {
+      onElicitationRequest?: (req: unknown, signal: AbortSignal) => Promise<unknown>
+    }
+    expect(opts.onElicitationRequest).toBeTypeOf('function')
+    const signal = new AbortController().signal
+    const req = { sessionId: 's', message: 'm', requestedSchema: { type: 'object' } }
+    await expect(opts.onElicitationRequest!(req, signal)).resolves.toEqual({ action: 'decline' })
+    expect(handler).toHaveBeenCalledWith('triage', req, signal)
+  })
+
+  it('leaves onElicitationRequest undefined when no handler is set (no capability)', async () => {
+    const { AcpClient } = (await import('@zooid/acp-client')) as unknown as {
+      AcpClient: ReturnType<typeof vi.fn>
+    }
+    AcpClient.mockClear()
+    await registry.prompt('builder', { threadId: 't', content: [{ type: 'text', text: 'hi' }] })
+    const opts = AcpClient.mock.calls[0]![0] as { onElicitationRequest?: unknown }
+    expect(opts.onElicitationRequest).toBeUndefined()
+  })
+})
+
 })
 
 describe('AcpAgentRegistry.cancelSession', () => {
@@ -239,5 +269,20 @@ describe('AcpAgentRegistry.cancelSession', () => {
     expect(
       (correlator as unknown as { cancelSession: ReturnType<typeof vi.fn> }).cancelSession,
     ).toHaveBeenCalledWith('sess-xyz')
+  })
+})
+
+describe('AcpAgentRegistry.cancelSession — elicitation', () => {
+  it('cancels open elicitations for the session with reason interrupt', async () => {
+    const elicitations = { cancelSession: vi.fn(() => 1) }
+    const r = new AcpAgentRegistry({
+      runtime: new StubRuntime(),
+      agents: {
+        architect: { name: 'architect', workdir: '.', hooks: {}, acp: { preset: 'claude' }, approval_timeout_ms: 0 },
+      },
+      elicitations: elicitations as never,
+    })
+    await r.cancelSession('architect', 'sess-xyz')
+    expect(elicitations.cancelSession).toHaveBeenCalledWith('sess-xyz', 'interrupt')
   })
 })

@@ -2,13 +2,20 @@ import type { ChildProcess } from 'node:child_process'
 import { resolve as pathResolve } from 'node:path'
 import { Readable, Writable } from 'node:stream'
 import {
-  ClientSideConnection,
+  client as acpClientApp,
+  methods,
+  type ClientSideConnection,
+  type ClientConnection,
+  type ClientCapabilities,
+  type CreateElicitationRequest,
+  type CreateElicitationResponse,
   PROTOCOL_VERSION,
   ndJsonStream,
   type Client,
   type SessionModeState,
   type AgentCapabilities,
 } from '@agentclientprotocol/sdk'
+import { toElicitationRequest, toRpcError } from './elicitation.js'
 import { AgentProcess } from './agent-process.js'
 import { SessionMap } from './session-map.js'
 import { JsonFileSessionStore } from './session-store.js'
@@ -21,6 +28,8 @@ import type {
   AgentEvent,
   ApprovalDecision,
   ApprovalRequest,
+  ElicitationRequest,
+  ElicitationResponse,
   PromptInput,
   PromptResult,
 } from './types.js'
@@ -53,6 +62,7 @@ export interface AcpClientOptions {
   agentDataDir?: string
   onEvent: (event: AgentEvent) => void
   onApprovalRequest: (req: ApprovalRequest) => Promise<ApprovalDecision>
+  onElicitationRequest?: (req: ElicitationRequest, signal: AbortSignal) => Promise<ElicitationResponse>
   sessionIdleTimeoutMs?: number
   onLifecycle?: (event: SessionLifecycleEvent) => void
   /**
@@ -108,7 +118,8 @@ interface KeyLifecycle {
 export class AcpClient {
   private process: AgentProcess | null = null
   private runtimeChild: ChildProcess | null = null
-  private connection: ClientSideConnection | null = null
+  private connection: Pick<ClientSideConnection, 'initialize' | 'newSession' | 'loadSession' | 'resumeSession' | 'closeSession' | 'setSessionMode' | 'prompt' | 'cancel'> | null = null
+  private rawConnection: ClientConnection | null = null
   private readonly sessions = new SessionMap()
   private store: JsonFileSessionStore | null = null
   private storeLoaded: Promise<void> | null = null
@@ -116,6 +127,7 @@ export class AcpClient {
   private readonly lifecycle = new Map<string, KeyLifecycle>()
   private readonly replay = new Set<string>()
   private readonly permissionCancels = new Map<string, Set<() => void>>()
+  private readonly elicitationCancels = new Map<string, Set<AbortController>>()
   private generation = 0
   private warnedNoClose = false
   private warnedNoStore = false
@@ -171,14 +183,29 @@ export class AcpClient {
     const output = Writable.toWeb(stdin) as WritableStream<Uint8Array>
     const stream = ndJsonStream(output, input)
 
-    this.connection = new ClientSideConnection(() => this.buildClient(), stream)
+    const callbacks = this.buildClient()
+    const app = acpClientApp({ name: 'zooid' })
+      .onNotification(methods.client.session.update, (ctx) => callbacks.sessionUpdate(ctx.params))
+      .onRequest(methods.client.session.requestPermission, (ctx) => callbacks.requestPermission(ctx.params))
+    if (this.options.onElicitationRequest) {
+      app.onRequest(methods.client.elicitation.create, (ctx) => this.onElicitation(ctx.params, ctx.signal))
+    }
+    this.rawConnection = app.connect(stream)
+    const agent = this.rawConnection.agent
+    this.connection = {
+      initialize: (p) => agent.request(methods.agent.initialize, p),
+      newSession: (p) => agent.request(methods.agent.session.new, p),
+      loadSession: (p) => agent.request(methods.agent.session.load, p),
+      resumeSession: (p) => agent.request(methods.agent.session.resume, p),
+      closeSession: (p) => agent.request(methods.agent.session.close, p),
+      setSessionMode: (p) => agent.request(methods.agent.session.setMode, p),
+      prompt: (p) => agent.request(methods.agent.session.prompt, p),
+      cancel: (p) => agent.notify(methods.agent.session.cancel, p),
+    }
 
     const init = await this.connection.initialize({
       protocolVersion: PROTOCOL_VERSION,
-      clientCapabilities: {
-        fs: { readTextFile: false, writeTextFile: false },
-        terminal: false,
-      },
+      clientCapabilities: this.clientCapabilities(),
       clientInfo: { name: 'zooid', title: 'Zooid', version: '0.0.1' },
     })
     this.agentCapabilities = init.agentCapabilities ?? {}
@@ -186,6 +213,10 @@ export class AcpClient {
   }
 
   async stop(): Promise<void> {
+    this.rawConnection?.close()
+    this.rawConnection = null
+    for (const controllers of this.elicitationCancels.values()) for (const controller of controllers) controller.abort()
+    this.elicitationCancels.clear()
     this.generation++
     this.clearTimers()
     for (const cancels of this.permissionCancels.values()) for (const cancel of cancels) cancel()
@@ -487,6 +518,7 @@ export class AcpClient {
   }
 
   async cancel(sessionId: string): Promise<void> {
+    for (const controller of this.elicitationCancels.get(sessionId) ?? []) controller.abort()
     if (!this.connection || !this.initialized) return
     await this.connection.cancel({ sessionId })
   }
@@ -505,6 +537,7 @@ export class AcpClient {
       try {
         if (live) {
           for (const cancel of this.permissionCancels.get(live.sessionId) ?? []) cancel()
+          for (const controller of this.elicitationCancels.get(live.sessionId) ?? []) controller.abort()
           if (state.activeTurns.size) {
             try {
               await this.cancel(live.sessionId)
@@ -616,6 +649,50 @@ export class AcpClient {
       return resolvePreset(preset, { model })
     }
     throw new Error('AcpClient: agent must specify either `preset` or `command`')
+  }
+
+  private clientCapabilities(): ClientCapabilities {
+    return {
+      fs: { readTextFile: false, writeTextFile: false },
+      terminal: false,
+      ...(this.options.onElicitationRequest ? { elicitation: { form: {} } } : {}),
+    }
+  }
+
+  private async onElicitation(
+    params: CreateElicitationRequest,
+    signal: AbortSignal,
+  ): Promise<CreateElicitationResponse> {
+    const agentId = this.options.agent.id
+    let request: ElicitationRequest
+    try { request = toElicitationRequest(params) } catch (err) { throw toRpcError(err) }
+    const threadId = [...this.lifecycle.keys()].find(
+      (key) => this.sessions.get({ threadId: key, agentId })?.sessionId === request.sessionId,
+    )
+    const controller = new AbortController()
+    const abort = () => controller.abort(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) abort()
+    const controllers = this.elicitationCancels.get(request.sessionId) ?? new Set<AbortController>()
+    controllers.add(controller)
+    this.elicitationCancels.set(request.sessionId, controllers)
+    if (threadId) this.setHumanRequestPending(threadId, true)
+    debugLog(agentId, 'createElicitation', { sessionId: request.sessionId, toolCallId: request.toolCallId })
+    try {
+      const response = await this.options.onElicitationRequest!(request, controller.signal)
+      if (signal.aborted) throw signal.reason
+      // A local session cancellation also settles the pending operation.
+      if (controller.signal.aborted) return { action: 'cancel' }
+      debugLog(agentId, 'createElicitation ←', { action: response.action })
+      return response
+    } catch (err) {
+      throw toRpcError(err)
+    } finally {
+      signal.removeEventListener('abort', abort)
+      controllers.delete(controller)
+      if (!controllers.size) this.elicitationCancels.delete(request.sessionId)
+      if (threadId) this.setHumanRequestPending(threadId, false)
+    }
   }
 
   private buildClient(): Client {

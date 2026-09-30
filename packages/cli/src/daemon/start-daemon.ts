@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net'
 import { serve, type ServerType } from '@hono/node-server'
 import {
   ApprovalCorrelator,
+  ElicitationCorrelator,
   findConfigFile,
   findHttpTransport,
   findMatrixTransport,
@@ -123,6 +124,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   const config = mergeCliFlags(base, opts.cliFlags ?? {})
 
   const approvals = new ApprovalCorrelator()
+  const elicitations = new ElicitationCorrelator()
 
   const runDir = opts.agentsDir
     ? join(opts.agentsDir, '..', 'run')
@@ -138,6 +140,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   const dataDir = opts.agentsDir ? dirname(opts.agentsDir) : undefined
   const registry = buildAcpRegistry(config, {
     approvals,
+    elicitations,
     onTap: opts.onTap,
     onLifecycle: opts.onLifecycle,
     agentsDir: opts.agentsDir,
@@ -254,6 +257,7 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     const transport = createMatrixTransport({
       agents: registry,
       approvals,
+      elicitations,
       client,
       bindings,
       hsToken: matrix.transport.hs_token,

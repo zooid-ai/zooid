@@ -1,3 +1,21 @@
+import {
+  ElicitationUnsupportedError,
+  type ElicitationResponse,
+} from '@zooid/acp-client'
+import {
+  unsupportedSchemaReasons,
+  validateElicitationContent,
+  type ElicitationCorrelator,
+  type ElicitationResolution,
+  type PendingElicitation,
+} from '@zooid/core'
+import {
+  ElicitationEventType,
+  parseElicitationResponse,
+  toElicitationRejectedBody,
+  toElicitationRequestBody,
+  toElicitationResolvedBody,
+} from './elicitation-events.js'
 import { Hono } from 'hono'
 import { timingSafeEqual, randomUUID } from 'node:crypto'
 import type {
@@ -109,6 +127,8 @@ export interface CreateMatrixTransportOptions {
   taskJournal?: TaskJournal
   taskRunId?: string
   pendingInput?: PendingInputRegistry
+  elicitations?: ElicitationCorrelator
+  elicitationRetryDelayMs?: number
   /** Deferred-return fallback window. Defaults to `RETURN_GRACE_MS`. */
   returnGraceMs?: number
   /** Fallback for a hold on a callee on another workstation ([[ZOD092]] §5). Defaults to `REMOTE_RETURN_GRACE_MS`. */
@@ -352,7 +372,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   const taskRegistry = new TaskRegistry({ journal: opts.taskJournal, runId: opts.taskRunId })
   const interruptedTasks = taskRegistry.restore()
   const invocations = new InvocationRegistry()
-  const pendingInput = opts.pendingInput ?? NO_PENDING_INPUT
+  const pendingInput = opts.pendingInput ?? opts.elicitations ?? NO_PENDING_INPUT
   const bindingFor = (name: string) => bindings.find((b) => b.name === name)
   const turnQueues = new Map<string, Promise<void>>()
   // Every workstation's agents, from the space's roster state events; the
@@ -608,6 +628,184 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     await tail
   }
 
+  const elicitations = opts.elicitations
+  const elicitationRetryDelayMs = opts.elicitationRetryDelayMs ?? 500
+  // Per request: the publish attempt, so 'resolved' never races the card.
+  const elicitationPublishes = new Map<string, Promise<void>>()
+
+  async function sendWithRetry(input: {
+    roomId: string
+    asUserId: string
+    eventType: string
+    content: Record<string, unknown>
+    txnId: string
+  }): Promise<{ event_id: string }> {
+    let last: unknown
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        // Same txnId every attempt: a lost ack cannot duplicate the event.
+        return await client.sendCustomEvent(input)
+      } catch (err) {
+        last = err
+        console.warn(`[matrix] ${input.eventType} attempt ${attempt} failed:`, err)
+        if (attempt < 3 && elicitationRetryDelayMs > 0) await delay(elicitationRetryDelayMs * attempt)
+      }
+    }
+    throw last
+  }
+
+  if (elicitations) {
+    agents.onElicitationRequest = async (name, req, signal) => {
+      const ctx = sessions.get(req.sessionId)
+      if (!ctx || ctx.agent.name !== name) {
+        console.warn(`[matrix:${name}] elicitation for ${req.sessionId} has no Matrix thread`)
+        throw new ElicitationUnsupportedError(`session ${req.sessionId} has no Matrix thread`)
+      }
+      const reasons = unsupportedSchemaReasons(req.requestedSchema)
+      if (reasons.length > 0) {
+        console.warn(`[matrix:${name}] unsupported elicitation schema: ${reasons.join('; ')}`)
+        throw new ElicitationUnsupportedError(reasons.join('; '))
+      }
+      const { record, response } = elicitations.register({
+        agentName: name,
+        sessionId: req.sessionId,
+        sessionKey: ctx.sessionKey,
+        roomId: ctx.roomId,
+        threadRoot: ctx.threadRoot,
+        request: req,
+        signal,
+      })
+      // Prose the agent wrote before asking lands above the card.
+      flushBuffer(req.sessionId)
+      void client
+        .setTyping({ roomId: ctx.roomId, asUserId: ctx.agent.userId, typing: false })
+        .catch(() => {})
+      const publish = (sendQueue.get(req.sessionId) ?? Promise.resolve()).then(async () => {
+        if (elicitations.get(record.requestId)?.state !== 'pending') return
+        try {
+          const { event_id } = await sendWithRetry({
+            roomId: ctx.roomId,
+            asUserId: ctx.agent.userId,
+            eventType: ElicitationEventType.Request,
+            content: toElicitationRequestBody(record),
+            txnId: `elicit-req-${record.requestId}`,
+          })
+          elicitations.attachRequestEvent(record.requestId, event_id)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          console.error(`[matrix:${name}] could not publish elicitation ${record.requestId}: ${msg}`)
+          elicitations.fail(record.requestId, new Error(`could not publish elicitation card: ${msg}`))
+        }
+      })
+      elicitationPublishes.set(record.requestId, publish)
+      // The send queue waits for the card, never for the answer — later
+      // sends and the turn's final drain must not block on a human.
+      sendQueue.set(req.sessionId, publish)
+      try { return await response } finally { elicitationPublishes.delete(record.requestId) }
+    }
+
+    elicitations.on('resolved', (res: ElicitationResolution) => {
+      const { record } = res
+      const agent = bindingFor(record.agentName)
+      if (!agent) return
+      void (elicitationPublishes.get(record.requestId) ?? Promise.resolve()).then(async () => {
+        elicitationPublishes.delete(record.requestId)
+        const current = elicitations.get(record.requestId)
+        if (!current?.requestEventId) return // never shown; nothing to close
+        await sendWithRetry({
+          roomId: record.roomId,
+          asUserId: agent.userId,
+          eventType: ElicitationEventType.Resolved,
+          content: toElicitationResolvedBody({ ...res, record: current }),
+          txnId: `elicit-res-${record.requestId}`,
+        }).catch((err) => console.error(`[matrix] elicitation_resolved ${record.requestId} not sent:`, err))
+        // Answered mid-turn: show the agent working again right away.
+        if (
+          elicitations.countForSession(record.sessionId) === 0 &&
+          turnQueues.has(`${record.agentName}::${record.sessionKey}`)
+        ) {
+          void client
+            .setTyping({ roomId: record.roomId, asUserId: agent.userId, typing: true, timeoutMs: 30_000 })
+            .catch(() => {})
+        }
+      })
+    })
+  }
+
+  function sendElicitationRejected(
+    record: PendingElicitation,
+    responseEventId: string,
+    reason: 'invalid' | 'stale',
+    errors?: Record<string, string>,
+  ): void {
+    const agent = bindingFor(record.agentName)
+    if (!agent) return
+    void sendWithRetry({
+      roomId: record.roomId,
+      asUserId: agent.userId,
+      eventType: ElicitationEventType.Rejected,
+      content: toElicitationRejectedBody({ record, responseEventId, reason, errors }),
+      txnId: `elicit-rej-${responseEventId}`,
+    }).catch((err) => console.warn(`[matrix] elicitation_rejected not sent:`, err))
+  }
+
+  async function handleElicitationResponse(evt: MatrixEvent): Promise<void> {
+    if (!elicitations) return
+    const parsed = parseElicitationResponse(evt)
+    const sender = evt.sender
+    if (!parsed || !sender || !evt.event_id || !evt.room_id) return
+    // Agents and service identities never answer on a human's behalf.
+    if (ourBotUserIds.has(sender) || workforce.agentIds.has(sender)) {
+      console.warn(`[matrix] ignoring elicitation response from agent ${sender}`)
+      return
+    }
+    // A response can arrive while a lost publication acknowledgement is being retried.
+    await elicitationPublishes.get(parsed.requestId)
+    const record = elicitations.get(parsed.requestId)
+    // Unknown: another daemon's question, or one from before a restart.
+    if (!record) return
+    if (
+      record.roomId !== evt.room_id ||
+      record.threadRoot !== parsed.threadRoot ||
+      record.requestEventId !== parsed.requestEventId
+    ) {
+      console.warn(`[matrix] elicitation response ${evt.event_id} does not match request ${record.requestId}`)
+      return
+    }
+    const agent = bindingFor(record.agentName)
+    if (!agent) return
+    try {
+      const { joined } = await client.getJoinedMembers(record.roomId, agent.userId)
+      if (!Object.hasOwn(joined, sender)) {
+        console.warn(`[matrix] elicitation response from non-member ${sender}`)
+        return
+      }
+    } catch (err) {
+      console.warn(`[matrix] membership check failed for ${sender}; response ignored:`, err)
+      return
+    }
+    if (elicitations.get(record.requestId)?.state !== 'pending') return sendElicitationRejected(record, evt.event_id, 'stale')
+    let response: ElicitationResponse
+    if (parsed.action === 'accept') {
+      const v = validateElicitationContent(record.requestedSchema, parsed.content)
+      if (!v.ok) {
+        if (elicitations.get(record.requestId)?.state === 'pending') {
+          sendElicitationRejected(record, evt.event_id, 'invalid', v.errors)
+        } else {
+          sendElicitationRejected(record, evt.event_id, 'stale')
+        }
+        return
+      }
+      response = { action: 'accept', content: v.content }
+    } else {
+      response = { action: parsed.action }
+    }
+    // Atomic: the first eligible response wins; the rest are stale.
+    if (!elicitations.settle(record.requestId, response, { respondedBy: sender, responseEventId: evt.event_id })) {
+      sendElicitationRejected(record, evt.event_id, 'stale')
+    }
+  }
+
   agents.onApprovalRequest = async (name, req) => {
     const handle = approvals.register(name, (req as { sessionId: string }).sessionId, req, {
       timeoutMs: agents.getApprovalTimeoutMs(name),
@@ -757,6 +955,18 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       // /clear must not allow a pre-reset deferred return to wake an agent up
       // later via either its old turn.end or the fallback timer.
       returns.dropThread(threadRoot)
+      // Spec § Cancellation: clearing cancels a waiting turn's questions and the
+      // turn itself before its memory is replaced. Sessions without an open
+      // question are left alone (ZOD039 behaviour unchanged).
+      if (elicitations) {
+        for (const [sessionId, ctx] of [...sessions]) {
+          if (ctx.threadRoot !== threadRoot || elicitations.countForSession(sessionId) === 0) continue
+          elicitations.cancelSession(sessionId, 'clear')
+          await agents.cancelSession(ctx.agent.name, sessionId).catch((err) => {
+            console.error(`[matrix] cancelSession(${ctx.agent.name}, ${sessionId}) on clear failed:`, err)
+          })
+        }
+      }
       // [[ZOD092]] No open handoff in this thread survives a reset.
       for (const k of [...openHandoffs.keys()]) if (k.endsWith(`::${threadRoot}`)) openHandoffs.delete(k)
       // [[ZOD071]]: a thread's sessions are the thread-level one plus one per
@@ -868,6 +1078,18 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           err,
         )
       })
+      return
+    }
+    if (evt.type === ElicitationEventType.Response) {
+      await handleElicitationResponse(evt)
+      return
+    }
+    // Our own request/resolved/rejected echoes are control events, never prompts.
+    if (
+      evt.type === ElicitationEventType.Request ||
+      evt.type === ElicitationEventType.Resolved ||
+      evt.type === ElicitationEventType.Rejected
+    ) {
       return
     }
     if (evt.type === 'dev.zooid.approval_response') {
@@ -1183,6 +1405,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     await safeTyping(true)
     await safePresence('unavailable')
     const refresh = setInterval(() => {
+      if (elicitations && elicitations.countForSession(sessionId) > 0) return
       void safeTyping(true)
     }, TYPING_REFRESH_MS)
 
