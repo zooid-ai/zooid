@@ -40,3 +40,9 @@ jobs:
       # (pnpm test) or in a dedicated infra job.
       - name: Test
         run: pnpm test:ci
+
+      # Docker-free suites that talk over a Unix socket. They need only the
+      # build output above, which their skipIf(!existsSync(...)) guards check.
+      # Add further Docker-free integration suites here as they appear.
+      - name: Socket integration tests
+        run: pnpm --filter ./packages/context-mcp --filter ./packages/pi-extension exec vitest run integration
