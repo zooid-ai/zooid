@@ -5,10 +5,12 @@ export class InvocationRegistry {
   private readonly records = new Map<string, InvocationRecord>()
   private readonly byCallee = new Map<string, string>()
   private readonly byEvent = new Map<string, string>()
+  private readonly byCall = new Map<string, string>()
   constructor(private readonly opts: { newId?: () => string } = {}) {}
   open(input: Omit<InvocationRecord, 'invocationId' | 'state'>): InvocationRecord {
     const record = { invocationId: this.opts.newId?.() ?? randomUUID(), state: 'outstanding' as const, ...input }
     this.records.set(record.invocationId, record)
+    if (record.callId) this.byCall.set(record.callId, record.invocationId)
     return record
   }
   attachCallEvent(id: string, eventId: string, sessionKey: string) {
@@ -18,6 +20,7 @@ export class InvocationRegistry {
   }
   get(id: string) { return this.records.get(id) }
   byCallEvent(eventId: string) { const id = this.byEvent.get(eventId); return id ? this.records.get(id) : undefined }
+  byCallId(callId: string) { const id = this.byCall.get(callId); return id ? this.records.get(id) : undefined }
   forCalleeSession(session: string) { const id = this.byCallee.get(session); return id ? this.records.get(id) : undefined }
   outstandingFor(session: string) { return [...this.records.values()].filter(x => x.state === 'outstanding' && x.callerSessionKey === session) }
   outstandingForTask(taskId: string) { return [...this.records.values()].filter(x => x.state === 'outstanding' && x.taskId === taskId) }

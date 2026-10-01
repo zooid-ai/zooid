@@ -1217,8 +1217,21 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       evt.event_id &&
       bindings.some((b) => b.userId === evt.sender)
     ) {
-      const invocation = invocations.byCallEvent(evt.event_id)
-      matches = invocation ? matches.filter((match) => match.name === invocation.calleeAgent) : []
+      let invocation = invocations.byCallEvent(evt.event_id)
+      // The sync echo of a handoff can arrive before its send resolves, so
+      // handoff() hasn't attached the event id yet. Match on the call_id the
+      // event carries and attach it here instead.
+      const call = readHandoff(evt.content)
+      if (!invocation && call && call.caller === evt.sender) {
+        invocation = invocations.byCallId(call.call_id)
+        if (invocation && !invocation.callEventId)
+          invocations.attachCallEvent(
+            invocation.invocationId,
+            evt.event_id,
+            composeHandoffKey(inboundRel ?? evt.event_id, evt.event_id),
+          )
+      }
+      matches = invocation ? matches.filter((match) => match.name === invocation!.calleeAgent) : []
     }
     // [[ZOD039]] A return fires at the callee's turn boundary, not per message.
     // Every tool call forces a buffer flush, so one turn posts many
@@ -1799,18 +1812,19 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           reason:
             'already_open: you already have a handoff open in this thread. End your turn and wait for it, or use zooid_start_task_threads for parallel work.',
         }
+      const callId = randomUUID()
       const invocation = inTask
         ? invocations.open({
             taskId: task!.taskId,
             callerAgent: callerBinding.name,
             callerSessionKey: caller.sessionKey,
             calleeAgent: target.name,
+            callId,
           })
         : undefined
       if (invocation) taskRegistry.clearSummary(task!.taskId)
       else openHandoffs.set(key, target.userId)
 
-      const callId = randomUUID()
       const content = buildHandoffContent({
         callId,
         caller: callerBinding.userId,

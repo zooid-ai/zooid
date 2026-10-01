@@ -19,4 +19,11 @@ describe('InvocationRegistry', () => {
     registry.cancelForTask('t1')
     expect(registry.resolve('i1')).toBeUndefined()
   })
+  it('finds a handoff by its call_id before the call event is attached', () => {
+    const registry = new InvocationRegistry({ newId: () => 'i1' })
+    const invocation = registry.open({ taskId: 't1', callerAgent: 'a', callerSessionKey: '$root', calleeAgent: 'b', callId: 'c1' })
+    expect(registry.byCallEvent('$call')).toBeUndefined()
+    expect(registry.byCallId('c1')).toBe(invocation)
+    expect(registry.byCallId('other')).toBeUndefined()
+  })
 })

@@ -73,6 +73,8 @@ export interface InvocationRecord {
   callerAgent: string
   callerSessionKey: string
   calleeAgent: string
+  /** The handoff's wire `call_id`; matches its sync echo before `callEventId` is known. */
+  callId?: string
   callEventId?: string
   calleeSessionKey?: string
   state: InvocationState

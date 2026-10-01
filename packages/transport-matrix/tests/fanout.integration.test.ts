@@ -116,7 +116,7 @@ function setup() {
       }),
     })
   }
-  return { transport, sent, prompts, client, deliver }
+  return { transport, sent, prompts, client, deliver, registry }
 }
 
 describe('thread fan-out', () => {
@@ -246,5 +246,58 @@ describe('thread fan-out', () => {
     })
     await settle()
     expect(prompts.filter((p) => p.name === 'coder')).toHaveLength(1)
+  })
+
+  it('a handoff inside an open task wakes the callee when its echo beats the send response', async () => {
+    const { transport, sent, prompts, client, deliver, registry } = setup()
+    // Hold the worker's turn open so its task stays open during the handoff.
+    let releaseWorker!: () => void
+    const workerTurn = new Promise<void>((r) => (releaseWorker = r))
+    const basePrompt = registry.prompt.getMockImplementation()!
+    registry.prompt.mockImplementation(async (name, input) => {
+      if (name === 'worker') {
+        await workerTurn
+        return { stopReason: 'end_turn' as const }
+      }
+      return basePrompt(name, input)
+    })
+    await transport.taskActions.startTasks(
+      { agentName: 'supervisor', channelId: roomId, threadRoot: '$parent', sessionKey: '$parent' },
+      { tasks: [{ agent: 'worker', prompt: 'audit' }] },
+    )
+    const root = sent[0]!
+    await deliver({
+      type: root.type,
+      event_id: root.event_id,
+      sender: '@supervisor:hs',
+      content: root.input.content as Record<string, unknown>,
+    })
+    await settle()
+
+    // Pull-mode sync can surface the posted handoff before the PUT /send
+    // response resolves, i.e. before handoff() learns the call's event id.
+    client.sendMessage.mockImplementationOnce(async (input: Record<string, unknown>) => {
+      const event_id = '$call'
+      sent.push({ type: 'm.room.message', input, event_id })
+      await deliver({
+        type: 'm.room.message',
+        event_id,
+        sender: '@worker:hs',
+        content: {
+          ...(input.content as Record<string, unknown>),
+          'm.relates_to': { rel_type: 'm.thread', event_id: root.event_id },
+        },
+      })
+      return { event_id }
+    })
+    const out = await transport.taskActions.handoff(
+      { agentName: 'worker', channelId: roomId, threadRoot: root.event_id, sessionKey: root.event_id },
+      { agent: 'coder', prompt: 'open the PR' },
+    )
+    expect(out).toMatchObject({ status: 'started' })
+    await settle()
+    expect(prompts.filter((p) => p.name === 'coder')).toHaveLength(1)
+    releaseWorker()
+    await settle()
   })
 })
