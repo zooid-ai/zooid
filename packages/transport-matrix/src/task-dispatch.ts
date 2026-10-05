@@ -1,4 +1,5 @@
 import { THREAD_START_FIELD, type ThreadCompletion, type ThreadStartContent } from '@zooid/core'
+import { buildMentionContent } from './mention-content.js'
 import type { AgentBinding } from './router.js'
 export type Admission = { ok: true } | { ok: false; reason: string }
 export function checkDelegable(
@@ -24,14 +25,12 @@ export function buildAssignmentContent(input: {
   prompt: string
   start: ThreadStartContent
 }): { msgtype: string; body: string; [key: string]: unknown } {
-  const escaped = input.prompt.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  const body = `${input.assigneeUserId} ${input.prompt}`.trim()
   return {
-    msgtype: 'm.notice',
-    body,
-    format: 'org.matrix.custom.html',
-    formatted_body: `<a href="https://matrix.to/#/${encodeURIComponent(input.assigneeUserId)}">${input.assigneeUserId}</a> ${escaped}`,
-    'm.mentions': { user_ids: [input.assigneeUserId] },
+    ...buildMentionContent({
+      userId: input.assigneeUserId,
+      text: input.prompt,
+      msgtype: 'm.notice',
+    }),
     [THREAD_START_FIELD]: input.start,
   }
 }
