@@ -41,6 +41,7 @@ import { startTriggerScheduler, validateCron } from './trigger-scheduler.js'
 import { mountWebhookRoutes, WEBHOOK_ROUTE_PREFIX } from './webhook-routes.js'
 import { loadCustomVerifiers } from './load-custom-verifiers.js'
 import { joinTriggerRooms } from './trigger-rooms.js'
+import { ignoredHooksWarning } from './ignored-hooks.js'
 
 export interface StartDaemonOpts {
   configPath?: string
@@ -122,6 +123,9 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
   const configDir = dirname(found.path)
   const base = loadZooidConfig(readFileSync(found.path, 'utf8'), { configDir, validateCron })
   const config = mergeCliFlags(base, opts.cliFlags ?? {})
+
+  const hooksWarning = ignoredHooksWarning(config.agents)
+  if (hooksWarning) console.warn(hooksWarning)
 
   const approvals = new ApprovalCorrelator()
   const elicitations = new ElicitationCorrelator()
