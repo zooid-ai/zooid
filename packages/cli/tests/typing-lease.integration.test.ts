@@ -59,29 +59,48 @@ describe.skipIf(!dockerAvailable() && !process.env.CI)('typing lease backstop (Z
     rmSync(workDir, { recursive: true, force: true })
   })
 
-  it('a raised indicator clears within the lease with nothing further sent', async () => {
+  let registered = false
+
+  /** Raise AGENT's typing with a 30s lease, then send nothing more (the daemon "dies"). */
+  async function raiseAndAbandon() {
     const client = new MatrixClient({ homeserver: HS, asToken })
-    await client.registerBot('lease-agent')
-    await client.registerBot('lease-watcher')
+    if (!registered) {
+      await client.registerBot('lease-agent')
+      await client.registerBot('lease-watcher')
+      registered = true
+    }
     const roomId = await client.createRoom({ roomAliasName: `lease-${Date.now()}`, invite: [AGENT], senderUserId: WATCHER })
     await client.joinRoom(roomId, AGENT)
-
     let { next } = await syncTyping(roomId)
     await client.setTyping({ roomId, asUserId: AGENT, typing: true, timeoutMs: 30_000 })
     const raisedAt = Date.now()
-    // The daemon "dies" here: no refresh, no lower.
+    const seen = await syncTyping(roomId, next)
+    expect(seen.userIds).toContain(AGENT)
+    return { roomId, next: seen.next, raisedAt }
+  }
 
-    let sawRaised = false
+  it('Tuwunel expires the lease: a fresh sync after it no longer lists the agent', async () => {
+    const { roomId, raisedAt } = await raiseAndAbandon()
+    await new Promise((r) => setTimeout(r, 35_000 - (Date.now() - raisedAt)))
+    const fresh = await syncTyping(roomId)
+    expect(fresh.userIds ?? []).not.toContain(AGENT)
+  }, 120_000)
+
+  // Pins an upstream Tuwunel bug: the expiry is never pushed to an incremental
+  // /sync. An already-open client keeps the stale indicator until something
+  // else changes typing in that room, so the lease is no backstop for a
+  // crashed daemon; the daemon lowering typing itself (ZOD091) is the fix for
+  // #36. If this test starts failing, Tuwunel fixed it: invert the assertion
+  // to `toBeDefined()` with a <=45s bound.
+  it('known Tuwunel bug: an already-syncing client is never told the lease expired', async () => {
+    const { roomId, raisedAt } = await raiseAndAbandon()
+    let since = (await syncTyping(roomId)).next
     let clearedAt: number | undefined
     while (Date.now() - raisedAt < 50_000) {
-      const r = await syncTyping(roomId, next)
-      next = r.next
-      if (r.userIds?.includes(AGENT)) sawRaised = true
-      if (sawRaised && r.userIds && !r.userIds.includes(AGENT)) { clearedAt = Date.now(); break }
+      const r = await syncTyping(roomId, since)
+      since = r.next
+      if (r.userIds && !r.userIds.includes(AGENT)) { clearedAt = Date.now(); break }
     }
-    console.log(`[typing-lease] measured clearedAt - raisedAt = ${clearedAt === undefined ? 'never cleared' : `${clearedAt - raisedAt}ms`}`)
-    expect(sawRaised).toBe(true)
-    expect(clearedAt, 'Tuwunel never expired the typing lease').toBeDefined()
-    expect(clearedAt! - raisedAt).toBeLessThanOrEqual(45_000)
+    expect(clearedAt).toBeUndefined()
   }, 120_000)
 })
