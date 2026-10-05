@@ -65,6 +65,7 @@ import { SyncLoop } from './sync-loop.js'
 import { NO_PENDING_INPUT } from '@zooid/core'
 import { TaskRegistry, MAX_OPEN_TASKS_PER_ROOM, type TaskJournal, type TaskRecord } from './task-registry.js'
 import { InvocationRegistry } from './invocation-registry.js'
+import { createTypingRegistry } from './typing-registry.js'
 import { evaluateCompletion, type StopReason } from './task-completion.js'
 import {
   buildAssignmentContent,
@@ -628,6 +629,8 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     await tail
   }
 
+  // [[ZOD091]] Typing and presence are the room aggregate of in-flight turns.
+  const typing = createTypingRegistry({ wire: client })
   const elicitations = opts.elicitations
   const elicitationRetryDelayMs = opts.elicitationRetryDelayMs ?? 500
   // Per request: the publish attempt, so 'resolved' never races the card.
@@ -677,9 +680,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       })
       // Prose the agent wrote before asking lands above the card.
       flushBuffer(req.sessionId)
-      void client
-        .setTyping({ roomId: ctx.roomId, asUserId: ctx.agent.userId, typing: false })
-        .catch(() => {})
+      void typing.pause(ctx.roomId, ctx.agent, req.sessionId)
       const publish = (sendQueue.get(req.sessionId) ?? Promise.resolve()).then(async () => {
         if (elicitations.get(record.requestId)?.state !== 'pending') return
         try {
@@ -701,7 +702,14 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       // The send queue waits for the card, never for the answer — later
       // sends and the turn's final drain must not block on a human.
       sendQueue.set(req.sessionId, publish)
-      try { return await response } finally { elicitationPublishes.delete(record.requestId) }
+      try {
+        return await response
+      } finally {
+        elicitationPublishes.delete(record.requestId)
+        // Answered, cancelled, aborted or never shown: the turn is working again
+        // (a no-op if it already ended).
+        if (elicitations.countForSession(req.sessionId) === 0) void typing.resume(ctx.roomId, ctx.agent, req.sessionId)
+      }
     }
 
     elicitations.on('resolved', (res: ElicitationResolution) => {
@@ -719,15 +727,6 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
           content: toElicitationResolvedBody({ ...res, record: current }),
           txnId: `elicit-res-${record.requestId}`,
         }).catch((err) => console.error(`[matrix] elicitation_resolved ${record.requestId} not sent:`, err))
-        // Answered mid-turn: show the agent working again right away.
-        if (
-          elicitations.countForSession(record.sessionId) === 0 &&
-          turnQueues.has(`${record.agentName}::${record.sessionKey}`)
-        ) {
-          void client
-            .setTyping({ roomId: record.roomId, asUserId: agent.userId, typing: true, timeoutMs: 30_000 })
-            .catch(() => {})
-        }
       })
     })
   }
@@ -1397,30 +1396,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       void agents.onEvent?.(agent.name, stashedCommands)
     }
 
-    const TYPING_TTL_MS = 30_000
-    const TYPING_REFRESH_MS = 25_000
-    const safeTyping = (typing: boolean) =>
-      client
-        .setTyping({
-          roomId,
-          asUserId: agent.userId,
-          typing,
-          timeoutMs: TYPING_TTL_MS,
-        })
-        .catch((err) => console.warn(`[matrix:${agent.name}] setTyping(${typing}) failed:`, err))
-    const safePresence = (presence: 'online' | 'unavailable' | 'offline') =>
-      client
-        .setPresence({ asUserId: agent.userId, presence })
-        .catch((err) =>
-          console.warn(`[matrix:${agent.name}] setPresence(${presence}) failed:`, err),
-        )
-
-    await safeTyping(true)
-    await safePresence('unavailable')
-    const refresh = setInterval(() => {
-      if (elicitations && elicitations.countForSession(sessionId) > 0) return
-      void safeTyping(true)
-    }, TYPING_REFRESH_MS)
+    await typing.enter(roomId, agent, sessionId)
 
     let turnError: unknown
     let stopReason: StopReason | undefined
@@ -1494,9 +1470,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       turnError = err
       throw err
     } finally {
-      clearInterval(refresh)
-      await safeTyping(false)
-      await safePresence('online')
+      await typing.exit(roomId, agent, sessionId)
       // Wait for every queued send (mid-turn flushes, tool/plan events, final
       // flush) to settle before announcing the turn's end — and run this even
       // when the turn above threw, so the room never hangs on a spinner.
