@@ -392,7 +392,7 @@ describe('MatrixContextProvider', () => {
     expect(page.messages.map((m) => m.id)).toEqual(['$root'])
     expect(page.has_more).toBe(false)
     expect(page.next_before).toBeUndefined()
-    expect(fetchThreadRelations).toHaveBeenCalledTimes(1) // short page: no peek
+    expect(fetchThreadRelations).toHaveBeenCalledTimes(2) // short page still peeks
   })
 
   it('getThreadHistory reports has_more=false when a full page ends exactly at the last message', async () => {
@@ -425,6 +425,23 @@ describe('MatrixContextProvider', () => {
     const page = await provider.getThreadHistory('!room:hs', '$root', { limit: 2, before: 'c0' })
     expect(page.has_more).toBe(true)
     expect(page.next_before).toBe('c1')
+  })
+
+  it('getThreadHistory reports has_more=true on a short page when the peek finds more (server-side limit clamp)', async () => {
+    const fetchThreadRelations = vi
+      .fn()
+      .mockResolvedValueOnce({ chunk: [threadReply('$r1')], next_batch: 'c1' })
+      .mockResolvedValueOnce({ chunk: [threadReply('$r2')], next_batch: 'c2' })
+    const provider = new MatrixContextProvider({
+      client: fakeClient({ fetchThreadRelations } as unknown as Partial<MatrixClient>),
+      asUserId: '@_zooid:hs',
+      agentBots: new Map(),
+    })
+    const page = await provider.getThreadHistory('!room:hs', '$root', { limit: 200, before: 'c0' })
+    expect(page.messages.map((m) => m.id)).toEqual(['$r1'])
+    expect(page.has_more).toBe(true)
+    expect(page.next_before).toBe('c1')
+    expect(fetchThreadRelations).toHaveBeenNthCalledWith(2, expect.objectContaining({ limit: 1, from: 'c1' }))
   })
 
   it('falls back to the room id when no name state is set', async () => {
