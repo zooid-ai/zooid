@@ -45,6 +45,8 @@ describe('task dispatch', () => {
       body: '@worker:hs audit',
       'm.mentions': { user_ids: ['@worker:hs'] },
     })
+    expect(content).not.toHaveProperty('formatted_body')
+    expect(content).not.toHaveProperty('format')
     expect(content['m.relates_to']).toBeUndefined()
     expect(
       renderCompletionPrompt({
