@@ -26,6 +26,8 @@ export type { AgentBinding, RouteMatch } from './router.js'
 export { BotPool } from './bot-pool.js'
 export { createMatrixTransport } from './transport.js'
 export type { CreateMatrixTransportOptions, MediaClientLike } from './transport.js'
+export { createTypingRegistry } from './typing-registry.js'
+export type { TypingRegistry, TypingWire, TypingAgent } from './typing-registry.js'
 export { SyncLoop } from './sync-loop.js'
 export type { SyncLoopOptions, SyncResponse, SyncClient } from './sync-loop.js'
 export {
