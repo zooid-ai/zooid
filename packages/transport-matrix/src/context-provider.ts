@@ -168,10 +168,25 @@ export class MatrixContextProvider implements TransportContextProvider {
       const reply = this.toMessage(ev)
       if (reply) messages.push({ ...reply, thread_id: threadId })
     }
+    // Tuwunel returns `next_batch` even when the page is exhausted, so cursor
+    // presence says nothing about whether messages remain (zooid-ai/zooid#21).
+    // A short page doesn't prove exhaustion either: homeservers clamp `limit`
+    // on their side. So whenever a cursor is present, peek one event past it.
+    let hasMore = false
+    if (next_batch !== undefined) {
+      const peek = await this.opts.client.fetchThreadRelations({
+        roomId: channelId,
+        rootEventId: threadId,
+        asUserId: this.opts.asUserId,
+        limit: 1,
+        from: next_batch,
+      })
+      hasMore = peek.chunk.length > 0
+    }
     return {
       messages,
-      next_before: next_batch,
-      has_more: next_batch !== undefined,
+      next_before: hasMore ? next_batch : undefined,
+      has_more: hasMore,
     }
   }
 
