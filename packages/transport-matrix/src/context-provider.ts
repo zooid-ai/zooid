@@ -61,6 +61,9 @@ export interface MatrixContextProviderOpts {
   rooms?: RoomBinding[]
 }
 
+/** Matches MatrixClient.fetchThreadRelations' own default page size. */
+const THREAD_PAGE_LIMIT = 100
+
 export class MatrixContextProvider implements TransportContextProvider {
   constructor(private readonly opts: MatrixContextProviderOpts) {}
 
@@ -157,21 +160,38 @@ export class MatrixContextProvider implements TransportContextProvider {
         if (rootMsg) messages.push({ ...rootMsg, thread_id: threadId })
       }
     }
+    const limit = hopts.limit ?? THREAD_PAGE_LIMIT
     const { chunk, next_batch } = await this.opts.client.fetchThreadRelations({
       roomId: channelId,
       rootEventId: threadId,
       asUserId: this.opts.asUserId,
-      limit: hopts.limit,
+      limit,
       from: hopts.before,
     })
     for (const ev of chunk as unknown as MatrixMessageEvent[]) {
       const reply = this.toMessage(ev)
       if (reply) messages.push({ ...reply, thread_id: threadId })
     }
+    // Tuwunel returns `next_batch` even when the page is exhausted, so cursor
+    // presence says nothing about whether messages remain (zooid-ai/zooid#21).
+    // The relations path is filtered to m.room.message server-side, so a short
+    // page is exhausted. A full page might end exactly at the last message;
+    // peek one event past the cursor to tell.
+    let hasMore = false
+    if (next_batch !== undefined && chunk.length >= limit) {
+      const peek = await this.opts.client.fetchThreadRelations({
+        roomId: channelId,
+        rootEventId: threadId,
+        asUserId: this.opts.asUserId,
+        limit: 1,
+        from: next_batch,
+      })
+      hasMore = peek.chunk.length > 0
+    }
     return {
       messages,
-      next_before: next_batch,
-      has_more: next_batch !== undefined,
+      next_before: hasMore ? next_batch : undefined,
+      has_more: hasMore,
     }
   }
 
