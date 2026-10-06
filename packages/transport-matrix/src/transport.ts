@@ -1480,6 +1480,30 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
         console.warn(
           `[matrix:${agent.name}] turn finished with empty buffer (session=${sessionId}); nothing sent to ${roomId}`,
         )
+        // A turn that threw is already announced by reportTurnFailure; this
+        // covers the clean end_turn that said nothing (e.g. a provider error
+        // swallowed upstream), which would otherwise look like a hung agent.
+        if (turnError === undefined) {
+          await client
+            .sendCustomEvent({
+              roomId,
+              asUserId: agent.userId,
+              eventType: 'dev.zooid.error',
+              content: toErrorBody(
+                {
+                  kind: 'error',
+                  agentId: agent.name,
+                  sessionId,
+                  turnId: null,
+                  code: 'internal',
+                  message: `${agent.name} produced no output. Check the daemon log.`,
+                  transient: false,
+                },
+                threadRoot,
+              ),
+            })
+            .catch((e) => console.warn(`[matrix:${agent.name}] dev.zooid.error send failed:`, e))
+        }
       }
       // Turn boundary for [[ZOD076]] and push notifications. Sent after the
       // send queue drains so it lands *after* the prose it announces — a

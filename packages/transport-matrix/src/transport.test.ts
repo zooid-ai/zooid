@@ -508,6 +508,64 @@ describe('dev.zooid.turn.end', () => {
     })
   })
 
+  const errorCalls = (client: { sendCustomEvent: { mock: { calls: unknown[][] } } }) =>
+    client.sendCustomEvent.mock.calls.filter(
+      (c) => (c[0] as { eventType: string }).eventType === 'dev.zooid.error',
+    )
+
+  it('posts a no-output notice before turn.end when a turn ends empty', async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+    await postTxn(transport.app, { events: [topLevelMention()] })
+    await settleTurn()
+
+    const errors = errorCalls(client)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]![0]).toMatchObject({
+      roomId: '!r:example.com',
+      asUserId: '@architect:example.com',
+      content: expect.objectContaining({
+        message: 'architect produced no output. Check the daemon log.',
+        'm.relates_to': { rel_type: 'm.thread', event_id: '$root' },
+      }),
+    })
+    const calls = client.sendCustomEvent.mock.calls
+    const order = client.sendCustomEvent.mock.invocationCallOrder
+    const turnEndIdx = calls.findIndex(
+      (c) => (c[0] as { eventType: string }).eventType === 'dev.zooid.turn.end',
+    )
+    expect(order[calls.indexOf(errors[0]!)]).toBeLessThan(order[turnEndIdx]!)
+  })
+
+  it('posts no notice for a turn that produced output', async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockImplementation(async (_name: string, p: { threadId: string }) => {
+      agents.onEvent('architect', {
+        type: 'agent_message_chunk',
+        sessionId: 'sess-' + p.threadId,
+        content: { type: 'text', text: 'hello back' },
+      })
+      return { stopReason: 'end_turn' as const }
+    })
+    await postTxn(transport.app, { events: [topLevelMention()] })
+    await settleTurn()
+
+    expect(errorCalls(client)).toHaveLength(0)
+  })
+
+  it('posts only the failure, not the no-output notice, when the turn throws', async () => {
+    const { transport, agents, client } = makeTransport()
+    agents.prompt.mockImplementation(async () => {
+      throw new Error('boom')
+    })
+    await postTxn(transport.app, { events: [topLevelMention()] })
+    await settleTurn()
+
+    const errors = errorCalls(client)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]![0]).toMatchObject({ content: expect.objectContaining({ message: 'boom' }) })
+  })
+
   it('is still sent when the turn throws, so the room never hangs on a spinner', async () => {
     const { transport, agents, client } = makeTransport()
     agents.prompt.mockImplementation(async () => {
