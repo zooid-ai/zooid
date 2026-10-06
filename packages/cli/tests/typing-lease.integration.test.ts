@@ -13,7 +13,8 @@ function dockerAvailable(): boolean {
   try { execSync('docker info', { stdio: 'ignore' }); return true } catch { return false }
 }
 
-const HOST_PORT = 18449
+// 18448 is zooid-dev.integration, 18449 is zooid-dev-cycle2.integration.
+const HOST_PORT = 18450
 const HS = `http://localhost:${HOST_PORT}`
 const AGENT = '@lease-agent:localhost'
 const WATCHER = '@lease-watcher:localhost'

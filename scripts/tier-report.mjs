@@ -13,8 +13,19 @@ export function tierViolations(report) {
   for (const file of report.testResults) {
     const notRun = file.assertionResults.filter((a) => NOT_RUN.has(a.status)).length
     if (notRun > 0) {
-      violations.push(`${file.name}: ${notRun} skipped — a tier-2 suite must run here, check its build-output guard`)
+      violations.push(`${file.name}: ${notRun} skipped — a suite in a tier script must run, check its skip guard`)
     }
   }
   return violations
+}
+
+/**
+ * Splits test-tier.mjs arguments: leading `--flags` pass through to vitest,
+ * everything from the first non-flag on is a test path. Flags that take a
+ * value must use `--flag=value`.
+ * @param {string[]} argv
+ */
+export function parseTierArgs(argv) {
+  const i = argv.findIndex((a) => !a.startsWith('-'))
+  return i === -1 ? { flags: argv, paths: [] } : { flags: argv.slice(0, i), paths: argv.slice(i) }
 }

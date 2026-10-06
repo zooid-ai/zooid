@@ -28,6 +28,7 @@
     "build": "tsup",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:infra": "node ../../scripts/test-tier.mjs --no-file-parallelism src/docker-acp.integration.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { tierViolations, type VitestJsonReport } from './tier-report.mjs'
+import { parseTierArgs, tierViolations, type VitestJsonReport } from './tier-report.mjs'
 
 const file = (name: string, statuses: string[]) => ({
   name,
@@ -41,5 +41,26 @@ describe('tierViolations', () => {
 
   it('rejects a missing report rather than trusting the exit code', () => {
     expect(tierViolations(undefined)).toEqual(['vitest wrote no JSON report'])
+  })
+})
+
+describe('parseTierArgs', () => {
+  it('treats everything as paths when there are no flags', () => {
+    expect(parseTierArgs(['src/a.test.ts', 'tests/'])).toEqual({ flags: [], paths: ['src/a.test.ts', 'tests/'] })
+  })
+
+  it('passes leading --flags through and keeps the rest as paths', () => {
+    expect(parseTierArgs(['--no-file-parallelism', '--testTimeout=60000', 'tests/x.test.ts'])).toEqual({
+      flags: ['--no-file-parallelism', '--testTimeout=60000'],
+      paths: ['tests/x.test.ts'],
+    })
+  })
+
+  it('only leading flags count, so a later --flag is a path for vitest to reject', () => {
+    expect(parseTierArgs(['a.test.ts', '--bail=1']).paths).toEqual(['a.test.ts', '--bail=1'])
+  })
+
+  it('returns no paths for flags alone, which the runner rejects', () => {
+    expect(parseTierArgs(['--no-file-parallelism'])).toEqual({ flags: ['--no-file-parallelism'], paths: [] })
   })
 })
