@@ -41,8 +41,10 @@ jobs:
       - name: Test
         run: pnpm test:ci
 
-      # Docker-free suites that talk over a Unix socket. They need only the
-      # build output above, which their skipIf(!existsSync(...)) guards check.
-      # Add further Docker-free integration suites here as they appear.
-      - name: Socket integration tests
-        run: pnpm --filter ./packages/context-mcp --filter ./packages/pi-extension exec vitest run --passWithNoTests integration
+      # Tier 2 (ZOD098): Docker-free suites that need only the build output
+      # above and a Unix socket. Each package lists its own suites by path in a
+      # test:socket script; a skipped or empty selection fails the step. To add
+      # a suite, give its package a test:socket script. The filename does not
+      # matter.
+      - name: Socket tier tests
+        run: pnpm test:socket

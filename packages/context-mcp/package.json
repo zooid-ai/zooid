@@ -31,6 +31,7 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
+    "test:socket": "node ../../scripts/test-tier.mjs src/integration.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"
   },
