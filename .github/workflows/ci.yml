@@ -5,15 +5,22 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Nightly leg for the infra tier (ZOD098 § 7): more samples of a flaky suite.
+  schedule:
+    - cron: '0 2 * * *'
   workflow_dispatch:
 
-# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR).
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR). The
+# nightly run gets its own group so it never cancels, or is cancelled by, a
+# push to main.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}${{ github.event_name == 'schedule' && '-nightly' || '' }}
   cancel-in-progress: true
 
 jobs:
   build-test:
+    # The nightly run is for the infra tier only.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,3 +55,61 @@ jobs:
       # matter.
       - name: Socket tier tests
         run: pnpm test:socket
+
+  # Tier 3 (ZOD098 § 7): suites that need Docker and Tuwunel. Each package
+  # lists its suites by path in a test:infra script; a skip fails the job.
+  # Non-blocking until it records 20 consecutive clean runs (no failure, no
+  # flake, no skip, no suite added), then it becomes a required check. A
+  # failure may be a finding (typing-lease → zooid-ai/zooid#36), not a test to
+  # relax.
+  test-infra:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Before anything else: without a daemon every suite would only skip.
+      - name: Docker preflight
+        run: |
+          docker info > /dev/null || {
+            echo "::error title=No Docker::the infra tier needs a working Docker daemon"
+            exit 1
+          }
+
+      # Image pulls would otherwise eat the suites' 60s health-check budgets.
+      - name: Pre-pull images
+        run: |
+          docker pull ghcr.io/matrix-construct/tuwunel:latest
+          docker pull alpine:3
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      # One retry, in the step. A pass on the retry is a flake: it's annotated
+      # and doesn't count toward the 20 clean runs.
+      - name: Infra tier tests
+        run: |
+          if pnpm test:infra; then
+            echo "### Infra tier: clean" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "::warning title=Infra tier retry::first attempt failed; retrying once"
+          docker ps -aq | xargs -r docker rm -f
+          if pnpm test:infra; then
+            echo "::warning title=Infra tier flake::failed, then passed on retry. Not a clean run."
+            echo "### Infra tier: FLAKE (failed, then passed on retry)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "### Infra tier: FAILED on both attempts" >> "$GITHUB_STEP_SUMMARY"
+          exit 1

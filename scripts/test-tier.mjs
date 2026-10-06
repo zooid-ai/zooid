@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-// Usage (from a package): node ../../scripts/test-tier.mjs <path> [<path>…]
-// Runs the package's tier-2 suites by path and fails if any were skipped or
-// none were selected. See ZOD098.
+// Usage (from a package): node ../../scripts/test-tier.mjs [--vitest-flag…] <path> [<path>…]
+// Runs a package's tier suites by path and fails if any were skipped or
+// none were selected. Leading --flags go to vitest. See ZOD098.
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { tierViolations } from './tier-report.mjs'
+import { parseTierArgs, tierViolations } from './tier-report.mjs'
 
-const paths = process.argv.slice(2)
+const { flags, paths } = parseTierArgs(process.argv.slice(2))
 if (paths.length === 0) {
-  console.error('test-tier: pass the tier-2 test paths to run')
+  console.error('test-tier: pass the tier test paths to run')
   process.exit(2)
 }
 
@@ -20,7 +20,7 @@ let code = 1
 try {
   const run = spawnSync(
     'vitest',
-    ['run', '--reporter=default', '--reporter=json', `--outputFile.json=${out}`, ...paths],
+    ['run', '--reporter=default', '--reporter=json', `--outputFile.json=${out}`, ...flags, ...paths],
     { stdio: 'inherit' },
   )
   if (run.error) throw run.error

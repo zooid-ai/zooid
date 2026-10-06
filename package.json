@@ -14,6 +14,7 @@
     "test": "pnpm -r test",
     "test:ci": "pnpm -r exec vitest run --exclude '**/*integration*.test.ts' --exclude '**/integration/**' --passWithNoTests",
     "test:socket": "vitest run --dir scripts && pnpm -r --if-present test:socket",
+    "test:infra": "pnpm -r --workspace-concurrency=1 --no-bail --if-present test:infra",
     "typecheck": "pnpm -r typecheck",
     "clean": "pnpm -r exec rm -rf dist",
     "agent-images:check": "pnpm -C packages/runtime-docker exec tsx src/image-versions-cli.ts",
