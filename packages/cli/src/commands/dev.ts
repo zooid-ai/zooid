@@ -147,13 +147,14 @@ export async function runDev(flags: DevFlags): Promise<DevHandle> {
       },
       {
         title: `Start Tuwunel container (${flags.engine})`,
-        task: () => {
+        task: async () => {
           ctx.svc = new TuwunelService({
             name: 'zooid-tuwunel',
             hostPort: port,
             paths,
             engine: flags.engine,
           })
+          await ctx.svc.prepare()
           const child = ctx.svc.start()
           ctx.tuwunelCaptureDone = captureChildToFile(child, logPaths.tuwunelLog)
         },
