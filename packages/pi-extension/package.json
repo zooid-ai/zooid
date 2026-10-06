@@ -21,6 +21,7 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
+    "test:socket": "node ../../scripts/test-tier.mjs tests/",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
