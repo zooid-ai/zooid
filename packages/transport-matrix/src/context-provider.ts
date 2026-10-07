@@ -69,12 +69,13 @@ export class MatrixContextProvider implements TransportContextProvider {
     // burn the page budget on reactions, `dev.zooid.*` custom events, typing
     // notifications, etc., and routinely return empty pages with a stale
     // `has_more` cursor.
+    const filter = { types: ['m.room.message'] }
     const { chunk, end } = await this.opts.client.fetchRoomMessages({
       roomId: channelId,
       asUserId: this.opts.asUserId,
       limit: hopts.limit,
       from: hopts.before,
-      filter: { types: ['m.room.message'] },
+      filter,
     })
     const messages: Message[] = []
     for (let i = chunk.length - 1; i >= 0; i--) {
@@ -82,10 +83,11 @@ export class MatrixContextProvider implements TransportContextProvider {
       const msg = this.toMessage(ev)
       if (msg) messages.push(msg)
     }
+    const hasMore = await this.hasMessagesPast(channelId, end, filter)
     return {
       messages,
-      next_before: end,
-      has_more: end !== undefined,
+      next_before: hasMore ? end : undefined,
+      has_more: hasMore,
     }
   }
 
@@ -96,12 +98,13 @@ export class MatrixContextProvider implements TransportContextProvider {
     // Server-side filter: `m.room.message` only, and exclude thread replies
     // (`not_rel_types: ['m.thread']`) so the overview shows top-level entries
     // and thread roots, not the reply noise underneath them.
+    const filter = { types: ['m.room.message'], not_rel_types: ['m.thread'] }
     const { chunk, end } = await this.opts.client.fetchRoomMessages({
       roomId: channelId,
       asUserId: this.opts.asUserId,
       limit: hopts.limit,
       from: hopts.before,
-      filter: { types: ['m.room.message'], not_rel_types: ['m.thread'] },
+      filter,
     })
     // /messages returns newest-first; keep that order for the overview.
     const threads: ThreadOverview[] = []
@@ -132,11 +135,36 @@ export class MatrixContextProvider implements TransportContextProvider {
         last_activity_at: new Date(latestTs).toISOString(),
       })
     }
+    const hasMore = await this.hasMessagesPast(channelId, end, filter)
     return {
       threads,
-      next_before: end,
-      has_more: end !== undefined,
+      next_before: hasMore ? end : undefined,
+      has_more: hasMore,
     }
+  }
+
+  /**
+   * Whether `/messages` has anything older than the cursor `end`. Cursor
+   * presence says nothing: Tuwunel returns a cursor even on an exhausted
+   * page (zooid-ai/zooid#21, #111), and a short page proves nothing either
+   * because the filter can thin a page while older events remain and the
+   * homeserver may clamp `limit`. So peek one event past the cursor with the
+   * same filter.
+   */
+  private async hasMessagesPast(
+    channelId: string,
+    end: string | undefined,
+    filter: { types?: string[]; not_rel_types?: string[] },
+  ): Promise<boolean> {
+    if (end === undefined) return false
+    const peek = await this.opts.client.fetchRoomMessages({
+      roomId: channelId,
+      asUserId: this.opts.asUserId,
+      limit: 1,
+      from: end,
+      filter,
+    })
+    return peek.chunk.length > 0
   }
 
   async getThreadHistory(

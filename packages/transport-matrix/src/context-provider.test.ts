@@ -27,10 +27,20 @@ function threadReply(id: string) {
   }
 }
 
+function roomMsg(id: string) {
+  return {
+    event_id: id,
+    sender: '@alice:hs',
+    origin_server_ts: 1000,
+    type: 'm.room.message',
+    content: { msgtype: 'm.text', body: id },
+  }
+}
+
 describe('MatrixContextProvider', () => {
   it('maps Matrix m.room.message events into Message[] oldest-first', async () => {
     const client = fakeClient({
-      fetchRoomMessages: vi.fn().mockResolvedValue({
+      fetchRoomMessages: vi.fn().mockResolvedValueOnce({
         chunk: [
           {
             event_id: '$e2',
@@ -48,7 +58,9 @@ describe('MatrixContextProvider', () => {
           },
         ],
         end: 'matrix-pagination-token',
-      }),
+      })
+        // peek past the cursor: an older message remains
+        .mockResolvedValueOnce({ chunk: [{ event_id: '$e0', sender: '@alice:hs', origin_server_ts: 500, type: 'm.room.message', content: { msgtype: 'm.text', body: 'zeroth' } }], end: 'peek-end' }),
     } as unknown as Partial<MatrixClient>)
     const provider = new MatrixContextProvider({
       client,
@@ -146,6 +158,94 @@ describe('MatrixContextProvider', () => {
       from: 'cursor-1',
       filter: { types: ['m.room.message'] },
     })
+  })
+
+  it('getRoomHistory reports has_more=false and no cursor when the server returns a cursor but nothing older remains', async () => {
+    const fetchRoomMessages = vi
+      .fn()
+      .mockResolvedValueOnce({ chunk: [roomMsg('$e1')], end: 't1' })
+      .mockResolvedValueOnce({ chunk: [], end: 't2' })
+    const provider = new MatrixContextProvider({
+      client: fakeClient({ fetchRoomMessages } as unknown as Partial<MatrixClient>),
+      asUserId: '@_zooid:hs',
+      agentBots: new Map(),
+    })
+    const page = await provider.getRoomHistory('!room:hs', { limit: 50 })
+    expect(page.messages.map((m) => m.id)).toEqual(['$e1'])
+    expect(page.has_more).toBe(false)
+    expect(page.next_before).toBeUndefined()
+    expect(fetchRoomMessages).toHaveBeenLastCalledWith({
+      roomId: '!room:hs',
+      asUserId: '@_zooid:hs',
+      limit: 1,
+      from: 't1',
+      filter: { types: ['m.room.message'] },
+    })
+  })
+
+  it('getRoomHistory reports has_more=true on a short page when the peek finds older messages (filter thinning / limit clamp)', async () => {
+    const fetchRoomMessages = vi
+      .fn()
+      .mockResolvedValueOnce({ chunk: [roomMsg('$e2')], end: 't1' })
+      .mockResolvedValueOnce({ chunk: [roomMsg('$e1')], end: 't2' })
+    const provider = new MatrixContextProvider({
+      client: fakeClient({ fetchRoomMessages } as unknown as Partial<MatrixClient>),
+      asUserId: '@_zooid:hs',
+      agentBots: new Map(),
+    })
+    const page = await provider.getRoomHistory('!room:hs', { limit: 50 })
+    expect(page.has_more).toBe(true)
+    expect(page.next_before).toBe('t1')
+  })
+
+  it('getRoomHistory makes no peek request when the server returns no cursor', async () => {
+    const fetchRoomMessages = vi.fn().mockResolvedValue({ chunk: [roomMsg('$e1')] })
+    const provider = new MatrixContextProvider({
+      client: fakeClient({ fetchRoomMessages } as unknown as Partial<MatrixClient>),
+      asUserId: '@_zooid:hs',
+      agentBots: new Map(),
+    })
+    const page = await provider.getRoomHistory('!room:hs', {})
+    expect(page.has_more).toBe(false)
+    expect(fetchRoomMessages).toHaveBeenCalledTimes(1)
+  })
+
+  it('getRecentThreads reports has_more=false and no cursor when the server returns a cursor but nothing older remains', async () => {
+    const fetchRoomMessages = vi
+      .fn()
+      .mockResolvedValueOnce({ chunk: [roomMsg('$top')], end: 't1' })
+      .mockResolvedValueOnce({ chunk: [], end: 't2' })
+    const provider = new MatrixContextProvider({
+      client: fakeClient({ fetchRoomMessages } as unknown as Partial<MatrixClient>),
+      asUserId: '@_zooid:hs',
+      agentBots: new Map(),
+    })
+    const page = await provider.getRecentThreads('!room:hs', { limit: 50 })
+    expect(page.threads.map((t) => t.id)).toEqual(['$top'])
+    expect(page.has_more).toBe(false)
+    expect(page.next_before).toBeUndefined()
+    expect(fetchRoomMessages).toHaveBeenLastCalledWith({
+      roomId: '!room:hs',
+      asUserId: '@_zooid:hs',
+      limit: 1,
+      from: 't1',
+      filter: { types: ['m.room.message'], not_rel_types: ['m.thread'] },
+    })
+  })
+
+  it('getRecentThreads reports has_more=true on a short page when the peek finds older entries', async () => {
+    const fetchRoomMessages = vi
+      .fn()
+      .mockResolvedValueOnce({ chunk: [roomMsg('$top2')], end: 't1' })
+      .mockResolvedValueOnce({ chunk: [roomMsg('$top1')], end: 't2' })
+    const provider = new MatrixContextProvider({
+      client: fakeClient({ fetchRoomMessages } as unknown as Partial<MatrixClient>),
+      asUserId: '@_zooid:hs',
+      agentBots: new Map(),
+    })
+    const page = await provider.getRecentThreads('!room:hs', { limit: 50 })
+    expect(page.has_more).toBe(true)
+    expect(page.next_before).toBe('t1')
   })
 
   it('getChannelMembers returns joined members with is_agent flags', async () => {
