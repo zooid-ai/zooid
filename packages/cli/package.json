@@ -25,7 +25,7 @@
     "access": "public"
   },
   "zooid": {
-    "webVersion": "0.14.0"
+    "webVersion": "0.15.0"
   },
   "engines": {
     "node": ">=22"
