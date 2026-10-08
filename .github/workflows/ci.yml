@@ -58,13 +58,11 @@ jobs:
 
   # Tier 3 (ZOD098 § 7): suites that need Docker and Tuwunel. Each package
   # lists its suites by path in a test:infra script; a skip fails the job.
-  # Non-blocking until it records 20 consecutive clean runs (no failure, no
-  # flake, no skip, no suite added), then it becomes a required check. A
+  # A required check with a single attempt: no retry, no continue-on-error. A
   # failure may be a finding (typing-lease → zooid-ai/zooid#36), not a test to
   # relax.
   test-infra:
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -96,20 +94,5 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # One retry, in the step. A pass on the retry is a flake: it's annotated
-      # and doesn't count toward the 20 clean runs.
       - name: Infra tier tests
-        run: |
-          if pnpm test:infra; then
-            echo "### Infra tier: clean" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "::warning title=Infra tier retry::first attempt failed; retrying once"
-          docker ps -aq | xargs -r docker rm -f
-          if pnpm test:infra; then
-            echo "::warning title=Infra tier flake::failed, then passed on retry. Not a clean run."
-            echo "### Infra tier: FLAKE (failed, then passed on retry)" >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "### Infra tier: FAILED on both attempts" >> "$GITHUB_STEP_SUMMARY"
-          exit 1
+        run: pnpm test:infra
