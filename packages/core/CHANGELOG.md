@@ -1,5 +1,11 @@
 # @zooid/core
 
+## 0.17.1
+
+### Patch Changes
+
+- @zooid/acp-client@0.17.1
+
 ## 0.17.0
 
 ### Minor Changes

@@ -1,5 +1,24 @@
 # zooid
 
+## 0.17.1
+
+### Patch Changes
+
+- fa46595: Warn at daemon startup when configured hooks are ignored, post assignment messages as plain Matrix user IDs, and update the pinned agent CLI versions in container images.
+- d7f8329: `zooid dev` now fails immediately, with docker's stderr and exit code, when `docker run` for Tuwunel exits early, and removes a stale non-running `zooid-tuwunel` container left by an interrupted run (zooid#19). A running one is left alone with a clear error.
+- fa46595: Pin the bundled web client to @zooid/web 0.15.0, adding thread history gap markers and controls to load missing messages, with corrected pagination from the oldest room and thread timelines.
+- Updated dependencies [fa46595]
+- Updated dependencies [f60e546]
+- Updated dependencies [e112e88]
+- Updated dependencies [a594930]
+  - @zooid/transport-matrix@0.17.1
+  - @zooid/core@0.17.1
+  - @zooid/acp-client@0.17.1
+  - @zooid/context-mcp@0.17.1
+  - @zooid/runtime-docker@0.17.1
+  - @zooid/runtime-local@0.17.1
+  - @zooid/transport-http@0.17.1
+
 ## 0.17.0
 
 ### Minor Changes

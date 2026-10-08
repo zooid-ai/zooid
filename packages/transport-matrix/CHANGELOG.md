@@ -1,5 +1,16 @@
 # @zooid/transport-matrix
 
+## 0.17.1
+
+### Patch Changes
+
+- fa46595: Warn at daemon startup when configured hooks are ignored, post assignment messages as plain Matrix user IDs, and update the pinned agent CLI versions in container images.
+- f60e546: `zooid_get_history` and `zooid_get_recent_threads` no longer report `has_more: true` forever at the start of a room's history: `has_more` and `next_before` now come from peeking one event past the `/messages` cursor instead of from cursor presence (zooid#111).
+- e112e88: `zooid_get_thread_history` no longer reports `has_more: true` on an exhausted thread: Tuwunel echoes `next_batch` on every page, so `has_more` and `next_before` now come from whether messages actually remain (zooid#21).
+- a594930: Typing and presence are now the room aggregate of an agent's in-flight turns: one turn ending no longer clears another's indicator, a turn waiting on a human shows as not typing, and no refresh can outlive its turn (ZOD091, zooid#36).
+  - @zooid/core@0.17.1
+  - @zooid/acp-client@0.17.1
+
 ## 0.17.0
 
 ### Minor Changes
