@@ -47,6 +47,7 @@
     "@zooid/pi-extension": "workspace:^",
     "@zooid/runtime-docker": "workspace:^",
     "@zooid/runtime-local": "workspace:^",
+    "@zooid/runtime-vm": "workspace:^",
     "@zooid/transport-http": "workspace:^",
     "@zooid/transport-matrix": "workspace:^",
     "cac": "^6.7.14",

@@ -7,11 +7,13 @@ import { serve, type ServerType } from '@hono/node-server'
 import {
   ApprovalCorrelator,
   ElicitationCorrelator,
+  containerEngineOf,
   findConfigFile,
   findHttpTransport,
   findMatrixTransport,
   loadZooidConfig,
   mergeCliFlags,
+  resolveAgentRuntime,
   type CliFlags,
   type TapEvent,
   type SessionLifecycleEvent,
@@ -29,7 +31,13 @@ import {
   type SyncLoop,
 } from '@zooid/transport-matrix'
 import { SpawnRegistry, startAgentSocketServers, type AgentSocketsHandle } from '@zooid/context-mcp'
-import { buildAcpRegistry, contextEligibleAgents } from '../build-registry.js'
+import {
+  buildAcpRegistry,
+  containerAgentNames,
+  contextEligibleAgents,
+  contextUnavailableAgents,
+} from '../build-registry.js'
+import { provisionVms, type VmsHandle } from '../provision-vms.js'
 import { installPiExtension, resolvePiAgentDir } from '../pi-extension-install.js'
 import { resolvePiExtensionBundle } from '@zooid/pi-extension'
 import { prepullImages } from '../prepull-images.js'
@@ -183,19 +191,40 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
     }
   }
 
-  if (config.runtime !== 'local') {
-    await prepullImages(registry, {
-      engine: config.runtime === 'podman' ? 'podman' : 'docker',
-      runtime: config.runtime,
-      skip: opts.noPrepull ?? process.env.ZOOID_NO_PREPULL === '1',
-      refresh: opts.refreshImages ?? process.env.ZOOID_REFRESH_IMAGES === '1',
-      log: opts.prepullLog,
-    })
+  // Only container agents' images go through the engine; vm images are pulled by smolvm. [ZOD109]
+  const engine = containerEngineOf(config)
+  if (engine) {
+    const containerAgents = containerAgentNames(config)
+    await prepullImages(
+      {
+        agentNames: () => containerAgents,
+        resolveSpawnImage: (n) => registry.resolveSpawnImage(n),
+      },
+      {
+        engine,
+        runtime: engine,
+        skip: opts.noPrepull ?? process.env.ZOOID_NO_PREPULL === '1',
+        refresh: opts.refreshImages ?? process.env.ZOOID_REFRESH_IMAGES === '1',
+        log: opts.prepullLog,
+      },
+    )
   }
+  const vms: VmsHandle = await provisionVms({
+    cfg: config,
+    configDir,
+    agentsDir: opts.agentsDir,
+    log: opts.prepullLog,
+  })
 
   console.log(`[context] runDir=${runDir}`)
+  const noContext = new Set(contextUnavailableAgents(config))
   for (const name of agentNames) {
-    console.log(`[context] agent=${name} socket=${contextSockets.paths[name] ?? '(disabled)'}`)
+    const socket =
+      contextSockets.paths[name] ??
+      (noContext.has(name)
+        ? '(unavailable: runtime vm has no host socket, so this agent has no zooid_* context tools; see ZOD109)'
+        : '(disabled)')
+    console.log(`[context] agent=${name} socket=${socket}`)
   }
 
   let server: ServerType | null = null
@@ -228,7 +257,6 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       homeserver: matrix.transport.homeserver,
       asToken: matrix.transport.as_token,
     })
-    const isContainerRuntime = config.runtime !== 'local'
     const bindings: AgentBinding[] = []
     for (const a of Object.values(config.agents)) {
       if (a.matrix?.transport !== matrix.name) continue
@@ -242,7 +270,9 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       // Resolve workspace dirs for media attachment routing.
       const workspaceDir = isAbsolute(a.workdir) ? a.workdir : resolve(configDir, a.workdir)
       binding.workspaceDir = workspaceDir
-      binding.agentWorkspacePath = isContainerRuntime ? '/workspace' : workspaceDir
+      // Containers and vm guests both see the workdir at /workspace.
+      binding.agentWorkspacePath =
+        resolveAgentRuntime(a, config) === 'local' ? workspaceDir : '/workspace'
       bindings.push(binding)
     }
     // user_namespace is a regex like `@.*:localhost`; the part after the last
@@ -481,6 +511,11 @@ export async function startDaemon(opts: StartDaemonOpts = {}): Promise<DaemonHan
       await registry.stopAll()
     } catch (err) {
       console.error('stopAll:', err)
+    }
+    try {
+      await vms.stop()
+    } catch (err) {
+      console.error('vm stop:', err)
     }
     try {
       await contextSockets.close()

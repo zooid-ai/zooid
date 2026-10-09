@@ -4,6 +4,7 @@ import { parse } from 'yaml'
 import type { AcpAgentSpec } from './acp-types.js'
 import { isPreset } from '@zooid/acp-client'
 import { interpolateEnv, interpolateString } from './env-interpolation.js'
+import { isContainerRuntime, resolveAgentRuntime } from './runtime-resolve.js'
 import { compileMatch } from './match-expression.js'
 import type {
   AgentConfig,
@@ -15,9 +16,11 @@ import type {
   MatrixTransportConfig,
   MountConfig,
   RoomBinding,
+  RuntimeKind,
   TransportConfig,
   TriggerConfig,
   TriggerMessage,
+  VmConfig,
   WebhookTriggerConfig,
   ZooidConfig,
   ZooidContainerConfig,
@@ -331,6 +334,51 @@ function parseDisableMounts(agentName: string, raw: unknown): string[] {
       )
     }
     out.push(v)
+  }
+  return out
+}
+
+const VM_FIELDS = ['image', 'cpus', 'memory', 'disk'] as const
+
+/** `8GiB` / `512MiB` → MiB. Binary units only, so there is one way to write a size. */
+function parseSizeMib(raw: unknown, field: string): number {
+  const m = typeof raw === 'string' ? /^(\d+)\s*(MiB|GiB)$/.exec(raw.trim()) : null
+  if (!m) throw new Error(`${field} must be a size like "8GiB" or "512MiB" (got ${JSON.stringify(raw)})`)
+  const n = Number(m[1])
+  if (n <= 0) throw new Error(`${field} must be greater than zero`)
+  return m[2] === 'GiB' ? n * 1024 : n
+}
+
+function parseVmBlock(name: string, raw: unknown): VmConfig {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(`agents.${name}.vm must be a mapping`)
+  }
+  const v = raw as Record<string, unknown>
+  for (const k of Object.keys(v)) {
+    if (!(VM_FIELDS as readonly string[]).includes(k)) {
+      throw new Error(
+        `agents.${name}.vm.${k} is not a recognised field (${VM_FIELDS.join(', ')}). See [ZOD109].`,
+      )
+    }
+  }
+  const out: VmConfig = {}
+  if (v.image !== undefined) {
+    if (typeof v.image !== 'string' || v.image.length === 0) {
+      throw new Error(`agents.${name}.vm.image must be a non-empty string`)
+    }
+    out.image = v.image
+  }
+  if (v.cpus !== undefined) {
+    if (typeof v.cpus !== 'number' || !Number.isInteger(v.cpus) || v.cpus < 1) {
+      throw new Error(`agents.${name}.vm.cpus must be a positive integer`)
+    }
+    out.cpus = v.cpus
+  }
+  if (v.memory !== undefined) out.memory_mib = parseSizeMib(v.memory, `agents.${name}.vm.memory`)
+  if (v.disk !== undefined) {
+    const mib = parseSizeMib(v.disk, `agents.${name}.vm.disk`)
+    if (mib % 1024 !== 0) throw new Error(`agents.${name}.vm.disk must be a whole number of GiB`)
+    out.disk_gib = mib / 1024
   }
   return out
 }
@@ -695,7 +743,7 @@ function parseTransportBinding(
 
 function parseAgents(
   raw: unknown,
-  runtime: 'local' | 'docker' | 'podman',
+  runtime: RuntimeKind,
   transports: Record<string, TransportConfig>,
   daemonHooks: { pre_turn?: string; post_turn?: string },
   processEnv: NodeJS.ProcessEnv,
@@ -782,9 +830,22 @@ function parseAgents(
       }
     }
 
+    const agentRuntime =
+      entry.runtime === undefined
+        ? undefined
+        : parseRuntimeValue(entry.runtime, `agents.${name}.runtime`)
+    const resolvedRuntime = agentRuntime ?? runtime
+
+    if (entry.container !== undefined && entry.container !== null && resolvedRuntime === 'vm') {
+      throw new Error(
+        `agents.${name}.container is not valid when runtime is 'vm'. A vm agent has no container ` +
+          `and no host mount besides its read-only workdir; set its image under agents.${name}.vm. See [ZOD109].`,
+      )
+    }
+
     let containerBlock: ContainerConfig | undefined
     if (entry.container !== undefined && entry.container !== null) {
-      if (runtime === 'local') {
+      if (resolvedRuntime === 'local') {
         // Under runtime: local, the parser only accepts mounts/disable_mounts
         // (which the compose layer ignores). image/env stay rejected because
         // they would silently lie: there's no container and the host inherits
@@ -807,6 +868,16 @@ function parseAgents(
       containerBlock = parseAgentContainer(name, entry.container, processEnv, configDir)
     }
 
+    let vmBlock: VmConfig | undefined
+    if (entry.vm !== undefined && entry.vm !== null) {
+      if (resolvedRuntime !== 'vm') {
+        throw new Error(
+          `agents.${name}.vm is only valid when the agent's runtime is 'vm' (resolved: '${resolvedRuntime}'). See [ZOD109].`,
+        )
+      }
+      vmBlock = parseVmBlock(name, entry.vm)
+    }
+
     const binding = parseTransportBinding(name, entry, transports)
 
     const agentCfg: AgentConfig = {
@@ -817,6 +888,8 @@ function parseAgents(
       approval_timeout_ms,
       session_idle_timeout_ms,
     }
+    if (agentRuntime) agentCfg.runtime = agentRuntime
+    if (vmBlock) agentCfg.vm = vmBlock
     if (containerBlock) agentCfg.container = containerBlock
     if (binding.matrix) agentCfg.matrix = binding.matrix
     if (binding.http) agentCfg.http = binding.http
@@ -1189,12 +1262,17 @@ function parseWebhookTrigger(
   return config
 }
 
-function parseRuntime(raw: unknown): 'local' | 'docker' | 'podman' {
-  const runtime = raw ?? 'docker'
-  if (runtime !== 'local' && runtime !== 'docker' && runtime !== 'podman') {
-    throw new Error(`runtime must be "local", "docker", or "podman" (got "${runtime}")`)
+const RUNTIME_KINDS: readonly RuntimeKind[] = ['local', 'docker', 'podman', 'vm']
+
+function parseRuntimeValue(raw: unknown, field: string): RuntimeKind {
+  if (typeof raw !== 'string' || !(RUNTIME_KINDS as readonly string[]).includes(raw)) {
+    throw new Error(`${field} must be "local", "docker", "podman", or "vm" (got "${String(raw)}")`)
   }
-  return runtime
+  return raw as RuntimeKind
+}
+
+function parseRuntime(raw: unknown): RuntimeKind {
+  return parseRuntimeValue(raw ?? 'docker', 'runtime')
 }
 
 function zooidHooks(raw: Record<string, unknown>): { pre_turn?: string; post_turn?: string } {
@@ -1268,6 +1346,17 @@ export function loadZooidConfig(
     opts.configDir,
   )
 
+  const engines = new Set(
+    Object.values(agents)
+      .map((a) => resolveAgentRuntime(a, { runtime }))
+      .filter(isContainerRuntime),
+  )
+  if (engines.size > 1) {
+    throw new Error(
+      "agents resolve to both 'docker' and 'podman'; a workforce runs one container engine. See [ZOD109].",
+    )
+  }
+
   const cfg: ZooidConfig = {
     runtime,
     transports,
@@ -1277,10 +1366,10 @@ export function loadZooidConfig(
   }
   if (workstation !== undefined) cfg.workstation = workstation
   if (r.container !== undefined && r.container !== null) {
-    if (runtime === 'local') {
+    if (engines.size === 0) {
       throw new Error(
         "container is only valid when runtime is 'docker' or 'podman'. " +
-          'runtime: local does not run agents in containers; image is ignored. See [ZOD043].',
+          'No agent in this workforce runs in a container, so image would be ignored. See [ZOD043], [ZOD109].',
       )
     }
     cfg.container = parseZooidContainer(r.container)
@@ -1348,16 +1437,9 @@ export function findConfigFile(cwd: string): FoundConfigFile | null {
 }
 
 export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
-  const runtimeFlag = flags.runtime as 'local' | 'docker' | 'podman' | undefined
-  if (
-    runtimeFlag !== undefined &&
-    runtimeFlag !== 'local' &&
-    runtimeFlag !== 'docker' &&
-    runtimeFlag !== 'podman'
-  ) {
-    throw new Error(`runtime must be "local", "docker", or "podman" (got "${flags.runtime}")`)
-  }
-  const runtime = runtimeFlag ?? base.runtime
+  // Agents keep their explicit runtime, so the flag moves only the inheritors. [ZOD109]
+  const runtime =
+    flags.runtime === undefined ? base.runtime : parseRuntimeValue(flags.runtime, 'runtime')
   const merged: ZooidConfig = {
     runtime,
     transports: base.transports,
@@ -1365,7 +1447,10 @@ export function mergeCliFlags(base: ZooidConfig, flags: CliFlags): ZooidConfig {
     hooks: { ...base.hooks },
     triggers: base.triggers,
   }
-  if (runtime === 'docker' || runtime === 'podman') {
+  const anyContainer = Object.values(base.agents).some((a) =>
+    isContainerRuntime(resolveAgentRuntime(a, { runtime })),
+  )
+  if (anyContainer) {
     const image = flags.image ?? base.container?.image
     if (image !== undefined) {
       merged.container = { image }
