@@ -10,6 +10,7 @@
       "@zooid/context-mcp",
       "@zooid/runtime-docker",
       "@zooid/runtime-local",
+      "@zooid/runtime-vm",
       "@zooid/transport-http",
       "@zooid/transport-matrix"
     ]

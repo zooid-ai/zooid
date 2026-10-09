@@ -2,14 +2,18 @@ import type { ElicitationCorrelator } from '@zooid/core'
 import { isAbsolute, resolve as pathResolve } from 'node:path'
 import { LocalAcpRuntime } from '@zooid/runtime-local'
 import { DockerAcpRuntime } from '@zooid/runtime-docker'
+import { VM_GUEST_WORKDIR, VmAcpRuntime, vmMachineName } from '@zooid/runtime-vm'
 import {
   AcpAgentRegistry,
+  isContainerRuntime,
+  resolveAgentRuntime,
   type AcpMount,
   type AcpRuntime,
   type AgentConfig,
   type ApprovalCorrelator,
   type ContextSpawnFactory,
   type MountConfig,
+  type RuntimeKind,
   type TapEvent,
   type SessionLifecycleEvent,
   type ZooidConfig,
@@ -74,7 +78,7 @@ export interface BuildAcpRegistryOptions {
 
 type ImageProvenance = 'agent' | 'workforce' | `preset:${PresetName}` | 'unresolved'
 
-interface ResolvedImage {
+export interface ResolvedImage {
   image: string | undefined
   source: ImageProvenance
 }
@@ -87,9 +91,18 @@ function presetOf(agent: AgentConfig): PresetName | undefined {
   return undefined
 }
 
-function resolveAgentImage(agent: AgentConfig, cfg: ZooidConfig): ResolvedImage {
-  if (agent.container?.image) return { image: agent.container.image, source: 'agent' }
-  if (cfg.container?.image) return { image: cfg.container.image, source: 'workforce' }
+/**
+ * Container agents: agent.container.image > workforce container.image > preset.
+ * vm agents: agent.vm.image > preset — never the workforce container image,
+ * which belongs to the container engine. [ZOD109]
+ */
+export function resolveAgentImage(agent: AgentConfig, cfg: ZooidConfig): ResolvedImage {
+  if (resolveAgentRuntime(agent, cfg) === 'vm') {
+    if (agent.vm?.image) return { image: agent.vm.image, source: 'agent' }
+  } else {
+    if (agent.container?.image) return { image: agent.container.image, source: 'agent' }
+    if (cfg.container?.image) return { image: cfg.container.image, source: 'workforce' }
+  }
   const preset = presetOf(agent)
   const presetImage = preset ? PRESETS[preset]?.image : undefined
   if (presetImage && preset) return { image: presetImage, source: `preset:${preset}` }
@@ -108,9 +121,10 @@ function composeAgentMounts(
   cfg: ZooidConfig,
   opts: BuildAcpRegistryOptions,
 ): ComposedMounts {
-  if (cfg.runtime === 'local') {
-    return { mounts: [], mkdirs: [], cwd: agent.workdir }
-  }
+  const kind = resolveAgentRuntime(agent, cfg)
+  if (kind === 'local') return { mounts: [], mkdirs: [], cwd: agent.workdir }
+  // vm: the workdir mount is made once, at machine create (provision-vms).
+  if (kind === 'vm') return { mounts: [], mkdirs: [], cwd: VM_GUEST_WORKDIR }
 
   const disabled = new Set(agent.container?.disable_mounts ?? [])
   const knownIds = new Set<string>(['workspace'])
@@ -199,17 +213,19 @@ function composeAgentMounts(
 }
 
 /**
- * Build an `AcpAgentRegistry` from a parsed workforce config.
+ * Build an `AcpAgentRegistry` from a parsed workforce config. Each agent's
+ * runtime resolves on its own (agent > workforce > docker), so one fleet can
+ * mix them [ZOD109]:
  *
- *   - `runtime: local`   → `LocalAcpRuntime`
- *   - `runtime: docker`  → `DockerAcpRuntime` (engine: docker)
- *   - `runtime: podman`  → `DockerAcpRuntime` (engine: podman)
+ *   - `local`   → `LocalAcpRuntime`
+ *   - `docker`  → `DockerAcpRuntime` (engine: docker)
+ *   - `podman`  → `DockerAcpRuntime` (engine: podman)
+ *   - `vm`      → `VmAcpRuntime`, one per agent (its own machine)
  *
  * Compose layers (docker/podman only): workspace auto-mount → preset-declared
  * canonical-id mounts (filtered by `container.disable_mounts`) → user mounts.
- * Image resolution: agent.container.image > workforce container.image >
- * preset.image. Under `runtime: docker | podman`, throws at startup if any
- * agent has no resolvable image.
+ * Image resolution: see `resolveAgentImage`. Throws at startup if any
+ * non-local agent has no resolvable image.
  */
 export function buildAcpRegistry(
   cfg: ZooidConfig,
@@ -221,30 +237,37 @@ export function buildAcpRegistry(
     }
   }
 
-  // Startup validation: every docker/podman agent must resolve to an image.
-  if (cfg.runtime !== 'local') {
-    const missing: Array<{ name: string; preset?: string }> = []
-    for (const [name, agent] of Object.entries(cfg.agents)) {
-      const { image } = resolveAgentImage(agent, cfg)
-      if (!image) {
-        missing.push({ name, preset: presetOf(agent) })
-      }
-    }
-    if (missing.length > 0) {
-      const lines = missing.map(
-        ({ name, preset }) =>
-          `  - ${name}${preset ? ` (preset: ${preset})` : ''} — no preset-default image`,
-      )
+  // Startup validation: every non-local agent must resolve to an image.
+  const missing = new Map<RuntimeKind, Array<{ name: string; preset?: string }>>()
+  for (const [name, agent] of Object.entries(cfg.agents)) {
+    const kind = resolveAgentRuntime(agent, cfg)
+    if (kind === 'local' || resolveAgentImage(agent, cfg).image) continue
+    missing.set(kind, [...(missing.get(kind) ?? []), { name, preset: presetOf(agent) }])
+  }
+  for (const [kind, agents] of missing) {
+    const lines = agents.map(
+      ({ name, preset }) =>
+        `  - ${name}${preset ? ` (preset: ${preset})` : ''} — no preset-default image`,
+    )
+    if (kind === 'vm') {
       throw new Error(
-        `runtime: ${cfg.runtime} requires a container image for each agent. Unresolved:\n` +
+        `runtime: vm requires an image for each agent. Unresolved:\n` +
           lines.join('\n') +
-          `\nSet agents.<name>.container.image, top-level container.image, or use a ` +
-          `preset that ships a default image (claude, codex, opencode, pi).`,
+          `\nSet agents.<name>.vm.image, or use a preset that ships a default image ` +
+          `(claude, codex, opencode, pi).`,
       )
     }
+    throw new Error(
+      `runtime: ${kind} requires a container image for each agent. Unresolved:\n` +
+        lines.join('\n') +
+        `\nSet agents.<name>.container.image, top-level container.image, or use a ` +
+        `preset that ships a default image (claude, codex, opencode, pi).`,
+    )
   }
 
-  const runtime = opts.runtime ?? defaultRuntimeFor(cfg)
+  const runtimeOpts = opts.runtime
+    ? { runtime: opts.runtime }
+    : { runtimeByAgent: runtimesByAgent(cfg, pathResolve(opts.configDir ?? process.cwd())) }
   const env: Record<string, Record<string, string>> = {}
   const image: Record<string, string | undefined> = {}
   const mountsByAgent: Record<string, AcpMount[]> = {}
@@ -264,11 +287,14 @@ export function buildAcpRegistry(
     }))
     mkdirByAgent[name] = composed.mkdirs
     cwdByAgent[name] = composed.cwd
-    if (resolvedImage && cfg.runtime !== 'local') {
+    const kind = resolveAgentRuntime(agent, cfg)
+    if (resolvedImage && kind !== 'local') {
       const mountSummary =
-        composed.mounts.length === 0
-          ? 'mounts=[]'
-          : `mounts=[${composed.mounts.map((m) => m.id ?? m.target).join(',')}]`
+        kind === 'vm'
+          ? `runtime=vm machine=${vmMachineName(name, pathResolve(opts.configDir ?? process.cwd()))}`
+          : composed.mounts.length === 0
+            ? 'mounts=[]'
+            : `mounts=[${composed.mounts.map((m) => m.id ?? m.target).join(',')}]`
       log(
         `[zooid] agent ${name.padEnd(12)} image=${resolvedImage}  source=${source}  ${mountSummary}`,
       )
@@ -285,8 +311,9 @@ export function buildAcpRegistry(
       const agentSock = opts.daemonSockPaths?.[name]
       if (!agentSock) continue
       env[name] = {
-        ZOOID_DAEMON_SOCK:
-          cfg.runtime === 'local' ? agentSock : CONTEXT_CONTAINER_SOCK,
+        ZOOID_DAEMON_SOCK: isContainerRuntime(resolveAgentRuntime(cfg.agents[name]!, cfg))
+          ? CONTEXT_CONTAINER_SOCK
+          : agentSock,
         ...env[name],
       }
     }
@@ -296,8 +323,9 @@ export function buildAcpRegistry(
   // its container, so the daemon socket + the (self-contained) bin must be
   // bind-mounted in. Local runtime needs neither — the host spec resolves
   // directly. Only agents that actually got a context factory get the mounts.
-  if (cfg.runtime !== 'local' && contextSpawns) {
-    for (const name of Object.keys(cfg.agents)) {
+  if (contextSpawns) {
+    for (const [name, agent] of Object.entries(cfg.agents)) {
+      if (!isContainerRuntime(resolveAgentRuntime(agent, cfg))) continue
       if (!contextSpawns[name]) continue
       const agentSock = opts.daemonSockPaths?.[name]
       if (!agentSock) continue
@@ -309,7 +337,7 @@ export function buildAcpRegistry(
   }
 
   return new AcpAgentRegistry({
-    runtime,
+    ...runtimeOpts,
     agents: cfg.agents,
     env,
     image,
@@ -350,7 +378,9 @@ function buildContextSpawns(
   const result: Record<string, ContextSpawnFactory | undefined> = {}
   for (const [name, agent] of Object.entries(cfg.agents)) {
     const sockPath = opts.daemonSockPaths[name]
-    if (agent.matrix && matrixClients.has(agent.matrix.transport) && sockPath) {
+    const kind = resolveAgentRuntime(agent, cfg)
+    // No host socket reaches a vm guest; see contextUnavailableAgents.
+    if (kind !== 'vm' && agent.matrix && matrixClients.has(agent.matrix.transport) && sockPath) {
       const client = matrixClients.get(agent.matrix.transport)!
       const provider: TransportContextProvider = new MatrixContextProvider({
         client,
@@ -370,7 +400,7 @@ function buildContextSpawns(
         return buildContextServerSpec({
           spawnId,
           sockPath,
-          containerize: cfg.runtime !== 'local',
+          containerize: isContainerRuntime(kind),
         })
       }
     } else {
@@ -380,8 +410,7 @@ function buildContextSpawns(
   return result
 }
 
-/** Agents on configured Matrix transports get a context listener and binding. */
-export function contextEligibleAgents(cfg: ZooidConfig): string[] {
+function matrixBoundAgents(cfg: ZooidConfig): string[] {
   const matrixTransports = new Set(
     Object.entries(cfg.transports)
       .filter(([, transport]) => transport.type === 'matrix')
@@ -392,19 +421,46 @@ export function contextEligibleAgents(cfg: ZooidConfig): string[] {
     .map(([name]) => name)
 }
 
-function defaultRuntimeFor(cfg: ZooidConfig): AcpRuntime {
-  if (cfg.runtime === 'local') return new LocalAcpRuntime()
-  if (cfg.runtime === 'docker') {
-    return new DockerAcpRuntime({
-      defaultImage: cfg.container?.image,
-      engine: 'docker',
-    })
+/** Agents on configured Matrix transports get a context listener and binding — except vm agents. */
+export function contextEligibleAgents(cfg: ZooidConfig): string[] {
+  return matrixBoundAgents(cfg).filter(
+    (name) => resolveAgentRuntime(cfg.agents[name]!, cfg) !== 'vm',
+  )
+}
+
+/** Matrix-bound vm agents: no host socket can reach the guest, so no context tools. [ZOD109] */
+export function contextUnavailableAgents(cfg: ZooidConfig): string[] {
+  return matrixBoundAgents(cfg).filter(
+    (name) => resolveAgentRuntime(cfg.agents[name]!, cfg) === 'vm',
+  )
+}
+
+/** Agents whose images the container engine must prepull. */
+export function containerAgentNames(cfg: ZooidConfig): string[] {
+  return Object.entries(cfg.agents)
+    .filter(([, agent]) => isContainerRuntime(resolveAgentRuntime(agent, cfg)))
+    .map(([name]) => name)
+}
+
+/** One runtime per agent: local/docker/podman share an instance per kind, each vm agent gets its own. */
+function runtimesByAgent(cfg: ZooidConfig, configDir: string): Record<string, AcpRuntime> {
+  const shared = new Map<RuntimeKind, AcpRuntime>()
+  const sharedFor = (kind: 'local' | 'docker' | 'podman'): AcpRuntime => {
+    let rt = shared.get(kind)
+    if (!rt) {
+      rt =
+        kind === 'local'
+          ? new LocalAcpRuntime()
+          : new DockerAcpRuntime({ defaultImage: cfg.container?.image, engine: kind })
+      shared.set(kind, rt)
+    }
+    return rt
   }
-  if (cfg.runtime === 'podman') {
-    return new DockerAcpRuntime({
-      defaultImage: cfg.container?.image,
-      engine: 'podman',
-    })
+  const out: Record<string, AcpRuntime> = {}
+  for (const [name, agent] of Object.entries(cfg.agents)) {
+    const kind = resolveAgentRuntime(agent, cfg)
+    out[name] =
+      kind === 'vm' ? new VmAcpRuntime({ machine: vmMachineName(name, configDir) }) : sharedFor(kind)
   }
-  throw new Error(`unsupported runtime: ${cfg.runtime}`)
+  return out
 }

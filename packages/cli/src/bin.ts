@@ -13,7 +13,7 @@ const cli = cac('zooid')
 cli
   .command('start', 'Run the daemon (production entry-point)')
   .option('--data <dir>', 'Persistent data root dir', { default: './data' })
-  .option('--runtime <local|docker|podman>', 'Agent runtime')
+  .option('--runtime <local|docker|podman|vm>', 'Workforce default agent runtime (agents may override)')
   .option('--image <ref>', 'Agent container image')
   .option('--print-token', 'Print a 32-byte hex token and exit')
   .example('$ zooid start --data ./data')

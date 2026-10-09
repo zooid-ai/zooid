@@ -11,6 +11,7 @@ export { renderTemplate } from './render-template.js'
 export { compileMatch, evaluateMatch } from './match-expression.js'
 export type { MatchContext } from './match-expression.js'
 export { AcpAgentRegistry, resolveAcpAgentSpec } from './acp-registry.js'
+export { resolveAgentRuntime, isContainerRuntime, containerEngineOf } from './runtime-resolve.js'
 export {
   ApprovalCorrelator,
   type RegisteredApproval,
@@ -31,6 +32,8 @@ export type {
   ContainerConfig,
   MountConfig,
   ZooidContainerConfig,
+  RuntimeKind,
+  VmConfig,
   MatrixBinding,
   RoomBinding,
   HttpBinding,

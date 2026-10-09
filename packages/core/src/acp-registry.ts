@@ -37,6 +37,8 @@ export type AcpRegistryApprovalHandler = (
  */
 export interface AcpRegistry {
   hasAgent(name: string): boolean
+  /** The runtime an agent's ACP process spawns through. [ZOD109] */
+  runtimeFor(name: string): AcpRuntime
   /** Whether an agent has a transport-context provider attached. */
   hasContextSpawn(name: string): boolean
   /** Per-agent approval timeout from zooid.yaml. 0 means no timeout. */
@@ -66,7 +68,10 @@ export interface AcpRegistry {
 }
 
 export interface AcpAgentRegistryOptions {
-  runtime: AcpRuntime
+  /** Runtime for agents without an entry in `runtimeByAgent`. */
+  runtime?: AcpRuntime
+  /** Per-agent runtime; wins over `runtime`. Mixed fleets set one per agent. [ZOD109] */
+  runtimeByAgent?: Record<string, AcpRuntime>
   agents: Record<string, AgentConfig>
   /** Per-agent env passed to each `AcpClient`'s spawn spec. */
   env?: Record<string, Record<string, string>>
@@ -174,6 +179,12 @@ export class AcpAgentRegistry implements AcpRegistry {
     return Object.prototype.hasOwnProperty.call(this.opts.agents, name)
   }
 
+  runtimeFor(name: string): AcpRuntime {
+    const rt = this.opts.runtimeByAgent?.[name] ?? this.opts.runtime
+    if (!rt) throw new Error(`no runtime for agent ${name}`)
+    return rt
+  }
+
   hasContextSpawn(name: string): boolean {
     return Boolean(this.opts.contextSpawns?.[name])
   }
@@ -270,7 +281,7 @@ export class AcpAgentRegistry implements AcpRegistry {
         mounts: this.resolveSpawnMounts(name),
       },
       agentDataDir: this.opts.agentsDir ? join(this.opts.agentsDir, name) : undefined,
-      runtime: this.opts.runtime,
+      runtime: this.runtimeFor(name),
       onEvent: (e) => this.onEvent(name, e),
       onApprovalRequest: (req) => this.onApprovalRequest(name, req),
       onElicitationRequest: this.onElicitationRequest

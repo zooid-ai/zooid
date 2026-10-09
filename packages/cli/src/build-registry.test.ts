@@ -27,23 +27,21 @@ function cfg(overrides: Partial<ZooidConfig> & Pick<ZooidConfig, 'runtime'>): Zo
 describe('buildAcpRegistry', () => {
   it('constructs with LocalAcpRuntime for runtime: local', () => {
     const reg = buildAcpRegistry(cfg({ runtime: 'local' }))
-    expect((reg as unknown as { opts: { runtime: unknown } }).opts.runtime).toBeInstanceOf(LocalAcpRuntime)
+    expect(reg.runtimeFor('a')).toBeInstanceOf(LocalAcpRuntime)
   })
 
   it('constructs with DockerAcpRuntime (docker engine) for runtime: docker', () => {
     const reg = buildAcpRegistry(
       cfg({ runtime: 'docker', container: { image: 'img:latest' } }),
     )
-    const rt = (reg as unknown as { opts: { runtime: DockerAcpRuntime } }).opts.runtime
-    expect(rt).toBeInstanceOf(DockerAcpRuntime)
+    expect(reg.runtimeFor('a')).toBeInstanceOf(DockerAcpRuntime)
   })
 
   it('constructs with DockerAcpRuntime (podman engine) for runtime: podman', () => {
     const reg = buildAcpRegistry(
       cfg({ runtime: 'podman', container: { image: 'img:latest' } }),
     )
-    const rt = (reg as unknown as { opts: { runtime: DockerAcpRuntime } }).opts.runtime
-    expect(rt).toBeInstanceOf(DockerAcpRuntime)
+    expect(reg.runtimeFor('a')).toBeInstanceOf(DockerAcpRuntime)
   })
 
   it('throws if any agent has no acp block (defense in depth)', () => {
