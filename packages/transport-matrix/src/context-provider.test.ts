@@ -224,28 +224,98 @@ describe('MatrixContextProvider', () => {
     expect(page.threads.map((t) => t.id)).toEqual(['$top'])
     expect(page.has_more).toBe(false)
     expect(page.next_before).toBeUndefined()
+    expect(fetchRoomMessages).toHaveBeenCalledTimes(2)
     expect(fetchRoomMessages).toHaveBeenLastCalledWith({
       roomId: '!room:hs',
       asUserId: '@_zooid:hs',
-      limit: 1,
+      limit: 50,
       from: 't1',
       filter: { types: ['m.room.message'], not_rel_types: ['m.thread'] },
     })
   })
 
-  it('getRecentThreads reports has_more=true on a short page when the peek finds older entries', async () => {
+  it('getRecentThreads fetches in batches of at least 50 events, more when limit is larger', async () => {
+    for (const [limit, batch] of [
+      [5, 50],
+      [200, 200],
+    ]) {
+      const fetchRoomMessages = vi.fn().mockResolvedValue({ chunk: [], end: undefined })
+      const provider = new MatrixContextProvider({
+        client: fakeClient({ fetchRoomMessages } as unknown as Partial<MatrixClient>),
+        asUserId: '@_zooid:hs',
+        agentBots: new Map(),
+      })
+      await provider.getRecentThreads('!room:hs', { limit })
+      expect(fetchRoomMessages).toHaveBeenCalledWith(expect.objectContaining({ limit: batch }))
+    }
+  })
+
+  // Tuwunel ignores not_rel_types (zooid-ai/zooid#123), so thread replies
+  // eat the batch. A thin batch must not end the page early.
+  it('getRecentThreads keeps fetching past batches thinned by thread replies', async () => {
     const fetchRoomMessages = vi
       .fn()
-      .mockResolvedValueOnce({ chunk: [roomMsg('$top2')], end: 't1' })
-      .mockResolvedValueOnce({ chunk: [roomMsg('$top1')], end: 't2' })
+      .mockResolvedValueOnce({ chunk: [roomMsg('$new'), threadReply('$r2')], end: 't1' })
+      .mockResolvedValueOnce({ chunk: [threadReply('$r1')], end: 't2' })
+      .mockResolvedValueOnce({ chunk: [roomMsg('$old')], end: 't3' })
+      .mockResolvedValueOnce({ chunk: [], end: undefined })
     const provider = new MatrixContextProvider({
       client: fakeClient({ fetchRoomMessages } as unknown as Partial<MatrixClient>),
       asUserId: '@_zooid:hs',
       agentBots: new Map(),
     })
-    const page = await provider.getRecentThreads('!room:hs', { limit: 50 })
+    const page = await provider.getRecentThreads('!room:hs', { limit: 5 })
+    expect(page.threads.map((t) => t.id)).toEqual(['$new', '$old'])
+    expect(page.has_more).toBe(false)
+    expect(fetchRoomMessages.mock.calls.map(([o]) => o.from)).toEqual([
+      undefined,
+      't1',
+      't2',
+      't3',
+    ])
+  })
+
+  it('getRecentThreads re-requests exactly through the last kept entry when a batch overshoots, so no entry is skipped', async () => {
+    const fetchRoomMessages = vi
+      .fn()
+      // Batch 1: one entry, one reply. Need 2, have 1.
+      .mockResolvedValueOnce({ chunk: [roomMsg('$e3'), threadReply('$r')], end: 't1' })
+      // Batch 2: two entries, need only one. Can't return `t2`: it would skip $e1.
+      .mockResolvedValueOnce({ chunk: [roomMsg('$e2'), roomMsg('$e1')], end: 't2' })
+      // Exact re-request through $e2.
+      .mockResolvedValueOnce({ chunk: [roomMsg('$e2')], end: 't1b' })
+      // Peek past t1b.
+      .mockResolvedValueOnce({ chunk: [roomMsg('$e1')], end: 't2' })
+    const provider = new MatrixContextProvider({
+      client: fakeClient({ fetchRoomMessages } as unknown as Partial<MatrixClient>),
+      asUserId: '@_zooid:hs',
+      agentBots: new Map(),
+    })
+    const page = await provider.getRecentThreads('!room:hs', { limit: 2 })
+    expect(page.threads.map((t) => t.id)).toEqual(['$e3', '$e2'])
     expect(page.has_more).toBe(true)
-    expect(page.next_before).toBe('t1')
+    expect(page.next_before).toBe('t1b')
+    expect(fetchRoomMessages.mock.calls[2]?.[0]).toMatchObject({ from: 't1', limit: 1 })
+    expect(fetchRoomMessages.mock.calls[3]?.[0]).toMatchObject({ from: 't1b', limit: 1 })
+  })
+
+  it('getRecentThreads returns the cursor after 5 rounds rather than fetching forever', async () => {
+    let n = 0
+    const fetchRoomMessages = vi.fn().mockImplementation(async () => {
+      n++
+      return { chunk: [threadReply(`$r${n}`)], end: `t${n}` }
+    })
+    const provider = new MatrixContextProvider({
+      client: fakeClient({ fetchRoomMessages } as unknown as Partial<MatrixClient>),
+      asUserId: '@_zooid:hs',
+      agentBots: new Map(),
+    })
+    const page = await provider.getRecentThreads('!room:hs', { limit: 5 })
+    expect(page.threads).toEqual([])
+    // 5 rounds + 1 peek past the last cursor.
+    expect(fetchRoomMessages).toHaveBeenCalledTimes(6)
+    expect(page.has_more).toBe(true)
+    expect(page.next_before).toBe('t5')
   })
 
   it('getChannelMembers returns joined members with is_agent flags', async () => {
@@ -341,7 +411,7 @@ describe('MatrixContextProvider', () => {
 
   it('getRecentThreads returns top-level entries newest-first with bundled thread metadata, skipping thread replies', async () => {
     const client = fakeClient({
-      fetchRoomMessages: vi.fn().mockResolvedValue({
+      fetchRoomMessages: vi.fn().mockResolvedValueOnce({
         chunk: [
           {
             event_id: '$top2',
@@ -375,7 +445,8 @@ describe('MatrixContextProvider', () => {
           },
         ],
         end: 'next-page',
-      }),
+      })
+        .mockResolvedValueOnce({ chunk: [], end: undefined }),
     } as unknown as Partial<MatrixClient>)
     const provider = new MatrixContextProvider({
       client,
@@ -394,8 +465,8 @@ describe('MatrixContextProvider', () => {
       reply_count: 3,
       last_activity_at: new Date(2500).toISOString(),
     })
-    expect(page.has_more).toBe(true)
-    expect(page.next_before).toBe('next-page')
+    expect(page.has_more).toBe(false)
+    expect(page.next_before).toBeUndefined()
   })
 
   it('getThreadHistory prepends the root event then appends replies oldest-first', async () => {
