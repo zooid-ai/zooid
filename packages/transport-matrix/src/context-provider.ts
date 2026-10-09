@@ -61,6 +61,20 @@ export interface MatrixContextProviderOpts {
   rooms?: RoomBinding[]
 }
 
+/** Events fetched per round when collecting recent threads. */
+const RECENT_THREADS_BATCH = 50
+/** Max /messages rounds per getRecentThreads call (peeks not counted). */
+const RECENT_THREADS_MAX_ROUNDS = 5
+
+/** Index of the nth non-null item (1-based n), or -1 if there are fewer. */
+function indexOfNth<T>(items: Array<T | null>, n: number): number {
+  let seen = 0
+  for (let i = 0; i < items.length; i++) {
+    if (items[i] !== null && ++seen === n) return i
+  }
+  return -1
+}
+
 export class MatrixContextProvider implements TransportContextProvider {
   constructor(private readonly opts: MatrixContextProviderOpts) {}
 
@@ -95,51 +109,95 @@ export class MatrixContextProvider implements TransportContextProvider {
     channelId: string,
     hopts: HistoryOptions,
   ): Promise<ThreadOverviewPage> {
-    // Server-side filter: `m.room.message` only, and exclude thread replies
-    // (`not_rel_types: ['m.thread']`) so the overview shows top-level entries
-    // and thread roots, not the reply noise underneath them.
+    // Server-side filter: `m.room.message` only, and ask to exclude thread
+    // replies (`not_rel_types: ['m.thread']`). Tuwunel honors `types` but
+    // ignores `not_rel_types` (zooid-ai/zooid#123), so replies still arrive
+    // and are dropped by toThreadOverview(). A page of `limit` events can
+    // then hold few or no entries. Instead, fetch in batches and keep going
+    // until `limit` entries are collected, history runs out, or the round
+    // budget is spent.
     const filter = { types: ['m.room.message'], not_rel_types: ['m.thread'] }
-    const { chunk, end } = await this.opts.client.fetchRoomMessages({
-      roomId: channelId,
-      asUserId: this.opts.asUserId,
-      limit: hopts.limit,
-      from: hopts.before,
-      filter,
-    })
-    // /messages returns newest-first; keep that order for the overview.
+    const limit = hopts.limit ?? 50
     const threads: ThreadOverview[] = []
-    for (const ev of chunk as unknown as MatrixMessageEvent[]) {
-      if (ev.type !== 'm.room.message') continue
-      // m.notice: agent prose sends as m.notice so
-      // .m.rule.suppress_notices silences the chunk storm server-side
-      // (ZNC025 §10) — a thread root sent by an agent must still surface here.
-      if (
-        (ev.content?.msgtype !== 'm.text' && ev.content?.msgtype !== 'm.notice') ||
-        typeof ev.content.body !== 'string'
-      )
-        continue
-      const relatesTo = ev.content['m.relates_to']
-      if (relatesTo?.rel_type === 'm.thread') continue // skip thread replies
-      const agent = this.opts.agentBots.get(ev.sender)
-      const bundled = ev.unsigned?.['m.relations']?.['m.thread']
-      const replyCount = bundled?.count ?? 0
-      const latestTs = bundled?.latest_event?.origin_server_ts ?? ev.origin_server_ts
-      threads.push({
-        id: ev.event_id,
-        sender: ev.sender,
-        text: ev.content.body,
-        timestamp: new Date(ev.origin_server_ts).toISOString(),
-        is_agent: agent !== undefined,
-        ...(agent !== undefined ? { agent_name: agent } : {}),
-        reply_count: replyCount,
-        last_activity_at: new Date(latestTs).toISOString(),
+    let cursor = hopts.before
+    for (let round = 0; round < RECENT_THREADS_MAX_ROUNDS; round++) {
+      const remaining = limit - threads.length
+      const page = await this.opts.client.fetchRoomMessages({
+        roomId: channelId,
+        asUserId: this.opts.asUserId,
+        limit: Math.max(remaining, RECENT_THREADS_BATCH),
+        from: cursor,
+        filter,
       })
+      // /messages returns newest-first; keep that order for the overview.
+      const entries = (page.chunk as unknown as MatrixMessageEvent[]).map((ev) =>
+        this.toThreadOverview(ev),
+      )
+      const cut = indexOfNth(entries, remaining)
+      if (cut !== -1) {
+        // The batch holds more entries than we need. A Matrix cursor can't
+        // point inside a page, so returning the first `remaining` entries
+        // with `page.end` would skip the rest. Re-request exactly the events
+        // through the last entry kept so `end` lands right after it.
+        let end = page.end
+        let kept = entries.slice(0, cut + 1)
+        if (cut < entries.length - 1) {
+          const exact = await this.opts.client.fetchRoomMessages({
+            roomId: channelId,
+            asUserId: this.opts.asUserId,
+            limit: cut + 1,
+            from: cursor,
+            filter,
+          })
+          end = exact.end
+          kept = (exact.chunk as unknown as MatrixMessageEvent[]).map((ev) =>
+            this.toThreadOverview(ev),
+          )
+        }
+        for (const t of kept) if (t) threads.push(t)
+        const hasMore = await this.hasMessagesPast(channelId, end, filter)
+        return { threads, next_before: hasMore ? end : undefined, has_more: hasMore }
+      }
+      for (const t of entries) if (t) threads.push(t)
+      // An empty batch or a missing cursor means history is exhausted. A
+      // non-empty batch doesn't prove the opposite (Tuwunel returns `end` on
+      // the oldest page), but the next round's fetch settles it.
+      if (page.chunk.length === 0 || page.end === undefined) {
+        return { threads, next_before: undefined, has_more: false }
+      }
+      cursor = page.end
     }
-    const hasMore = await this.hasMessagesPast(channelId, end, filter)
+    // Round budget spent: return what we have and let the caller page on.
+    const hasMore = await this.hasMessagesPast(channelId, cursor, filter)
+    return { threads, next_before: hasMore ? cursor : undefined, has_more: hasMore }
+  }
+
+  /** A top-level entry or thread root for the overview; null for anything else. */
+  private toThreadOverview(ev: MatrixMessageEvent): ThreadOverview | null {
+    if (ev.type !== 'm.room.message') return null
+    // m.notice: agent prose sends as m.notice so
+    // .m.rule.suppress_notices silences the chunk storm server-side
+    // (ZNC025 §10) — a thread root sent by an agent must still surface here.
+    if (
+      (ev.content?.msgtype !== 'm.text' && ev.content?.msgtype !== 'm.notice') ||
+      typeof ev.content.body !== 'string'
+    )
+      return null
+    const relatesTo = ev.content['m.relates_to']
+    if (relatesTo?.rel_type === 'm.thread') return null // skip thread replies
+    const agent = this.opts.agentBots.get(ev.sender)
+    const bundled = ev.unsigned?.['m.relations']?.['m.thread']
+    const replyCount = bundled?.count ?? 0
+    const latestTs = bundled?.latest_event?.origin_server_ts ?? ev.origin_server_ts
     return {
-      threads,
-      next_before: hasMore ? end : undefined,
-      has_more: hasMore,
+      id: ev.event_id,
+      sender: ev.sender,
+      text: ev.content.body,
+      timestamp: new Date(ev.origin_server_ts).toISOString(),
+      is_agent: agent !== undefined,
+      ...(agent !== undefined ? { agent_name: agent } : {}),
+      reply_count: replyCount,
+      last_activity_at: new Date(latestTs).toISOString(),
     }
   }
 

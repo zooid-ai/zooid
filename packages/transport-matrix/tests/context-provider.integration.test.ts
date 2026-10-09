@@ -152,7 +152,264 @@ describe.skipIf(!dockerAvailable())('MatrixContextProvider against tuwunel', () 
     expect(byId.get(BOT_USER)).toMatchObject({ is_agent: true, agent_name: 'devctx' })
     expect([...byId.keys()]).toContain(alice.user_id)
   }, 120_000)
+
+  // --- has_more peeks (zooid-ai/zooid#110, #122), checked live in #123 ---
+
+  it('room /messages at the start of history: records whether Tuwunel still returns `end`', async () => {
+    const { roomId } = await setupRoom('start-of-history')
+    await asSend(roomId, 'm.room.message', { msgtype: 'm.text', body: 'only message' })
+
+    // Walk the unfiltered timeline back to m.room.create, then one step past.
+    let from: string | undefined
+    const pages: Array<{ n: number; end: boolean; create: boolean }> = []
+    for (let i = 0; i < 20; i++) {
+      const page = await rawMessages(roomId, { limit: 5, from })
+      const create = page.chunk.some((e) => e.type === 'm.room.create')
+      pages.push({ n: page.chunk.length, end: page.end !== undefined, create })
+      if (page.end === undefined || page.chunk.length === 0) break
+      from = page.end
+    }
+    console.log('[#123] start-of-history /messages pages:', JSON.stringify(pages))
+    expect(pages.some((p) => p.create)).toBe(true)
+
+    // Whatever Tuwunel does with `end`, the provider must report exhaustion.
+    const client = new MatrixClient({ homeserver: HS, asToken: AS_TOKEN })
+    const provider = newProvider(client)
+    const history = await provider.getRoomHistory(roomId, { limit: 50 })
+    expect(history.messages.map((m) => m.text)).toEqual(['only message'])
+    expect(history.has_more).toBe(false)
+    expect(history.next_before).toBeUndefined()
+    const threads = await provider.getRecentThreads(roomId, { limit: 50 })
+    expect(threads.threads.map((t) => t.text)).toEqual(['only message'])
+    expect(threads.has_more).toBe(false)
+  }, 120_000)
+
+  it('thread history: a one-reply thread reports has_more false; a multi-page thread paginates exactly', async () => {
+    const { roomId } = await setupRoom('thread-pages')
+    const provider = newProvider(new MatrixClient({ homeserver: HS, asToken: AS_TOKEN }))
+
+    const solo = await asSend(roomId, 'm.room.message', { msgtype: 'm.text', body: 'solo root' })
+    await asSend(roomId, 'm.room.message', threadReply(solo, 'solo reply'))
+    for (const limit of [50, 1]) {
+      const page = await provider.getThreadHistory(roomId, solo, { limit })
+      expect(page.messages.map((m) => m.text)).toEqual(['solo root', 'solo reply'])
+      expect(page.has_more).toBe(false)
+      expect(page.next_before).toBeUndefined()
+    }
+
+    // Root alone, no replies at all.
+    const bare = await asSend(roomId, 'm.room.message', { msgtype: 'm.text', body: 'bare root' })
+    const barePage = await provider.getThreadHistory(roomId, bare, { limit: 50 })
+    expect(barePage.messages.map((m) => m.text)).toEqual(['bare root'])
+    expect(barePage.has_more).toBe(false)
+
+    // Seven replies with reactions interleaved, paged three at a time.
+    const root = await asSend(roomId, 'm.room.message', { msgtype: 'm.text', body: 'big root' })
+    const expected: string[] = []
+    for (let i = 0; i < 7; i++) {
+      const id = await asSend(roomId, 'm.room.message', threadReply(root, `r${i}`))
+      await asSend(roomId, 'm.reaction', {
+        'm.relates_to': { rel_type: 'm.annotation', event_id: id, key: '👍' },
+      })
+      expected.push(`r${i}`)
+    }
+    const seen: string[] = []
+    const flags: boolean[] = []
+    let before: string | undefined
+    for (let i = 0; i < 10; i++) {
+      const page = await provider.getThreadHistory(roomId, root, { limit: 3, before })
+      seen.push(...page.messages.map((m) => m.text))
+      flags.push(page.has_more)
+      if (!page.has_more) break
+      before = page.next_before
+    }
+    expect(seen).toEqual(['big root', ...expected])
+    expect(flags).toEqual([true, true, false])
+  }, 120_000)
+
+  it('types-filtered peek past a long run of non-message events still finds the older message', async () => {
+    const { roomId } = await setupRoom('filtered-peek')
+    const client = new MatrixClient({ homeserver: HS, asToken: AS_TOKEN })
+    const provider = newProvider(client)
+
+    const old = await asSend(roomId, 'm.room.message', { msgtype: 'm.text', body: 'old' })
+    // 150 non-message events: more than any default page size, so a server
+    // that applied the filter after the limit would return an empty peek.
+    for (let i = 0; i < 75; i++) {
+      await asSend(roomId, 'm.reaction', {
+        'm.relates_to': { rel_type: 'm.annotation', event_id: old, key: `k${i}` },
+      })
+      await asSend(roomId, 'dev.zooid.agent_status', { state: 'working', n: i })
+    }
+    await asSend(roomId, 'm.room.message', { msgtype: 'm.text', body: 'new' })
+
+    // Raw peek, exactly as hasMessagesPast issues it.
+    const filter = { types: ['m.room.message'] }
+    const first = await client.fetchRoomMessages({ roomId, asUserId: BOT_USER, limit: 1, filter })
+    expect(first.chunk.map(bodyOf)).toEqual(['new'])
+    const peek = await client.fetchRoomMessages({
+      roomId,
+      asUserId: BOT_USER,
+      limit: 1,
+      from: first.end,
+      filter,
+    })
+    expect(peek.chunk.map(bodyOf)).toEqual(['old'])
+
+    const h1 = await provider.getRoomHistory(roomId, { limit: 1 })
+    expect(h1.messages.map((m) => m.text)).toEqual(['new'])
+    expect(h1.has_more).toBe(true)
+    const h2 = await provider.getRoomHistory(roomId, { limit: 1, before: h1.next_before })
+    expect(h2.messages.map((m) => m.text)).toEqual(['old'])
+    expect(h2.has_more).toBe(false)
+
+    const t1 = await provider.getRecentThreads(roomId, { limit: 1 })
+    expect(t1.threads.map((t) => t.text)).toEqual(['new'])
+    expect(t1.has_more).toBe(true)
+    const t2 = await provider.getRecentThreads(roomId, { limit: 1, before: t1.next_before })
+    expect(t2.threads.map((t) => t.text)).toEqual(['old'])
+    expect(t2.has_more).toBe(false)
+  }, 300_000)
+
+  // Tuwunel ignores `not_rel_types` on /messages, so thread replies arrive
+  // with the top-level entries and are dropped client-side. getRecentThreads
+  // must keep fetching past them rather than returning thin or empty pages.
+  it('recent threads past a long run of thread replies fills the page in one call', async () => {
+    const { roomId } = await setupRoom('reply-run')
+    const provider = newProvider(new MatrixClient({ homeserver: HS, asToken: AS_TOKEN }))
+
+    const old = await asSend(roomId, 'm.room.message', { msgtype: 'm.text', body: 'old' })
+    for (let i = 0; i < 60; i++) {
+      await asSend(roomId, 'm.room.message', threadReply(old, `t${i}`))
+    }
+    await asSend(roomId, 'm.room.message', { msgtype: 'm.text', body: 'new' })
+
+    const page = await provider.getRecentThreads(roomId, { limit: 5 })
+    expect(page.threads.map((t) => t.text)).toEqual(['new', 'old'])
+    expect(page.has_more).toBe(false)
+
+    // Paging one entry at a time crosses the reply run without an empty page.
+    const p1 = await provider.getRecentThreads(roomId, { limit: 1 })
+    expect(p1.threads.map((t) => t.text)).toEqual(['new'])
+    expect(p1.has_more).toBe(true)
+    const p2 = await provider.getRecentThreads(roomId, { limit: 1, before: p1.next_before })
+    expect(p2.threads.map((t) => t.text)).toEqual(['old'])
+    expect(p2.has_more).toBe(false)
+  }, 300_000)
+
+  it('paginates multi-page room history and recent threads to exhaustion with no skipped page', async () => {
+    const { roomId } = await setupRoom('exhaust')
+    const provider = newProvider(new MatrixClient({ homeserver: HS, asToken: AS_TOKEN }))
+
+    const allMessages: string[] = []
+    const topLevel: string[] = []
+    for (let i = 0; i < 23; i++) {
+      const id = await asSend(roomId, 'm.room.message', { msgtype: 'm.text', body: `m${i}` })
+      allMessages.push(`m${i}`)
+      topLevel.push(`m${i}`)
+      await asSend(roomId, 'dev.zooid.agent_status', { state: 'idle', n: i })
+      if (i % 3 === 0) {
+        await asSend(roomId, 'm.room.message', threadReply(id, `m${i}.reply`))
+        allMessages.push(`m${i}.reply`)
+      }
+    }
+
+    for (const limit of [7, 10, allMessages.length]) {
+      const pages: string[][] = []
+      const flags: boolean[] = []
+      let before: string | undefined
+      for (let i = 0; i < 50; i++) {
+        const page = await provider.getRoomHistory(roomId, { limit, before })
+        pages.push(page.messages.map((m) => m.text))
+        flags.push(page.has_more)
+        if (!page.has_more) break
+        expect(page.next_before).toBeDefined()
+        before = page.next_before
+      }
+      // Pages come newest-first; each page is oldest-first internally.
+      expect(pages.reverse().flat()).toEqual(allMessages)
+      expect(flags.at(-1)).toBe(false)
+      expect(flags.slice(0, -1).every(Boolean)).toBe(true)
+      expect(pages.every((p) => p.length > 0)).toBe(true)
+    }
+
+    for (const limit of [4, 9, topLevel.length]) {
+      const seen: string[] = []
+      const flags: boolean[] = []
+      let before: string | undefined
+      for (let i = 0; i < 50; i++) {
+        const page = await provider.getRecentThreads(roomId, { limit, before })
+        seen.push(...page.threads.map((t) => t.text))
+        flags.push(page.has_more)
+        if (!page.has_more) break
+        before = page.next_before
+      }
+      expect(seen).toEqual([...topLevel].reverse())
+      expect(flags.at(-1)).toBe(false)
+      expect(flags.slice(0, -1).every(Boolean)).toBe(true)
+    }
+  }, 300_000)
 })
+
+function newProvider(client: MatrixClient) {
+  return new MatrixContextProvider({
+    client,
+    asUserId: BOT_USER,
+    agentBots: new Map([[BOT_USER, 'devctx']]),
+  })
+}
+
+/** Fresh room: alice creates it, the AS bot joins. Messages are sent as the bot. */
+async function setupRoom(label: string) {
+  const alice = await registerUser(`alice-${label}-` + randomUUID().slice(0, 8), 'pw')
+  await asRegister(BOT_LOCALPART)
+  const { room_id: roomId } = await createRoom(alice.access_token, label)
+  await invite(alice.access_token, roomId, BOT_USER)
+  await asJoin(roomId, BOT_USER)
+  return { roomId, alice }
+}
+
+function bodyOf(e: Record<string, unknown>) {
+  return (e.content as { body?: string } | undefined)?.body
+}
+
+function threadReply(rootEventId: string, body: string) {
+  return {
+    msgtype: 'm.text',
+    body,
+    'm.relates_to': { rel_type: 'm.thread', event_id: rootEventId },
+  }
+}
+
+/** Send any event as the AS bot (rate_limited: false keeps bulk sends fast). */
+async function asSend(roomId: string, type: string, content: unknown): Promise<string> {
+  const r = await fetch(
+    `${HS}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/${encodeURIComponent(type)}/${randomUUID()}?user_id=${encodeURIComponent(BOT_USER)}`,
+    {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${AS_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify(content),
+    },
+  )
+  if (!r.ok) throw new Error(`asSend(${type}) failed: ${r.status} ${await r.text()}`)
+  return ((await r.json()) as { event_id: string }).event_id
+}
+
+/** Unfiltered /messages, dir=b, as the AS bot. */
+async function rawMessages(roomId: string, opts: { limit: number; from?: string }) {
+  const params = new URLSearchParams({
+    dir: 'b',
+    limit: String(opts.limit),
+    user_id: BOT_USER,
+  })
+  if (opts.from) params.set('from', opts.from)
+  const r = await fetch(
+    `${HS}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/messages?${params}`,
+    { headers: { Authorization: `Bearer ${AS_TOKEN}` } },
+  )
+  if (!r.ok) throw new Error(`rawMessages failed: ${r.status} ${await r.text()}`)
+  return (await r.json()) as { chunk: Array<{ type: string }>; end?: string }
+}
 
 // --- helpers ---
 
