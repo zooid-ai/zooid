@@ -1,12 +1,13 @@
 export { AcpClient } from './acp-client.js'
 export { AgentProcess } from './agent-process.js'
 export { SessionMap } from './session-map.js'
-export { PRESETS, resolvePreset, isPreset } from './presets.js'
+export { PRESETS, VM_PLACEHOLDER_CODEX_KEY, resolvePreset, isPreset } from './presets.js'
 export type {
   PresetName,
   PresetSpec,
   PresetMount,
   PresetMountContext,
+  PresetVmCredential,
 } from './presets.js'
 export {
   acpUpdateToAgentEvent,

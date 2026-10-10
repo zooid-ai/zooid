@@ -338,7 +338,8 @@ function parseDisableMounts(agentName: string, raw: unknown): string[] {
   return out
 }
 
-const VM_FIELDS = ['image', 'cpus', 'memory', 'disk'] as const
+const VM_FIELDS = ['image', 'cpus', 'memory', 'disk', 'git', 'allow_hosts'] as const
+const HOST_NAME = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i
 
 /** `8GiB` / `512MiB` → MiB. Binary units only, so there is one way to write a size. */
 function parseSizeMib(raw: unknown, field: string): number {
@@ -379,6 +380,37 @@ function parseVmBlock(name: string, raw: unknown): VmConfig {
     const mib = parseSizeMib(v.disk, `agents.${name}.vm.disk`)
     if (mib % 1024 !== 0) throw new Error(`agents.${name}.vm.disk must be a whole number of GiB`)
     out.disk_gib = mib / 1024
+  }
+  if (v.allow_hosts !== undefined) {
+    const hosts = v.allow_hosts
+    const bad = !Array.isArray(hosts)
+      ? hosts
+      : hosts.length === 0
+        ? hosts
+        : hosts.find((h) => typeof h !== 'string' || !HOST_NAME.test(h))
+    if (bad !== undefined) {
+      throw new Error(
+        `agents.${name}.vm.allow_hosts must be a non-empty list of host names like "github.com" (got ${JSON.stringify(bad)})`,
+      )
+    }
+    out.allow_hosts = hosts as string[]
+  }
+  if (v.git !== undefined) {
+    let url: URL | undefined
+    try {
+      url = typeof v.git === 'string' ? new URL(v.git) : undefined
+    } catch {
+      url = undefined
+    }
+    if (!url || url.protocol !== 'https:') {
+      throw new Error(`agents.${name}.vm.git must be an https:// URL (got ${JSON.stringify(v.git)})`)
+    }
+    if (!out.allow_hosts?.includes(url.hostname)) {
+      throw new Error(
+        `agents.${name}.vm.git host ${url.hostname} is not in agents.${name}.vm.allow_hosts; the guest could not fetch from it`,
+      )
+    }
+    out.git = v.git as string
   }
   return out
 }
