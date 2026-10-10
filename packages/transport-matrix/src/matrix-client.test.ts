@@ -141,6 +141,38 @@ describe('MatrixClient', () => {
     expect(id).toBe('!new:localhost')
   })
 
+  it('createRoom retries without the creator in users when the homeserver rejects it (room v12)', async () => {
+    const bodies: any[] = []
+    const fetch = fakeFetch(async ({ init }) => {
+      const body = JSON.parse(init.body as string)
+      bodies.push(body)
+      if (body.power_level_content_override.users['@admin:localhost'] !== undefined) {
+        return new Response(
+          JSON.stringify({
+            errcode: 'M_INVALID_PARAM',
+            error: 'M_INVALID_PARAM: creator user IDs are not allowed in the `users` field',
+          }),
+          { status: 400 },
+        )
+      }
+      return new Response(JSON.stringify({ room_id: '!r:localhost' }), { status: 200 })
+    })
+    const client = new MatrixClient({
+      homeserver: 'http://hs',
+      asToken: 't',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+    })
+    const id = await client.createRoom({
+      roomAliasName: 'welcome',
+      invite: [],
+      senderUserId: '@admin:localhost',
+      userPowerLevels: { '@op:localhost': 100 },
+    })
+    expect(id).toBe('!r:localhost')
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1].power_level_content_override.users).toEqual({ '@op:localhost': 100 })
+  })
+
   it('createRoom passes optional name as m.room.name when supplied', async () => {
     const fetch = fakeFetch(async ({ init }) => {
       const body = JSON.parse(init.body as string)

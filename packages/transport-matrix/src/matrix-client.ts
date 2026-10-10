@@ -129,35 +129,41 @@ export class MatrixClient {
       if (users[opts.senderUserId] === undefined) users[opts.senderUserId] = 100
       body.power_level_content_override = { users }
     }
-    const r = await this.fetch(
-      `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.senderUserId)}`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.asToken}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      },
-    )
+    const r = await this.postCreateRoom(opts.senderUserId, body)
     if (!r.ok) {
-      const body = await r.text()
-      throw new Error(`createRoom(${opts.roomAliasName}) failed: ${r.status} ${body}`)
+      const text = await r.text()
+      throw new Error(`createRoom(${opts.roomAliasName}) failed: ${r.status} ${text}`)
     }
     const j = (await r.json()) as { room_id: string }
     return j.room_id
   }
 
+  /**
+   * POST createRoom. Room v12 (MSC4289, Tuwunel >= 1.9) gives the creator
+   * implicit power and rejects them in `power_level_content_override.users`;
+   * older versions need them listed. Try with the creator, and on that
+   * specific rejection retry once with the creator removed.
+   */
+  private async postCreateRoom(asUserId: string, body: Record<string, unknown>): Promise<Response> {
+    const url = `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(asUserId)}`
+    const send = (b: Record<string, unknown>) =>
+      this.fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.asToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify(b),
+      })
+    const r = await send(body)
+    if (r.status !== 400) return r
+    const text = await r.clone().text()
+    if (!/creator user IDs are not allowed/i.test(text)) return r
+    const pl = body.power_level_content_override as { users?: Record<string, number> } | undefined
+    if (!pl?.users || !(asUserId in pl.users)) return r
+    const { [asUserId]: _creator, ...users } = pl.users
+    return send({ ...body, power_level_content_override: { ...pl, users } })
+  }
+
   async createRoomRaw(opts: { asUserId: string; body: Record<string, unknown> }): Promise<string> {
-    const url = `${this.homeserver}/_matrix/client/v3/createRoom?user_id=${encodeURIComponent(opts.asUserId)}`
-    const r = await this.fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.asToken}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(opts.body),
-    })
+    const r = await this.postCreateRoom(opts.asUserId, opts.body)
     if (!r.ok) throw new Error(`createRoomRaw failed: ${r.status}`)
     const j = (await r.json()) as { room_id: string }
     return j.room_id
