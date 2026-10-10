@@ -13,7 +13,7 @@ export interface TuwunelOpts {
   engine: 'docker' | 'podman'
 }
 
-const DEFAULT_IMAGE = 'ghcr.io/matrix-construct/tuwunel:latest'
+const DEFAULT_IMAGE = 'ghcr.io/matrix-construct/tuwunel:v1.9.3'
 
 export function buildRunArgs(opts: TuwunelOpts): string[] {
   const image = opts.image ?? DEFAULT_IMAGE

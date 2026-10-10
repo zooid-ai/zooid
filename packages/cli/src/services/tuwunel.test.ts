@@ -20,7 +20,7 @@ import { buildRunArgs, TuwunelService } from './tuwunel.js'
 describe('buildRunArgs', () => {
   const base = {
     name: 'zooid-tuwunel',
-    image: 'ghcr.io/matrix-construct/tuwunel:latest',
+    image: 'ghcr.io/matrix-construct/tuwunel:v1.9.3',
     hostPort: 8448,
     paths: {
       dataDir: '/abs/data/matrix',

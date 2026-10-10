@@ -1,6 +1,6 @@
 services:
   tuwunel:
-    image: ghcr.io/matrix-construct/tuwunel:latest
+    image: ghcr.io/matrix-construct/tuwunel:v1.9.3
     # tini as PID 1, so the container forwards signals and reaps children.
     # Without it tuwunel's PID 1 can end up a zombie that docker cannot kill
     # ("PID N is zombie and can not be killed"), stranding teardown.
