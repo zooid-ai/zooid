@@ -43,7 +43,85 @@ export interface PresetSpec {
    * during registry construction with `{ agentName, agentDataDir, containerWorkdir }`.
    */
   mounts?: (ctx: PresetMountContext) => PresetMount[]
+  /**
+   * How a `runtime: vm` agent on this preset reaches its model without the
+   * credential entering the guest: a host proxy injects it. [ZOD128]
+   */
+  vmCredential?: PresetVmCredential
 }
+
+/**
+ * The host-side credential proxy contract for one preset. The guest calls
+ * `127.0.0.1:<guestPort>`, a guest forwarder carries that to `guestSocket`
+ * (a mounted host Unix socket), and the host proxy swaps the placeholder
+ * credential for the real one before calling `upstream`. [ZOD128]
+ */
+export interface PresetVmCredential {
+  provider: 'openai-codex'
+  /** Origin the proxy forwards to. */
+  upstream: string
+  /** Path prefixes the proxy forwards; everything else is refused. */
+  allowPaths: string[]
+  /** Host dir holding the dedicated login (`auth.json`) the proxy alone refreshes. */
+  authDir: (ctx: { daemonHome: string }) => string
+  guestSocket: string
+  guestPort: number
+  /** Env for the guest ACP process. */
+  guestEnv: Record<string, string>
+  /** Idempotent, credential-free sh run as root in the guest after every start. */
+  guestSetup: string
+}
+
+const b64url = (o: unknown): string => Buffer.from(JSON.stringify(o)).toString('base64url')
+
+/**
+ * What a vm guest's pi holds instead of a key. pi refuses a key without the
+ * account claim, so the placeholder carries a fake one; the proxy replaces
+ * both the bearer and the `chatgpt-account-id` header. [ZOD128]
+ */
+export const VM_PLACEHOLDER_CODEX_KEY = [
+  b64url({ alg: 'none', typ: 'JWT' }),
+  b64url({ 'https://api.openai.com/auth': { chatgpt_account_id: 'zooid-placeholder' } }),
+  'sig',
+].join('.')
+
+const PI_GUEST_AGENT_DIR = '/root/.pi/agent'
+const PI_GUEST_PORT = 8787
+
+// Run with models.json and settings.json paths as argv[1] and argv[2]. JSON literals are generated here, so the
+// script holds no single quotes and sits safely inside sh's '…'.
+const PI_GUEST_CONFIG_JS = [
+  'const fs=require("fs");const [models,f]=process.argv.slice(1);',
+  `fs.writeFileSync(models,JSON.stringify(${JSON.stringify({
+    providers: {
+      'openai-codex': {
+        baseUrl: `http://127.0.0.1:${PI_GUEST_PORT}/backend-api`,
+        apiKey: VM_PLACEHOLDER_CODEX_KEY,
+      },
+    },
+  })},null,2)+"\\n");`,
+  'let s={};try{s=JSON.parse(fs.readFileSync(f,"utf8"))}catch{}',
+  // websocket is pi-codex's default; sse keeps the proxy plain HTTP.
+  's["transport"]="sse";fs.writeFileSync(f,JSON.stringify(s,null,2)+"\\n");',
+].join('')
+
+// The workdir mount is read-only and pi writes sessions into its agent dir,
+// so the workdir's `.pi-agent` is copied (minus sessions) into a writable
+// one. Staged, so the guest's own sessions are never touched. Paths take a
+// ZOOID_GUEST_ROOT prefix (unset in the guest) so tests can run it.
+const PI_GUEST_SETUP = `set -e
+R="\${ZOOID_GUEST_ROOT:-}"
+A="$R${PI_GUEST_AGENT_DIR}"
+mkdir -p "$A"
+if [ -d "$R/workspace/.pi-agent" ]; then
+  S="$(mktemp -d)"
+  cp -R "$R/workspace/.pi-agent/." "$S/"
+  rm -rf "$S/sessions"
+  cp -R "$S/." "$A/"
+  rm -rf "$S"
+fi
+node -e '${PI_GUEST_CONFIG_JS}' "$R${PI_GUEST_AGENT_DIR}/models.json" "$R${PI_GUEST_AGENT_DIR}/settings.json"
+`
 
 type PresetInternal = PresetSpec
 
@@ -122,6 +200,18 @@ const PRESETS_INTERNAL = {
         create: false,
       },
     ],
+    vmCredential: {
+      provider: 'openai-codex',
+      upstream: 'https://chatgpt.com',
+      allowPaths: ['/backend-api/codex/'],
+      // A dedicated device-code login: refresh tokens rotate, so the proxy
+      // must be its only refresher (sharing ~/.pi/agent kills other logins).
+      authDir: ({ daemonHome }: { daemonHome: string }) => `${daemonHome}/.zooid/cred-proxy/pi`,
+      guestSocket: '/run/zooid/model.sock',
+      guestPort: PI_GUEST_PORT,
+      guestEnv: { PI_CODING_AGENT_DIR: PI_GUEST_AGENT_DIR },
+      guestSetup: PI_GUEST_SETUP,
+    },
   },
 } as const satisfies Record<string, PresetInternal>
 
@@ -135,6 +225,10 @@ export const PRESETS: Record<PresetName, PresetSpec> = Object.freeze(
       if ('image' in e && e.image) copy.image = e.image
       if ('mounts' in e && typeof e.mounts === 'function') {
         copy.mounts = e.mounts as PresetSpec['mounts']
+      }
+      if ('vmCredential' in e) {
+        const c = e.vmCredential as PresetVmCredential
+        copy.vmCredential = { ...c, allowPaths: [...c.allowPaths], guestEnv: { ...c.guestEnv } }
       }
       return [k, copy]
     }),

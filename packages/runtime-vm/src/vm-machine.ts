@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative, sep } from 'node:path'
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 
 /** Where the agent's workdir appears in the guest, and the ACP process's default cwd. */
 export const VM_GUEST_WORKDIR = '/workspace'
@@ -35,6 +35,45 @@ export interface VmMachineSpec {
   cpus?: number
   memoryMib?: number
   diskGib?: number
+  /** Non-empty means `--net` plus one `--allow-host` each; otherwise no network. [ZOD128] */
+  allowHosts?: string[]
+  /** Host Unix sockets mounted into the guest. [ZOD128] */
+  sockets?: VmSocketMount[]
+  /** Local images only: changes when the archive is rebuilt, so the machine is recreated. */
+  imageStamp?: string
+}
+
+export interface VmSocketMount {
+  host: string
+  guest: string
+}
+
+/** A path-like `vm.image` is a local `docker save` archive or rootfs dir; anything else is a registry reference. */
+export function isLocalVmImage(image: string): boolean {
+  return /^(\/|\.\/|\.\.\/|~\/)/.test(image)
+}
+
+/**
+ * Resolve a local image to an absolute path plus a stamp that changes when it
+ * is rebuilt. Registry references pass through untouched. [ZOD128]
+ */
+export function resolveVmImage(
+  image: string,
+  configDir: string,
+  home: string,
+): { image: string; stamp?: string } {
+  if (!isLocalVmImage(image)) return { image }
+  const path = image.startsWith('~/') ? join(home, image.slice(2)) : resolve(configDir, image)
+  let st
+  try {
+    st = statSync(path)
+  } catch {
+    throw new Error(
+      `vm image ${path} does not exist (from "${image}"). Build it first, e.g. local-workstation/images/build-agent-smoke`,
+    )
+  }
+  const stamp = st.isDirectory() ? String(Math.trunc(st.mtimeMs)) : `${st.size}-${Math.trunc(st.mtimeMs)}`
+  return { image: path, stamp }
 }
 
 /** One machine per agent per workforce: the config dir hash keeps two workforces on one host apart. */
@@ -46,18 +85,22 @@ export function vmMachineName(agentName: string, configDir: string): string {
 /** Hash of everything fixed at create time. A change means the machine must be recreated. */
 export function vmSpecHash(spec: VmMachineSpec): string {
   const { image, workdir, cpus, memoryMib, diskGib } = spec
-  return createHash('sha256')
-    .update(JSON.stringify({ image, workdir, cpus, memoryMib, diskGib }))
-    .digest('hex')
-    .slice(0, 16)
+  // New keys join only when set, so a cycle-1 spec hashes as before and its machine is kept.
+  const input: Record<string, unknown> = { image, workdir, cpus, memoryMib, diskGib }
+  if (spec.allowHosts?.length) input.allowHosts = [...spec.allowHosts].sort()
+  if (spec.sockets?.length) {
+    input.sockets = [...spec.sockets].sort((a, b) => a.guest.localeCompare(b.guest))
+  }
+  if (spec.imageStamp !== undefined) input.imageStamp = spec.imageStamp
+  return createHash('sha256').update(JSON.stringify(input)).digest('hex').slice(0, 16)
 }
 
 /**
  * The workdir is the only host path the guest gets, always `:ro` (smolvm
  * enforces it host-side, so a guest `remount,rw` doesn't help) and never
  * `:staged` (a write path back out). The mount shadows smolvm's own
- * `/workspace` on the storage disk. No `--net`: cycle-1 guests have no
- * network. [ZOD109]
+ * `/workspace` on the storage disk. The network is off unless the agent
+ * lists `allow_hosts`, and then only those hosts resolve. [ZOD109] [ZOD128]
  */
 export function buildCreateArgv(spec: VmMachineSpec): string[] {
   const argv = ['machine', 'create', '--name', spec.name, '--image', spec.image]
@@ -65,6 +108,11 @@ export function buildCreateArgv(spec: VmMachineSpec): string[] {
   if (spec.memoryMib !== undefined) argv.push('--mem', String(spec.memoryMib))
   if (spec.diskGib !== undefined) argv.push('--storage', String(spec.diskGib))
   argv.push('-v', `${spec.workdir}:${VM_GUEST_WORKDIR}:ro`)
+  if (spec.allowHosts?.length) {
+    argv.push('--net')
+    for (const h of spec.allowHosts) argv.push('--allow-host', h)
+  }
+  for (const s of spec.sockets ?? []) argv.push('--mount-socket', `${s.host}:${s.guest}`)
   return argv
 }
 
@@ -167,9 +215,28 @@ export async function ensureVmMachine({
   if (!rec?.running) {
     await run(exec, ['machine', 'start', '--name', spec.name])
     log(`[vm] ${spec.name}: started`)
+    if (spec.allowHosts?.length) await settle(exec, spec.name, log)
   }
   mkdirSync(dirname(stateFile), { recursive: true })
   writeFileSync(stateFile, JSON.stringify({ machine: spec.name, hash }))
+}
+
+const SETTLE_ATTEMPTS = 5
+
+/**
+ * smolvm 1.25.2 SIGKILLs whatever exec is in flight shortly after a networked
+ * machine's first boot (exit 137 ~130ms into the first exec, whatever the
+ * command). A fast `true` can finish first and leave the kill for the next
+ * exec, so settle with one long enough to straddle it, retried until one
+ * survives; the guest setup and the ACP process then never meet it.
+ */
+async function settle(exec: VmExec, name: string, log: (line: string) => void): Promise<void> {
+  for (let i = 0; i < SETTLE_ATTEMPTS; i++) {
+    const r = await exec(SMOLVM_BIN, ['machine', 'exec', '--name', name, '--', 'sleep', '1'])
+    if (r.code === 0) return
+    log(`[vm] ${name}: settling exec exited ${r.code}, retrying`)
+  }
+  throw new Error(`vm ${name} started but is not accepting commands (${SETTLE_ATTEMPTS} execs killed)`)
 }
 
 /** Stop keeps the disk, which session/load needs across daemon restarts. */

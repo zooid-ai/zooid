@@ -59,6 +59,10 @@ export interface VmConfig {
   cpus?: number
   memory_mib?: number
   disk_gib?: number
+  /** https remote the guest clones from; its host must be in `allow_hosts`. [ZOD128] */
+  git?: string
+  /** Hosts the guest may reach. Absent means no network at all. [ZOD128] */
+  allow_hosts?: string[]
 }
 
 /**

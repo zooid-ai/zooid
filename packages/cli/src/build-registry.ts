@@ -85,7 +85,7 @@ export interface ResolvedImage {
 
 const CONTAINER_WORKDIR = '/workspace'
 
-function presetOf(agent: AgentConfig): PresetName | undefined {
+export function presetOf(agent: AgentConfig): PresetName | undefined {
   const spec = agent.acp as { preset?: string } | undefined
   if (spec?.preset && spec.preset in PRESETS) return spec.preset as PresetName
   return undefined
@@ -277,6 +277,15 @@ export function buildAcpRegistry(
 
   for (const [name, agent] of Object.entries(cfg.agents)) {
     env[name] = agent.container?.env ?? {}
+    if (resolveAgentRuntime(agent, cfg) === 'vm') {
+      // A vm agent has no container block. Its env points pi at the guest's
+      // writable agent dir and tells the smoke tools where to clone. [ZOD128]
+      const preset = presetOf(agent)
+      env[name] = {
+        ...(preset ? PRESETS[preset].vmCredential?.guestEnv : undefined),
+        ...(agent.vm?.git ? { ZOOID_VM_GIT: agent.vm.git } : {}),
+      }
+    }
     const { image: resolvedImage, source } = resolveAgentImage(agent, cfg)
     image[name] = resolvedImage
     const composed = composeAgentMounts(name, agent, cfg, opts)

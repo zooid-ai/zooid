@@ -105,12 +105,10 @@ describe('ZOD109: vm block', () => {
     ).toThrow(/agents\.smoke\.vm\.cpus/)
   })
 
-  it('rejects unknown vm fields (vm.git lands in cycle 2)', () => {
+  it('rejects unknown vm fields', () => {
     expect(() =>
-      loadZooidConfig(
-        yaml('runtime: vm', agent('smoke', '    vm: { git: https://example.com/r.git }\n')),
-      ),
-    ).toThrow(/agents\.smoke\.vm\.git/)
+      loadZooidConfig(yaml('runtime: vm', agent('smoke', '    vm: { mounts: [] }\n'))),
+    ).toThrow(/agents\.smoke\.vm\.mounts is not a recognised field/)
   })
 
   it('rejects vm on an agent whose resolved runtime is not vm', () => {
