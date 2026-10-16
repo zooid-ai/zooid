@@ -106,6 +106,10 @@ export interface CreateMatrixTransportOptions {
   drainQuietMs?: number
   /** Hard cap on the post-turn drain. Defaults to `DRAIN_MAX_MS`. */
   drainMaxMs?: number
+  /** Bound on the post-turn drain when the agent sent no session update at all
+   *  this turn (nothing buffered, nothing flushed, no tool/plan/thought event):
+   *  a silent turn, not a stream that hasn't started. Defaults to `DRAIN_START_MS`. */
+  drainStartMs?: number
   /** Injected media client for downloading/uploading Matrix media. */
   media?: MediaClientLike
   /** Injected attachment writer (defaults to the real writeAttachment). */
@@ -325,6 +329,12 @@ const DRAIN_QUIET_MS = 300
 // after that. The drain still short-circuits via DRAIN_QUIET_MS once any
 // content has settled, so this cap only kicks in for genuinely-stuck turns.
 const DRAIN_MAX_MS = 30_000
+// A turn that produced no session update of any kind (no chunk, tool call,
+// plan, thought) by the time the prompt resolved is almost always a genuinely
+// silent turn. Give a late stream this long to begin, then end the turn
+// instead of holding typing and turn.end for DRAIN_MAX_MS. Any activity
+// during the turn keeps the full cap.
+const DRAIN_START_MS = 3_000
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
@@ -346,6 +356,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   } = opts
   const drainQuietMs = opts.drainQuietMs ?? DRAIN_QUIET_MS
   const drainMaxMs = opts.drainMaxMs ?? DRAIN_MAX_MS
+  const drainStartMs = Math.min(opts.drainStartMs ?? DRAIN_START_MS, drainMaxMs)
   const returnGraceMs = opts.returnGraceMs ?? RETURN_GRACE_MS
   const remoteReturnGraceMs = opts.remoteReturnGraceMs ?? REMOTE_RETURN_GRACE_MS
   const mediaClient = opts.media
@@ -433,6 +444,8 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
   // not started yet" (0 flushes, empty buffer → keep waiting) from "turn done,
   // last message already flushed mid-stream" (>0 flushes, empty buffer → stop).
   const flushedCounts = new Map<string, number>()
+  // Sessions that received any session update during the current turn.
+  const activeSessions = new Set<string>()
   // Commands a shim advertises during session load/new — i.e. before runTurn
   // registers the session ctx (sessions.set). Stashed here keyed by sessionId
   // and replayed once the ctx exists, so `available_commands_update` (which is
@@ -517,6 +530,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       }
       return
     }
+    if (event.type !== 'available_commands') activeSessions.add(event.sessionId)
 
     if (event.type === 'agent_message_chunk') {
       const block = event.content as {
@@ -1387,6 +1401,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
     buffers.set(sessionId, '')
     bufferMessageIds.delete(sessionId)
     flushedCounts.set(sessionId, 0)
+    activeSessions.delete(sessionId)
     // Commands the shim advertised during ensureSession (session load/new)
     // arrived before the ctx above existed and were stashed — replay the latest
     // now that the session is fully registered, so the palette actually fills.
@@ -1455,6 +1470,9 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       let drained = buffers.get(sessionId) ?? ''
       while (drainQuietMs > 0 && Date.now() - drainStart < drainMaxMs) {
         await delay(drainQuietMs)
+        // Silent turn: no update of any kind arrived, so after the shorter
+        // start bound there is no stream to wait for.
+        if (!activeSessions.has(sessionId) && Date.now() - drainStart >= drainStartMs) break
         const next = buffers.get(sessionId) ?? ''
         // Stop when the buffer is quiet (unchanged) and either it holds the
         // final message to flush, or we already flushed a message this turn
@@ -1527,6 +1545,7 @@ export function createMatrixTransport(opts: CreateMatrixTransportOptions) {
       buffers.delete(sessionId)
       bufferMessageIds.delete(sessionId)
       flushedCounts.delete(sessionId)
+      activeSessions.delete(sessionId)
       lastFlushed.delete(sessionId)
       sendQueue.delete(sessionId)
     }

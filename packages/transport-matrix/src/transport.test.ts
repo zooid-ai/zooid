@@ -57,7 +57,7 @@ const baseAgents = [
   },
 ]
 
-function makeTransport(drain?: { drainQuietMs?: number; drainMaxMs?: number }) {
+function makeTransport(drain?: { drainQuietMs?: number; drainMaxMs?: number; drainStartMs?: number }) {
   const { reg, finishPrompt } = fakeRegistry()
   const approvals = fakeApprovals()
   const client = fakeClient()
@@ -72,6 +72,7 @@ function makeTransport(drain?: { drainQuietMs?: number; drainMaxMs?: number }) {
     // Tests covering trailing-chunk behavior pass an explicit window.
     drainQuietMs: drain?.drainQuietMs ?? 0,
     drainMaxMs: drain?.drainMaxMs,
+    drainStartMs: drain?.drainStartMs,
   })
   return { transport, agents: reg, approvals, client, finishPrompt }
 }
@@ -235,6 +236,44 @@ describe('matrix transport /transactions', () => {
         content: expect.objectContaining({ body: 'Hi. How can I help?' }),
       }),
     )
+  })
+
+  it('ends a silent end_turn promptly: turn.end sent and typing cleared well before the drain cap', async () => {
+    const { transport, agents, client } = makeTransport({
+      drainQuietMs: 20,
+      drainMaxMs: 5_000,
+      drainStartMs: 100,
+    })
+    const events = [
+      {
+        type: 'm.room.message',
+        event_id: '$root',
+        room_id: '!r:example.com',
+        sender: '@alice:example.com',
+        content: {
+          msgtype: 'm.text',
+          body: 'hi',
+          'm.mentions': { user_ids: ['@architect:example.com'] },
+        },
+      },
+    ]
+    agents.prompt.mockImplementation(async () => ({ stopReason: 'end_turn' as const }))
+
+    const t0 = Date.now()
+    const res = await postTxn(transport.app, { events })
+    expect(res.status).toBe(200)
+    await vi.waitFor(
+      () =>
+        expect(client.sendCustomEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            eventType: 'dev.zooid.turn.end',
+            content: expect.objectContaining({ produced_output: false }),
+          }),
+        ),
+      { timeout: 2_000 },
+    )
+    expect(Date.now() - t0).toBeLessThan(2_000)
+    expect(client.sendMessage).not.toHaveBeenCalled()
   })
 
   it('uses an in-thread message event_id as the thread root when one is set', async () => {
