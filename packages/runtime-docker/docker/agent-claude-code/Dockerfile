@@ -2,7 +2,7 @@ FROM ghcr.io/zooid-ai/agent-base:latest
 
 # ZOD074: the ARG default is the pin. docker/versions.json maps this ARG to its
 # npm package; image-versions.manifest.test.ts fails if the two disagree.
-ARG CLAUDE_AGENT_ACP_VERSION=0.89.1
+ARG CLAUDE_AGENT_ACP_VERSION=0.101.0
 RUN npm install -g @agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}
 
 # No CMD — DockerAcpRuntime sets the entrypoint to the resolved ACP shim
